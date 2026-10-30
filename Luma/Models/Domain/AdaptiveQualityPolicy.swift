@@ -26,6 +26,28 @@ nonisolated enum AdaptiveQualityPolicy {
     /// defaults are frequently a lossless original, so this is deliberately conservative.
     static let assumedAutomaticKbps: Double = 1_800
 
+    /// Automatic's conservative starting point on a metered/constrained link that has not been
+    /// measured yet. Without any evidence, opening a multi-MB original is what makes the first
+    /// track on a slow cellular link take many seconds to start. A source that is known to fit
+    /// under this bitrate (a normal lossy file) keeps its original bytes.
+    static let unmeasuredLimitedCeilingKbps: Double =
+        Double(CacheFormat.aac256.subsonicMaxBitRate ?? 256)
+
+    /// Non-nil when Automatic has no measurement on a limited link and the source may be larger
+    /// than the conservative starting point. `nil` means "no opinion" — the caller keeps its
+    /// normal Automatic behaviour.
+    private static func unmeasuredLimitedCap(
+        configured: CacheFormat,
+        sourceBitRateKbps: Int?,
+        measuredBytesPerSecond: Double?,
+        isLimitedNetwork: Bool
+    ) -> Double? {
+        guard configured == .matchStream, isLimitedNetwork,
+              measuredBytesPerSecond == nil else { return nil }
+        let required = sourceBitRateKbps.map(Double.init) ?? assumedAutomaticKbps
+        return required > unmeasuredLimitedCeilingKbps ? unmeasuredLimitedCeilingKbps : nil
+    }
+
     /// Highest explicit format that fits `usableKbps`.
     static func fittingFormat(usableKbps: Double) -> CacheFormat {
         let aac256 = Double(CacheFormat.aac256.subsonicMaxBitRate ?? 256)
@@ -61,6 +83,13 @@ nonisolated enum AdaptiveQualityPolicy {
         measuredBytesPerSecond: Double?,
         isLimitedNetwork: Bool = true
     ) -> Double? {
+        // No measurement yet on a metered/constrained link: start conservative instead of asking
+        // the server for the original. This value also travels as `MaxStreamingBitrate`.
+        if unmeasuredLimitedCap(configured: configured, sourceBitRateKbps: sourceBitRateKbps,
+                                measuredBytesPerSecond: measuredBytesPerSecond,
+                                isLimitedNetwork: isLimitedNetwork) != nil {
+            return unmeasuredLimitedCeilingKbps
+        }
         let configuredKbps = configured.subsonicMaxBitRate.map(Double.init)
         let measuredKbps = usableKbps(
             measuredBytesPerSecond: measuredBytesPerSecond,
@@ -91,6 +120,13 @@ nonisolated enum AdaptiveQualityPolicy {
         isLimitedNetwork: Bool = true
     ) -> CacheFormat {
         guard configured == .matchStream else { return configured }
+        // A limited link that has never been measured starts at the conservative ceiling rather
+        // than assuming it can carry the original.
+        if unmeasuredLimitedCap(configured: configured, sourceBitRateKbps: sourceBitRateKbps,
+                                measuredBytesPerSecond: measuredBytesPerSecond,
+                                isLimitedNetwork: isLimitedNetwork) != nil {
+            return fittingFormat(usableKbps: unmeasuredLimitedCeilingKbps)
+        }
         guard let usable = usableKbps(
             measuredBytesPerSecond: measuredBytesPerSecond,
             isLimitedNetwork: isLimitedNetwork
@@ -120,6 +156,34 @@ nonisolated enum AdaptiveQualityPolicy {
         case .aac256, .mp3_320: return .aac128
         default: return nil
         }
+    }
+
+    /// True when the format asks for the original bytes (Automatic or an explicit original).
+    static func carriesOriginalBytes(_ format: CacheFormat) -> Bool {
+        format == .matchStream || format == .flacOriginal
+    }
+
+    /// Whether a next-track source prepared under a previous (possibly unmetered) path has to be
+    /// dropped, because the current limited path's policy would transcode it. Local files and
+    /// explicit-Lossless choices never match, so they are kept.
+    ///
+    /// Called only after the path has become metered/constrained; the limited pole is therefore
+    /// fixed here. This is what stops a Wi-Fi-prepared lossless next track from opening a
+    /// multi-MB stream after the device falls back to slow cellular.
+    static func preparedOriginalNeedsReplacement(
+        configured: CacheFormat,
+        sourceBitRateKbps: Int?,
+        measuredBytesPerSecond: Double?,
+        preparedIsOriginal: Bool
+    ) -> Bool {
+        guard preparedIsOriginal else { return false }
+        let effective = effectiveFormat(
+            configured: configured,
+            sourceBitRateKbps: sourceBitRateKbps,
+            measuredBytesPerSecond: measuredBytesPerSecond,
+            isLimitedNetwork: true
+        )
+        return !carriesOriginalBytes(effective)
     }
 
     /// `effectiveFormat` with the session's adaptive ceiling applied.

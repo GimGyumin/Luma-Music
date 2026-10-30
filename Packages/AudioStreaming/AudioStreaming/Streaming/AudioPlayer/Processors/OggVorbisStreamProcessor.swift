@@ -257,7 +257,7 @@ final class OggVorbisStreamProcessor {
         entry.lock.lock()
         
         // Use the decoder's deinterleaved format directly
-        var asbd = processingFormat.streamDescription.pointee
+        let asbd = processingFormat.streamDescription.pointee
         
         // Store the format in the entry
         entry.audioStreamFormat = asbd
@@ -313,7 +313,7 @@ final class OggVorbisStreamProcessor {
     ///   - pcmBuffer: The PCM buffer containing decoded audio
     ///   - framesRead: Number of frames read
     private func processDecodedAudio(pcmBuffer: AVAudioPCMBuffer, framesRead: Int) {
-        guard let entry = playerContext.audioReadingEntry,
+        guard playerContext.audioReadingEntry != nil,
               let converter = audioConverter else { return }
         
         // Set the input buffer's frame length
@@ -330,7 +330,6 @@ final class OggVorbisStreamProcessor {
         let bufferContext = rendererContext.bufferContext
         let used = bufferContext.frameUsedCount
         let totalFrames = bufferContext.totalFrameCount
-        let end = (bufferContext.frameStartIndex + bufferContext.frameUsedCount) % bufferContext.totalFrameCount
         rendererContext.lock.unlock()
         
         guard used <= totalFrames else {

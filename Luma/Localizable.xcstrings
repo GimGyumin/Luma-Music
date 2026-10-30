@@ -8176,6 +8176,7 @@
       }
     },
     "GitHub Repository" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -10248,6 +10249,7 @@
       }
     },
     "Luma is free, forever." : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -15942,6 +15944,7 @@
     },
     "Send Feedback" : {
       "comment" : "Link: send feedback email",
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -15958,6 +15961,7 @@
       }
     },
     "Send Feedback / Report a Bug" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -18014,6 +18018,7 @@
     },
     "Support" : {
       "comment" : "Section header",
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -20578,6 +20583,7 @@
       }
     },
     "View Source on GitHub" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {

@@ -163,13 +163,17 @@ actor MediaResolver: MediaResolverProtocol {
         }
 
         // Playback must never wait for a second GET of the same audio just to measure it.
-        // Reuse a known measurement; unknown links start at the user's network-specific quality.
         // Sustained playback failures can lower Automatic for subsequent resolutions.
-        let ceiling = await MainActor.run { streamingSettings.currentAdaptiveCeiling(isLimited: usesCellularQuality) }
+        let ceiling = await MainActor.run {
+            streamingSettings.currentAdaptiveCeiling(isLimited: usesCellularQuality)
+        }
         let applyCeilingToExplicitChoice = await MainActor.run {
             streamingSettings.adaptiveCeilingAppliesToExplicitChoice
         }
-        let measuredRate = await speedProbe?.freshRate(serverId: serverId)
+        // The published rate is path-scoped: NetworkMonitor clears it on every path change and the
+        // underrun handler writes a slow value. The per-server `NetworkSpeedProbe` cache is not
+        // path-scoped, so it must not decide quality after a Wi-Fi → cellular transition.
+        let measuredRate = await MainActor.run { serverService.state.measuredBytesPerSecond }
         try Task.checkCancellation()
         let effectiveFormat = AdaptiveQualityPolicy.effectiveFormat(
             configured: configuredFormat,
@@ -180,8 +184,14 @@ actor MediaResolver: MediaResolverProtocol {
             applyCeilingToExplicitChoice: applyCeilingToExplicitChoice
         )
         // Automatic delivery must not override an explicit network quality selection.
-        // Preserve lossless originals only when that network allows Automatic/Lossless.
+        // The policy's answer is authoritative: keep the original bytes only when it chose an
+        // original format. This covers a measured slow link, a ceiling learned from real
+        // underruns, and Automatic's conservative start on an unmeasured metered link — the old
+        // `preserveLossless` shortcut handed the original back in all three cases, so a
+        // step-down was logged and then ignored on the very next resolve.
+        // Explicit Lossless/bitstream choices are kept by the policy itself.
         let preserveLossless = requestedRoute == .automatic
+            && AdaptiveQualityPolicy.carriesOriginalBytes(effectiveFormat)
             && (configuredFormat == .matchStream || configuredFormat == .flacOriginal)
             && PlaybackDecisionPolicy.preservesLosslessOriginal(song: song)
         let streamFormat: CacheFormat = preserveLossless ? .flacOriginal : AdaptiveQualityPolicy.transportFormat(effectiveFormat)

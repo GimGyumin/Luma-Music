@@ -13,7 +13,7 @@ struct AboutSettingsView: View {
     }
 
     private var buildIdentifier: String {
-        Bundle.main.infoDictionary?["LumaBuildIdentifier"] as? String ?? "26A1001e"
+        Bundle.main.infoDictionary?["LumaBuildIdentifier"] as? String ?? "26A1001rc1"
     }
 
     private var copyright: String {

@@ -2,7 +2,9 @@ import AppIntents
 import CoreSpotlight
 import Foundation
 
-enum LumaSpotlight {
+// A pure constant namespace read from nonisolated SQLite/Spotlight code. The module's
+// default MainActor isolation would otherwise make `indexName` main-actor-only.
+nonisolated enum LumaSpotlight {
     static let indexName = "Luma"
 }
 

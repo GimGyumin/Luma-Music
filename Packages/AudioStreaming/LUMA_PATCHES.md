@@ -22,6 +22,12 @@ RemoteContinuityTests reproduces duplicate prefix delivery in the original sourc
 (three failing tests / seven assertions) and verifies a valid range still works.
 Run `swift test --package-path Packages/AudioStreaming --filter RemoteContinuityTests`.
 
+Build hygiene: the vendored copy also had two C narrowing conversions
+(`VorbisFileBridge.c` `sample_rate`/`ov_seekable`) and three unused-value
+warnings in `OggVorbisStreamProcessor.swift`. Luma's CI fails a build that
+emits any warning, so those were made explicit (`(int)` casts, `let`, removed
+unused bindings). No behaviour changes.
+
 Keep these checks when updating upstream; remove the local patch only after the
 upstream implementation passes them. This local package makes the repair survive
 clean checkouts and package cache resets.

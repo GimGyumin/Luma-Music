@@ -354,19 +354,35 @@ struct AlbumDetailOfflineTests {
                     server.state.isExpensive = cellular
                     let source = try await resolver.resolve(songId: songID, serverId: serverID, song: song)
                     guard case .stream(let url, let headers, let context, _, _) = source else {
-                        Issue.record("Expected an original network stream")
+                        Issue.record("Expected a network stream")
                         return
                     }
                     let query = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
-                    if index == 0 {
-                        #expect(query.first { $0.name == "format" }?.value == "raw")
-                        #expect(!query.contains { $0.name == "maxBitRate" })
+                    // Automatic on an unmeasured metered link starts conservatively; an explicit
+                    // Lossless choice and every unmetered link keep the original bytes.
+                    let expectsOriginal = !cellular || format == .flacOriginal
+                    if expectsOriginal {
+                        if index == 0 {
+                            #expect(query.first { $0.name == "format" }?.value == "raw")
+                            #expect(!query.contains { $0.name == "maxBitRate" })
+                        } else {
+                            #expect(url.path == "/proxy/jellyfin/Items/\(guid)/File")
+                        }
+                        #expect(!AudioQualityClassifier.isLossyTranscodeStream(source))
                     } else {
-                        #expect(url.path == "/proxy/jellyfin/Items/\(guid)/File")
+                        let codec = try #require(CacheFormat.aac256.subsonicFormat)
+                        if index == 0 {
+                            #expect(query.first { $0.name == "format" }?.value == codec)
+                            #expect(query.first { $0.name == "maxBitRate" }?.value ==
+                                    String(CacheFormat.aac256.subsonicMaxBitRate ?? 0))
+                        } else {
+                            #expect(url.path == "/proxy/jellyfin/Audio/\(guid)/stream.\(codec)")
+                            #expect(url.absoluteString.contains("Static=false"))
+                        }
+                        #expect(AudioQualityClassifier.isLossyTranscodeStream(source))
                     }
                     #expect(headers["X-Test-Header"] == "preserved")
                     #expect(context == nil)
-                    #expect(!AudioQualityClassifier.isLossyTranscodeStream(source))
                 }
             }
             // The Wi-Fi preset must not leak into cellular playback, and source FLAC
@@ -402,6 +418,78 @@ struct AlbumDetailOfflineTests {
             }
             server.state.isCellularConnection = false
         }
+    }
+
+    @Test("A lossy ceiling learned from underruns steps Automatic down for a lossless original")
+    func learnedCeilingOverridesAutomaticOriginal() async throws {
+        let suite = "LumaResolverCeiling." + UUID().uuidString
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = StreamingSettings(defaults: defaults)
+        settings.wifiFormat = .matchStream
+        settings.cellularFormat = .matchStream
+        settings.losslessAudioEnabled = true
+        let baseURL = try #require(URL(string: "https://music.example.com/proxy"))
+        let server = MockServerService()
+        server.state.isOnline = true
+        server.state.activeServer = ServerSnapshot(from: ServerConfig(
+            displayName: "Test", baseURL: baseURL.absoluteString, username: "u"))
+        server.credentials = ServerCredentials(password: "p", customHeaders: [:])
+        server.musicClient = SwiftSonicClient(
+            configuration: ServerConfiguration(serverURL: baseURL, username: "u", password: "p"),
+            transport: StubHTTPTransport(outcome: .urlError(.unsupportedURL)), retryPolicy: .none)
+        let resolver = MediaResolver(downloadService: ADDownloadStub(), cacheService: MockCacheService(),
+            serverService: server, serverState: server.state, streamingSettings: settings)
+        let serverID = try #require(server.state.activeServer?.id)
+        let song = DisplayableSong(id: "learned-ceiling", title: "Track", audioFormat: "flac",
+                                   bitRate: 1_411, bitDepth: 16, samplingRate: 44_100, channelCount: 2)
+        // Set after the formats: assigning a format clears the session ceiling.
+        settings.adaptiveCeiling = .aac128
+        let source = try await resolver.resolve(songId: song.id, serverId: serverID, song: song)
+        guard case .stream(let url, _, _, _, _) = source else {
+            Issue.record("Expected a network stream")
+            return
+        }
+        let query = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
+        #expect(query.first { $0.name == "format" }?.value == CacheFormat.aac128.subsonicFormat)
+        #expect(query.first { $0.name == "maxBitRate" }?.value ==
+                String(CacheFormat.aac128.subsonicMaxBitRate ?? 0))
+    }
+
+    @Test("Automatic on an unmeasured metered link starts at AAC instead of the lossless original")
+    func unmeasuredMeteredAutomaticDoesNotRequestLossless() async throws {
+        let suite = "LumaResolverUnmeasured." + UUID().uuidString
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = StreamingSettings(defaults: defaults)
+        settings.wifiFormat = .matchStream
+        settings.cellularFormat = .matchStream
+        settings.losslessAudioEnabled = true
+        let baseURL = try #require(URL(string: "https://music.example.com/proxy"))
+        let server = MockServerService()
+        server.state.isOnline = true
+        server.state.isCellularConnection = true
+        server.state.activeServer = ServerSnapshot(from: ServerConfig(
+            displayName: "Test", baseURL: baseURL.absoluteString, username: "u"))
+        server.credentials = ServerCredentials(password: "p", customHeaders: [:])
+        server.musicClient = SwiftSonicClient(
+            configuration: ServerConfiguration(serverURL: baseURL, username: "u", password: "p"),
+            transport: StubHTTPTransport(outcome: .urlError(.unsupportedURL)), retryPolicy: .none)
+        let resolver = MediaResolver(downloadService: ADDownloadStub(), cacheService: MockCacheService(),
+            serverService: server, serverState: server.state, streamingSettings: settings)
+        let serverID = try #require(server.state.activeServer?.id)
+        let song = DisplayableSong(id: "unmeasured-cellular", title: "Track", audioFormat: "flac",
+                                   bitRate: 1_411, bitDepth: 16, samplingRate: 44_100, channelCount: 2)
+        let source = try await resolver.resolve(songId: song.id, serverId: serverID, song: song)
+        guard case .stream(let url, _, _, _, _) = source else {
+            Issue.record("Expected a network stream")
+            return
+        }
+        let query = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
+        #expect(query.first { $0.name == "format" }?.value == CacheFormat.aac256.subsonicFormat)
+        #expect(query.first { $0.name == "maxBitRate" }?.value ==
+                String(CacheFormat.aac256.subsonicMaxBitRate ?? 0))
+        #expect(AudioQualityClassifier.isLossyTranscodeStream(source))
     }
 
     @Test func wifiUpgradeBypassesLossyCacheAndHonorsQualityPreference() async throws {

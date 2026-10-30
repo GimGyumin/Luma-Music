@@ -81,10 +81,12 @@ enum PlaylistGenerationService {
         onProgress?(.preparing)
 
         var pool: [Song] = []
+        #if canImport(_CoreSpotlight_FoundationModels) && arch(arm64)
         if #available(iOS 27.0, macOS 27.0, *) {
             onProgress?(.scanning)
             pool = await SpotlightMusicDiscovery.songs(for: trimmed).map { $0.asSong() }
         }
+        #endif
         try Task.checkCancellation()
         if pool.isEmpty, let libraryService {
             onProgress?(.scanning)

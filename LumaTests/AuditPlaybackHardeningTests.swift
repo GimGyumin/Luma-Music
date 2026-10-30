@@ -143,7 +143,11 @@ struct AuditPlaybackHardeningTests {
         f.container.playerState.currentIndex = 0
         f.container.playerState.position = 180
         f.engine.progress = 180
-        let source = MediaSource.stream(URL(string: "https://example.invalid/prepared.flac")!, customHeaders: [:])
+        // A local fixture keeps this test about source reuse: a remote `example.invalid` URL made
+        // AVPlayer's asynchronous DNS failure race the assertion and re-resolve intermittently.
+        let preparedURL = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+            .appendingPathComponent("Fixtures/SilentMP3.mp3")
+        let source = MediaSource.downloaded(preparedURL)
         await f.player.armAuditPreparedNext(next, source: source)
         // The fake engine never selects its queue entry, exercising the grace-window fallback.
         await f.player.handleEndOfTrack(engineConfirmed: true)
@@ -400,6 +404,44 @@ struct AuditPlaybackHardeningTests {
         let data = try #require(storage.data(forKey: SharedStorageKey.nowPlayingState.rawValue))
         let value = try JSONDecoder().decode(SharedNowPlayingState.self, from: data)
         #expect(value.isPlaying)
+    }
+
+    @Test func leavingWiFiDropsAPreparedLosslessNextTrack() async throws {
+        let f = try AuditPlaybackFixture()
+        let next = DisplayableSong(id: "next-flac", title: "Next", audioFormat: "flac",
+                                   bitRate: 1_411, bitDepth: 16, samplingRate: 44_100)
+        await f.player.armAuditPreparedNext(next, source: .stream(
+            URL(string: "https://example.invalid/next.flac")!, customHeaders: [:]))
+        f.container.streamingSettings.wifiFormat = .matchStream
+        f.container.streamingSettings.cellularFormat = .matchStream
+        f.container.serverState.isCellularConnection = true
+        f.container.serverState.isExpensive = true
+        f.container.serverState.measuredBytesPerSecond = nil
+        let cell = PlaybackNetworkPath(online: true, wifi: false, cellular: true,
+                                       expensive: true, constrained: false)
+        f.container.serverState.playbackNetworkPath = cell
+        await f.player.handleNetworkPathChange(cell)
+        #expect(await f.player.gaplessBridge.next == nil)
+        #expect(await f.player.gaplessBridge.source == nil)
+        await f.player.stop()
+    }
+
+    @Test func explicitLosslessKeepsThePreparedNextTrackOnCellular() async throws {
+        let f = try AuditPlaybackFixture()
+        let next = DisplayableSong(id: "next-flac", title: "Next", audioFormat: "flac",
+                                   bitRate: 1_411, bitDepth: 16, samplingRate: 44_100)
+        await f.player.armAuditPreparedNext(next, source: .stream(
+            URL(string: "https://example.invalid/next.flac")!, customHeaders: [:]))
+        f.container.streamingSettings.cellularFormat = .flacOriginal
+        f.container.serverState.isCellularConnection = true
+        f.container.serverState.isExpensive = true
+        f.container.serverState.measuredBytesPerSecond = nil
+        let cell = PlaybackNetworkPath(online: true, wifi: false, cellular: true,
+                                       expensive: true, constrained: false)
+        f.container.serverState.playbackNetworkPath = cell
+        await f.player.handleNetworkPathChange(cell)
+        #expect(await f.player.gaplessBridge.next?.id == next.id)
+        await f.player.stop()
     }
 }
 

@@ -40,6 +40,17 @@
 				<string>C617.1</string>
 			</array>
 		</dict>
+		<dict>
+			<!-- ProcessInfo.systemUptime is used for elapsed-time measurement and timers
+			     (playback stall windows, throttles, animation clocks). 35F9.1 is Apple's
+			     declared reason for that use. -->
+			<key>NSPrivacyAccessedAPIType</key>
+			<string>NSPrivacyAccessedAPICategorySystemBootTime</string>
+			<key>NSPrivacyAccessedAPITypeReasons</key>
+			<array>
+				<string>35F9.1</string>
+			</array>
+		</dict>
 	</array>
 </dict>
 </plist>

@@ -24,9 +24,9 @@
 		<string>app.luma.library.preparation</string>
 	</array>
 	<key>CFBundleGetInfoString</key>
-	<string>Luma $(MARKETING_VERSION) (26A1001e), © 2026 Kyumin</string>
+	<string>Luma $(MARKETING_VERSION) (26A1001rc1), © 2026 Kyumin</string>
 	<key>LumaBuildIdentifier</key>
-	<string>26A1001e</string>
+	<string>26A1001rc1</string>
 	<key>NSHumanReadableCopyright</key>
 	<string>© 2026 Kyumin</string>
 	<key>CFBundleURLTypes</key>

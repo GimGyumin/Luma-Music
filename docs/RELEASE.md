@@ -1,7 +1,7 @@
 # Releasing Luma
 
 Luma ships through two independent channels, both triggered by pushing a
-`v*` git tag (e.g. `v1.9.0`).
+`v*` git tag (e.g. `v1.0-rc1` for the first public release candidate).
 
 | Channel | Target | Driver | Artifact |
 | --- | --- | --- | --- |
@@ -16,8 +16,8 @@ The two channels do not depend on each other; a tag push fans out to both.
    pipelines derive it from the tag (both read `v<version>`).
 2. Tag and push:
    ```sh
-   git tag v1.9.0
-   git push origin v1.9.0
+   git tag v1.0-rc1
+   git push origin v1.0-rc1
    ```
 3. **macOS (GitHub Actions):** archives the `Luma` scheme for macOS with
    manual Developer ID signing, exports via `ExportOptions-DeveloperID.plist`,
@@ -90,12 +90,11 @@ or password is stored in this repo.
   `agvtool` (the Xcode Cloud script) requires. The macOS job sets the version via
   `MARKETING_VERSION` / `CURRENT_PROJECT_VERSION` build-setting overrides, which
   flow into the generated `Info.plist`.
-- **Product build identifier:** the About screen shows `26A1001e` next to the
+- **Product build identifier:** the About screen shows `26A1001rc1` next to the
   marketing version. `26` is the 2026 development year, `A` is the 1.x release
-  family, `1001` is the first build in that series, and `e` is the stabilization
-  state (`a` is nearest to release; later letters indicate less stable builds).
-  The App Store-facing `CFBundleVersion` remains numeric (`1001` locally) for
-  Apple tooling compatibility.
+  family, `1001` is the first build in that series, and `rc1` identifies the
+  first public release candidate. The App Store-facing `CFBundleVersion` remains
+  numeric (`1001` locally) for Apple tooling compatibility.
 
 ## Known things to check on the first run
 

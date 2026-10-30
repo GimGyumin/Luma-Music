@@ -12,6 +12,7 @@ extension PlayerService {
     func handleNetworkPathChange(_ path: PlaybackNetworkPath) async {
         let current = await MainActor.run { serverService.state.playbackNetworkPath }
         guard current == path, lastPlaybackNetworkPath != path else { return }
+        let previous = lastPlaybackNetworkPath
         lastPlaybackNetworkPath = path
         cancelQualityUpgrade()
         // A Wi-Fi-prepared Atmos alternative must be resolved again on a restricted path.
@@ -23,6 +24,17 @@ extension PlayerService {
             cancelGaplessBridge()
             nextGaplessPreparationAttempt = .distantPast
         }
+        // Any prefetch started while the path allowed originals (crossfade or cache warm) may be
+        // downloading lossless bytes. On a limited path it has to resolve again under the new
+        // policy; the progress ticker can re-schedule it.
+        if (previous?.allowsLosslessUpgrade ?? false) && !path.allowsLosslessUpgrade {
+            cancelPendingPrefetch()
+        }
+        // A gapless next track armed on Wi-Fi is the other half of the same problem: its stream
+        // URL is already fixed, so it must be dropped explicitly when this path would transcode it.
+        if path.usesCellularQuality {
+            await dropPreparedOriginalIfLimitedPathWouldTranscode()
+        }
         if path.usesCellularQuality { awaitingUnmeteredPlaybackPath = true }
         guard path.allowsLosslessUpgrade, awaitingUnmeteredPlaybackPath else { return }
         let revision = qualityUpgradeRevision
@@ -30,6 +42,33 @@ extension PlayerService {
             do { try await Task.sleep(for: .milliseconds(1_200)) } catch { return }
             await self?.upgradeCurrentStreamOnWiFi(revision: revision)
         }
+    }
+
+    /// Drops a next-track source prepared while the device still had a lossless-capable path,
+    /// when the new limited path's quality policy would transcode it. The transition then
+    /// resolves under that policy instead of opening a multi-MB original on a slow link.
+    /// The track that is already audible is never touched — its buffer stays intact.
+    private func dropPreparedOriginalIfLimitedPathWouldTranscode() async {
+        guard let next = gaplessBridge.next, let source = gaplessBridge.source else { return }
+        let preparedIsOriginal = !source.isLocal && !source.isLiveStream
+            && !AudioQualityClassifier.isLossyTranscodeStream(source)
+        guard preparedIsOriginal else { return }
+        let (configured, measured) = await MainActor.run {
+            (streamingSettings.formatForCurrentNetwork(isLimited: true),
+             serverService.state.measuredBytesPerSecond)
+        }
+        guard AdaptiveQualityPolicy.preparedOriginalNeedsReplacement(
+            configured: configured,
+            sourceBitRateKbps: next.bitRate,
+            measuredBytesPerSecond: measured,
+            preparedIsOriginal: true
+        ) else { return }
+        Logger.player.notice(
+            "[NETWORK] dropping prepared original '\(next.title, privacy: .public)' — limited path would transcode"
+        )
+        cancelPendingPrefetch()
+        cancelGaplessBridge()
+        nextGaplessPreparationAttempt = .distantPast
     }
 
     func cancelQualityUpgrade() {

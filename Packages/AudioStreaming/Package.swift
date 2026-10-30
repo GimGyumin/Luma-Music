@@ -48,7 +48,10 @@ let package = Package(
                 .product(name: "vorbis", package: "vorbis-binary-xcframework")
             ],
             path: "AudioStreaming",
-            exclude: ["AudioStreaming.h", "Streaming/OggVorbis", "Info.plist"],
+            // `Streaming/OggVorbis` was removed upstream; the decoder now lives in `OggVorbis/`
+            // and must stay in the target. Keeping the stale path only emitted an
+            // "Invalid Exclude … File not found" warning on every package resolve.
+            exclude: ["AudioStreaming.h", "Info.plist"],
             swiftSettings: []
         ),
         .testTarget(

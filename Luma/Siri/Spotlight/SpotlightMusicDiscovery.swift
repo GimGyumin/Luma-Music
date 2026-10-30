@@ -2,6 +2,17 @@ import CoreSpotlight
 import Foundation
 import FoundationModels
 
+// `CoreSpotlightSource` and `SpotlightSearchTool` live in the CoreSpotlight × FoundationModels
+// cross-import overlay. Two build constraints apply:
+//   1. Xcode's explicit-module build passes `-disable-cross-import-overlay-search` and does not
+//      precompile the overlay, so it must be imported by name.
+//   2. The SDK ships those declarations for arm64 only; the x86_64 simulator interface omits
+//      them, which broke every universal simulator build.
+// Both gates below compile the feature out instead of failing the build, and
+// PlaylistGenerationService then uses its catalog scan. Devices are always arm64.
+#if canImport(_CoreSpotlight_FoundationModels) && arch(arm64)
+import _CoreSpotlight_FoundationModels
+
 @available(iOS 27.0, macOS 27.0, *)
 @Generable
 private struct SpotlightMusicSelection {
@@ -85,3 +96,4 @@ enum SpotlightMusicDiscovery {
         } catch { return [] }
     }
 }
+#endif

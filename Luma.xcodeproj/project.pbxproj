@@ -20,21 +20,21 @@
 			containerPortal = DBA4A7492F9BBFCB008BC5A9 /* Project object */;
 			proxyType = 1;
 			remoteGlobalIDString = DBBC62D42FB3B9A600010D3F;
-			remoteInfo = "LumaWidgetsExtension";
+			remoteInfo = LumaWidgetsExtension;
 		};
 		DB04DC0C2FB3C9EE0077CCD3 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = DBA4A7492F9BBFCB008BC5A9 /* Project object */;
 			proxyType = 1;
 			remoteGlobalIDString = DBBC62D42FB3B9A600010D3F;
-			remoteInfo = "LumaWidgetsExtension";
+			remoteInfo = LumaWidgetsExtension;
 		};
 		DB04DC102FB3CA280077CCD3 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = DBA4A7492F9BBFCB008BC5A9 /* Project object */;
 			proxyType = 1;
 			remoteGlobalIDString = DBBC62D42FB3B9A600010D3F;
-			remoteInfo = "LumaWidgetsExtension";
+			remoteInfo = LumaWidgetsExtension;
 		};
 		DBA4A75F2F9BBFCC008BC5A9 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -70,10 +70,10 @@
 		DBA4A7512F9BBFCB008BC5A9 /* Luma.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Luma.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		DBA4A75E2F9BBFCC008BC5A9 /* LumaTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = LumaTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		DBA4A7682F9BBFCC008BC5A9 /* LumaUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = LumaUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
-		DBBC62D52FB3B9A600010D3F /* LumaWidgetsExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = "LumaWidgetsExtension.appex"; sourceTree = BUILT_PRODUCTS_DIR; };
+		DBBC62D52FB3B9A600010D3F /* LumaWidgetsExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = LumaWidgetsExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		DBBC62D72FB3B9A600010D3F /* WidgetKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WidgetKit.framework; path = System/Library/Frameworks/WidgetKit.framework; sourceTree = SDKROOT; };
 		DBBC62D92FB3B9A600010D3F /* SwiftUI.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SwiftUI.framework; path = System/Library/Frameworks/SwiftUI.framework; sourceTree = SDKROOT; };
-		DBBC62EB2FB3BD0800010D3F /* LumaWidgetsExtension.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = "LumaWidgetsExtension.entitlements"; sourceTree = "<group>"; };
+		DBBC62EB2FB3BD0800010D3F /* LumaWidgetsExtension.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = LumaWidgetsExtension.entitlements; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -97,6 +97,15 @@
 			);
 			target = DBBC62D42FB3B9A600010D3F /* LumaWidgetsExtension */;
 		};
+		DBA4A7F12F9BBFCC008BC5A9 /* Exceptions for "Luma" folder in "Luma" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				DesignSystem/LumaColors.md,
+				DesignSystem/Platform/CONVENTIONS.md,
+				DesignSystem/README.md,
+			);
+			target = DBA4A7502F9BBFCB008BC5A9 /* Luma */;
+		};
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -104,6 +113,7 @@
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
 				DBBC62ED2FB3BD3000010D3F /* Exceptions for "Luma" folder in "LumaWidgetsExtension" target */,
+				DBA4A7F12F9BBFCC008BC5A9 /* Exceptions for "Luma" folder in "Luma" target */,
 			);
 			path = Luma;
 			sourceTree = "<group>";
@@ -123,7 +133,7 @@
 			exceptions = (
 				DBBC62E72FB3B9A700010D3F /* Exceptions for "LumaWidgets" folder in "LumaWidgetsExtension" target */,
 			);
-			path = "LumaWidgets";
+			path = LumaWidgets;
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -297,10 +307,10 @@
 			fileSystemSynchronizedGroups = (
 				DBBC62DB2FB3B9A600010D3F /* LumaWidgets */,
 			);
-			name = "LumaWidgetsExtension";
+			name = LumaWidgetsExtension;
 			packageProductDependencies = (
 			);
-			productName = "LumaWidgetsExtension";
+			productName = LumaWidgetsExtension;
 			productReference = DBBC62D52FB3B9A600010D3F /* LumaWidgetsExtension.appex */;
 			productType = "com.apple.product-type.app-extension";
 		};
@@ -583,6 +593,7 @@
 				"CODE_SIGN_ENTITLEMENTS[sdk=macosx*]" = "Luma/Luma-macOS.entitlements";
 				CODE_SIGN_STYLE = Automatic;
 				DEAD_CODE_STRIPPING = YES;
+				DEVELOPMENT_TEAM = ZKZ9SNL8LZ;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_INCOMING_NETWORK_CONNECTIONS = NO;
@@ -648,6 +659,7 @@
 				"CODE_SIGN_ENTITLEMENTS[sdk=macosx*]" = "Luma/Luma-macOS.entitlements";
 				CODE_SIGN_STYLE = Automatic;
 				DEAD_CODE_STRIPPING = YES;
+				DEVELOPMENT_TEAM = ZKZ9SNL8LZ;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_INCOMING_NETWORK_CONNECTIONS = NO;
@@ -809,15 +821,16 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				ASSETCATALOG_COMPILER_WIDGET_BACKGROUND_COLOR_NAME = WidgetBackground;
-				CODE_SIGN_ENTITLEMENTS = "LumaWidgetsExtension.entitlements";
+				CODE_SIGN_ENTITLEMENTS = LumaWidgetsExtension.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				DEAD_CODE_STRIPPING = YES;
+				DEVELOPMENT_TEAM = ZKZ9SNL8LZ;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_OUTGOING_NETWORK_CONNECTIONS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_FILE = "LumaWidgets/Info.plist";
+				INFOPLIST_FILE = LumaWidgets/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "Luma Widgets";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "© 2026 Kyumin";
 				IPHONEOS_DEPLOYMENT_TARGET = 18.6;
@@ -850,15 +863,16 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				ASSETCATALOG_COMPILER_WIDGET_BACKGROUND_COLOR_NAME = WidgetBackground;
-				CODE_SIGN_ENTITLEMENTS = "LumaWidgetsExtension.entitlements";
+				CODE_SIGN_ENTITLEMENTS = LumaWidgetsExtension.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				DEAD_CODE_STRIPPING = YES;
+				DEVELOPMENT_TEAM = ZKZ9SNL8LZ;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_OUTGOING_NETWORK_CONNECTIONS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_FILE = "LumaWidgets/Info.plist";
+				INFOPLIST_FILE = LumaWidgets/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "Luma Widgets";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "© 2026 Kyumin";
 				IPHONEOS_DEPLOYMENT_TARGET = 18.6;

@@ -25,13 +25,55 @@ struct AdaptiveQualityFormatTests {
         }
     }
 
-    @Test func noMeasurementKeepsAutomatic() {
+    @Test func noMeasurementKeepsAutomaticOnAnUnmeteredLink() {
+        // Wi-Fi has no conservative default: an unmetered link keeps the original.
         #expect(
             AdaptiveQualityPolicy.effectiveFormat(
                 configured: .matchStream,
                 sourceBitRateKbps: 1_411,
-                measuredBytesPerSecond: nil
+                measuredBytesPerSecond: nil,
+                isLimitedNetwork: false
             ) == .matchStream
+        )
+    }
+
+    @Test func unmeasuredLimitedLinkStartsAtTheConservativeCeiling() {
+        // Metered/constrained with no measurement: do not assume the link can carry a lossless
+        // original. The first track used to open a multi-MB stream on slow cellular.
+        #expect(
+            AdaptiveQualityPolicy.effectiveFormat(
+                configured: .matchStream,
+                sourceBitRateKbps: 1_411,
+                measuredBytesPerSecond: nil,
+                isLimitedNetwork: true
+            ) == .aac256
+        )
+        // Unknown source size is treated as potentially large.
+        #expect(
+            AdaptiveQualityPolicy.effectiveFormat(
+                configured: .matchStream,
+                sourceBitRateKbps: nil,
+                measuredBytesPerSecond: nil,
+                isLimitedNetwork: true
+            ) == .aac256
+        )
+        // A known lossy source already fits; it keeps its original bytes.
+        #expect(
+            AdaptiveQualityPolicy.effectiveFormat(
+                configured: .matchStream,
+                sourceBitRateKbps: 192,
+                measuredBytesPerSecond: nil,
+                isLimitedNetwork: true
+            ) == .matchStream
+        )
+        // An explicit choice is never touched.
+        #expect(
+            AdaptiveQualityPolicy.effectiveFormat(
+                configured: .flacOriginal,
+                sourceBitRateKbps: 1_411,
+                measuredBytesPerSecond: nil,
+                isLimitedNetwork: true
+            ) == .flacOriginal
         )
     }
 
@@ -137,6 +179,25 @@ struct AdaptiveQualityFormatTests {
         #expect(AdaptiveQualityPolicy.qualityRank(.matchStream) > AdaptiveQualityPolicy.qualityRank(.aac256))
         #expect(AdaptiveQualityPolicy.qualityRank(.aac256) > AdaptiveQualityPolicy.qualityRank(.aac128))
     }
+
+    @Test func preparedOriginalFollowsTheLimitedPathPolicy() {
+        // Automatic on an unmeasured limited link: the prepared original would be transcoded.
+        #expect(AdaptiveQualityPolicy.preparedOriginalNeedsReplacement(
+            configured: .matchStream, sourceBitRateKbps: 1_411,
+            measuredBytesPerSecond: nil, preparedIsOriginal: true))
+        // Explicit Lossless is the listener's instruction and is kept.
+        #expect(!AdaptiveQualityPolicy.preparedOriginalNeedsReplacement(
+            configured: .flacOriginal, sourceBitRateKbps: 1_411,
+            measuredBytesPerSecond: nil, preparedIsOriginal: true))
+        // A measurement that proves the link is fast keeps the prepared original.
+        #expect(!AdaptiveQualityPolicy.preparedOriginalNeedsReplacement(
+            configured: .matchStream, sourceBitRateKbps: 1_411,
+            measuredBytesPerSecond: 1_000_000, preparedIsOriginal: true))
+        // A source that is already a transcode needs no replacement.
+        #expect(!AdaptiveQualityPolicy.preparedOriginalNeedsReplacement(
+            configured: .aac256, sourceBitRateKbps: 1_411,
+            measuredBytesPerSecond: nil, preparedIsOriginal: false))
+    }
 }
 
 @Suite("AdaptiveQualityPolicy.streamingCeilingKbps")
@@ -179,11 +240,34 @@ struct AdaptiveQualityCeilingTests {
         )
     }
 
-    @Test func noMeasurementAndNoChoiceMeansNoCeiling() {
+    @Test func noMeasurementOnWiFiMeansNoCeiling() {
         #expect(
             AdaptiveQualityPolicy.streamingCeilingKbps(
                 configured: .matchStream,
-                measuredBytesPerSecond: nil
+                measuredBytesPerSecond: nil,
+                isLimitedNetwork: false
+            ) == nil
+        )
+    }
+
+    @Test func noMeasurementOnALimitedLinkReportsTheConservativeCeiling() {
+        // Jellyfin receives this as MaxStreamingBitrate, so its Direct Play decision is made for
+        // the real (unmeasured but metered) link instead of for a hypothetical fast one.
+        #expect(
+            AdaptiveQualityPolicy.streamingCeilingKbps(
+                configured: .matchStream,
+                sourceBitRateKbps: 1_411,
+                measuredBytesPerSecond: nil,
+                isLimitedNetwork: true
+            ) == 256
+        )
+        // A known small source needs no ceiling.
+        #expect(
+            AdaptiveQualityPolicy.streamingCeilingKbps(
+                configured: .matchStream,
+                sourceBitRateKbps: 192,
+                measuredBytesPerSecond: nil,
+                isLimitedNetwork: true
             ) == nil
         )
     }

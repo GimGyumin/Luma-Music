@@ -367,7 +367,7 @@ private struct AboutSettingsTab: View {
         Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "—"
     }
     private var buildIdentifier: String {
-        Bundle.main.infoDictionary?["LumaBuildIdentifier"] as? String ?? "26A1001e"
+        Bundle.main.infoDictionary?["LumaBuildIdentifier"] as? String ?? "26A1001rc1"
     }
     private var copyrightNotice: String {
         Bundle.main.infoDictionary?["NSHumanReadableCopyright"] as? String ?? "© 2026 Kyumin"

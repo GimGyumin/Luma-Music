@@ -256,7 +256,8 @@ int VFGetInfo(VFFileRef fr, VFStreamInfo *out_info) {
     vorbis_info const *info = ov_info(vf, -1);
     if (!info) return -1;
     
-    out_info->sample_rate = info->rate;
+    // `vorbis_info` reports `long`; the public struct exposes Int32.
+    out_info->sample_rate = (int)info->rate;
     out_info->channels = info->channels;
     out_info->total_pcm_samples = ov_pcm_total(vf, -1);
     out_info->duration_seconds = ov_time_total(vf, -1);
@@ -317,5 +318,5 @@ int VFIsSeekable(VFFileRef fr) {
     if (!vf) return 0;
     
     // Returns nonzero if the stream is seekable
-    return ov_seekable(vf);
+    return ov_seekable(vf) ? 1 : 0;
 }

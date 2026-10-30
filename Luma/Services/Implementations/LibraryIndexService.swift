@@ -270,7 +270,7 @@ final class LibraryIndexService {
         var owner: String? = nil
     }
 
-    struct LocalHits: Sendable {
+    nonisolated struct LocalHits: Sendable {
         var artists: [IndexedArtist]
         var albums: [IndexedAlbum]
         var playlists: [IndexedPlaylist]

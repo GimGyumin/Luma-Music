@@ -1,0 +1,36 @@
+APP_FEEDBACK.md
+WARNINGS_AUDIT.md
+Beta_FEEDBACK.md
+INVESTIGATION_scrubber_drift.md
+INVESTIGATION_amperfy_comparison.md
+CACHE_AUDIT.md
+xcuserdata/
+*.xcuserstate
+build/
+
+# Build artifacts & Xcode caches (were previously tracked accidentally)
+.derivedData*/
+DerivedData/
+*.xcresult
+
+# macOS metadata
+.DS_Store
+
+# Local archives and scratch folders
+*.zip
+.cursor-tmp/
+
+# Local Swift package build products
+Packages/**/.build/
+Packages/**/.swiftpm/
+
+# Runtime artifacts
+*.profraw
+nohup.out
+*.log
+
+# Internal audit artifacts
+/docs/audits/
+
+# Internal release audit
+/docs/RC_FOLLOWUP_AUDIT.md

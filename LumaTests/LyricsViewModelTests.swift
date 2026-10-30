@@ -1,0 +1,899 @@
+// Luma — Music client for Subsonic/OpenSubsonic servers
+// Copyright (C) 2026 Mathieu Dubart
+// Licensed under the Mozilla Public License 2.0.
+// See LICENSE file in the project root for full license information.
+
+import Testing
+import SwiftUI
+import Foundation
+import SwiftData
+import SwiftSonic
+import ImageIO
+@testable import Luma
+
+// MARK: - Mocks
+
+@MainActor
+final class MockPlayerService: PlayerServiceProtocol {
+    let state: PlayerState = PlayerState()
+    var seekCalledWith: TimeInterval?
+    var seekDelay: Duration = .zero
+    var seekCompletedWith: TimeInterval?
+    var seekWasCancelled = false
+
+    func play(tracks: [DisplayableSong], startIndex: Int) async throws {}
+    func resume() async {}
+    func pause() async {}
+    func stop() async {}
+    func skipToNext() async throws {}
+    func skipToPrevious() async throws {}
+    func seek(to position: TimeInterval) async {
+        seekCalledWith = position
+        try? await Task.sleep(for: seekDelay)
+        seekWasCancelled = Task.isCancelled
+        seekCompletedWith = position
+    }
+    func setRepeatMode(_ mode: RepeatMode) async {}
+    func toggleShuffle() async {}
+    func appendToQueue(_ tracks: [DisplayableSong]) async {}
+    func playNext(_ song: DisplayableSong) async {}
+    func playNext(_ songs: [DisplayableSong]) async {}
+    func addToQueue(_ song: DisplayableSong) async {}
+    func addToQueue(_ songs: [DisplayableSong]) async {}
+    func removeFromQueue(at index: Int) async {}
+    func clearQueueHistory() async {}
+    func clearUpNext() async {}
+    func moveInQueue(fromIndex: Int, toIndex: Int) async {}
+    func restoreSession() async {}
+    func handleNetworkRestored() async {}
+    func playRadio(_ station: InternetRadioStation) async throws {}
+    func playSmartShuffle() async throws {}
+    func setAutoExtendEnabled(_ enabled: Bool) async {}
+    func setVolume(_ volume: Float) async {}
+    func togglePlayPause() async {}
+    func saveCurrentPosition() async {}
+    func handleAppBecameActive() async {}
+    func handleAppWillResignActive() async {}
+    func handleAppDidEnterBackground() async {}
+    func replayGainSettingsDidChange() async {}
+    func crossfadeSettingsDidChange() async {}
+    func gaplessSettingsDidChange() async {}
+    nonisolated func stopAudioEngineSync() {}
+}
+
+// MARK: - Helpers
+
+@MainActor
+private func makeViewModel(
+    songId: String = "song-1",
+    serverId: UUID = UUID(),
+    lyrics: LyricsList? = nil
+) throws -> (LyricsViewModel, MockPlayerService) {
+    let container = try ModelContainer(
+        for: Schema([CachedLyrics.self]),
+        configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+    )
+
+    if let lyrics {
+        let data = try JSONEncoder().encode(lyrics)
+        let ctx = ModelContext(container)
+        ctx.insert(CachedLyrics(songId: songId, serverId: serverId, jsonPayload: data))
+        try ctx.save()
+    }
+
+    let serverService = MockLyricsServerService()
+    let service = LyricsService(serverService: serverService, modelContainer: container)
+    let playerService = MockPlayerService()
+    let playerState = PlayerState()
+
+    let vm = LyricsViewModel(
+        songId: songId,
+        serverId: serverId,
+        lyricsService: service,
+        playerService: playerService,
+        playerState: playerState
+    )
+    return (vm, playerService)
+}
+
+private func syncedList(offset: Int = 0) -> LyricsList {
+    LyricsList(structuredLyrics: [
+        StructuredLyrics(
+            lang: "en",
+            synced: true,
+            line: [
+                Line(value: "Line 0", start: 0),
+                Line(value: "Line 1", start: 1000),
+                Line(value: "Line 2", start: 2000),
+            ],
+            offset: offset
+        )
+    ])
+}
+
+private func multiLanguageList() -> LyricsList {
+    LyricsList(structuredLyrics: [
+        StructuredLyrics(lang: "en", synced: true, line: [Line(value: "Hello", start: 0)]),
+        StructuredLyrics(lang: "fr", synced: false, line: [Line(value: "Bonjour")])
+    ])
+}
+
+private func unsyncedPlainList() -> LyricsList {
+    LyricsList(structuredLyrics: [
+        StructuredLyrics(
+            lang: "en",
+            synced: false,
+            line: [
+                Line(value: "No timestamps here"),
+                Line(value: "Still should not crash on load"),
+            ]
+        )
+    ])
+}
+
+// MARK: - update(elapsedMs:)
+
+@Suite("Lyrics tracking cache regressions")
+@MainActor
+struct LyricsTrackingCacheTests {
+    @Test func distinctTimestampsAreRequired() {
+        let untimedCases: [[Int?]] = [[], [nil, nil], [0], [0, 0, nil]]
+        for starts in untimedCases {
+            let lyrics = StructuredLyrics(lang: "en", synced: true,
+                line: starts.map { Line(value: "Line", start: $0) })
+            #expect(!LyricsViewModel.hasUsableTiming(lyrics))
+        }
+        let lyrics = StructuredLyrics(lang: "en", synced: false,
+            line: [Line(value: "Untimed"), Line(value: "First", start: 0),
+                   Line(value: "Duet", start: 0), Line(value: "Next", start: 1000)])
+        #expect(LyricsViewModel.hasUsableTiming(lyrics))
+    }
+
+    @Test func replacingDocumentInvalidatesTrackingCache() throws {
+        let (vm, _) = try makeViewModel()
+        #expect(!vm.followsPlayback)
+        vm.state = .loaded(syncedList().structuredLyrics[0])
+        #expect(vm.followsPlayback)
+        vm.state = .loaded(unsyncedPlainList().structuredLyrics[0])
+        #expect(!vm.followsPlayback)
+        vm.state = .loaded(syncedList().structuredLyrics[0])
+        #expect(vm.followsPlayback)
+        vm.state = .loading
+        #expect(!vm.followsPlayback)
+        vm.state = .empty
+        #expect(!vm.followsPlayback)
+    }
+}
+
+@Suite("Apple translation session lifecycle")
+@MainActor
+struct LyricsAppleTranslationSessionTests {
+    @Test func changedTranslationSettingsDiscardOldClientResult() async throws {
+        let (vm, _) = try makeViewModel(lyrics: syncedList())
+        await vm.load()
+        let original = try #require(vm.displayRows.first)
+        vm.replaceTranslatedLyrics([
+            TranslatedLyric(time: 0, originalText: original.text, translatedText: "이전 프롬프트 번역", isBlank: false, translationSource: .appleAPI)
+        ], reveal: true)
+        // Simulate a view model retained while the Settings screen changed its prompt.
+        vm.translationSettingsIdentity = ["previous configuration"]
+        let request = vm.appleTranslationRequestID
+        await vm.refreshTranslationSettingsIfNeeded()
+        #expect(vm.appleTranslationRequestID > request)
+        #expect(!vm.translatedLyrics.contains { $0.translatedText == "이전 프롬프트 번역" })
+        #expect(!vm.areTranslationsVisible)
+        #expect(vm.translationSettingsIdentity == LyricsTranslationSettings.shared.translationIdentity)
+    }
+
+    @Test func ignoresOldAndInactiveSessions() throws {
+        let (vm, _) = try makeViewModel()
+        vm.appleTranslationRequestID = 2
+        vm.isTranslating = true
+        #expect(!vm.beginAppleTranslationSession(requestID: 1))
+        #expect(vm.isTranslating)
+        #expect(vm.beginAppleTranslationSession(requestID: 2))
+        vm.isTranslating = false
+        #expect(!vm.beginAppleTranslationSession(requestID: 2))
+    }
+
+    @Test func reportsTranslationFailureWithoutDiscardingLyrics() async throws {
+        let (vm, _) = try makeViewModel(serverId: UUID(), lyrics: syncedList())
+        await vm.load()
+        await vm.failAppleTranslation(message: "Language download unavailable")
+        #expect(vm.translationErrorMessage == "Language download unavailable")
+        #expect(!vm.isTranslating)
+        #expect(!vm.translatedLyrics.isEmpty)
+    }
+}
+
+@Suite("LyricsViewModel — update(elapsedMs:)")
+@MainActor
+struct LyricsViewModelUpdateTests {
+    @Test func lateClockSampleCannotToggleTheHighlightedLineBackward() async throws {
+        let (vm, _) = try makeViewModel(serverId: UUID(), lyrics: syncedList())
+        await vm.load()
+        vm.update(elapsedMs: 1_100)
+        #expect(vm.currentLineIndex == 1)
+        vm.update(elapsedMs: 990)
+        #expect(vm.currentLineIndex == 1)
+        #expect(vm.karaokePlaybackMs == 1_100)
+        vm.update(elapsedMs: 1_200)
+        #expect(vm.currentLineIndex == 1)
+        // An explicit seek resets the common clock before evaluating its target.
+        vm.karaokePlaybackMs = 900
+        vm.update(elapsedMs: 900)
+        #expect(vm.currentLineIndex == 0)
+    }
+
+    @Test func authoritativeClockCorrectionResynchronizesLyrics() async throws {
+        let (vm, _) = try makeViewModel(serverId: UUID(), lyrics: syncedList())
+        await vm.load()
+
+        vm.update(elapsedMs: 1_100)
+        #expect(vm.currentLineIndex == 1)
+
+        // A correction larger than timestamp quantization is an actual player resync,
+        // such as the engine clock settling after buffering.
+        vm.update(elapsedMs: 700)
+        #expect(vm.currentLineIndex == 0)
+        #expect(vm.karaokePlaybackMs == 700)
+    }
+
+    @Test func returnsNilBeforeLoad() throws {
+        let (vm, _) = try makeViewModel()
+        vm.update(elapsedMs: 500)
+        #expect(vm.currentLineIndex == nil)
+    }
+
+    @Test func picksCorrectLineIndex() async throws {
+        let id = UUID()
+        let (vm, _) = try makeViewModel(serverId: id, lyrics: syncedList())
+        await vm.load()
+
+        vm.update(elapsedMs: 0)
+        #expect(vm.currentLineIndex == 0)
+
+        vm.update(elapsedMs: 999)
+        #expect(vm.currentLineIndex == 0)
+
+        vm.update(elapsedMs: 1000)
+        #expect(vm.currentLineIndex == 1)
+
+        vm.update(elapsedMs: 2500)
+        #expect(vm.currentLineIndex == 2)
+    }
+
+    @Test func appliesNegativeOffset() async throws {
+        // offset = -500 means lines shift 500ms later
+        let id = UUID()
+        let (vm, _) = try makeViewModel(serverId: id, lyrics: syncedList(offset: -500))
+        await vm.load()
+
+        // adjustedMs = 400 - (-500) = 900 → still line 0 (line 1 starts at 1000)
+        vm.update(elapsedMs: 400)
+        #expect(vm.currentLineIndex == 0)
+
+        // adjustedMs = 600 - (-500) = 1100 → line 1
+        vm.update(elapsedMs: 600)
+        #expect(vm.currentLineIndex == 1)
+    }
+
+    @Test func appliesPositiveOffset() async throws {
+        // offset = 500 means lines shift 500ms earlier
+        let id = UUID()
+        let (vm, _) = try makeViewModel(serverId: id, lyrics: syncedList(offset: 500))
+        await vm.load()
+
+        // adjustedMs = 1200 - 500 = 700 → line 0 (line 1 starts at 1000)
+        vm.update(elapsedMs: 1200)
+        #expect(vm.currentLineIndex == 0)
+
+        // adjustedMs = 1600 - 500 = 1100 → line 1
+        vm.update(elapsedMs: 1600)
+        #expect(vm.currentLineIndex == 1)
+    }
+
+    @Test func highlightsSimultaneousTimestampLines() async throws {
+        let lyrics = LyricsList(structuredLyrics: [
+            StructuredLyrics(
+                lang: "en",
+                synced: true,
+                line: [
+                    Line(value: "I'm starting with the man", start: 1000),
+                    Line(value: "(man in the mirror)", start: 1000),
+                    Line(value: "Next verse", start: 5000),
+                ],
+                offset: 0
+            )
+        ])
+        let id = UUID()
+        let (vm, _) = try makeViewModel(serverId: id, lyrics: lyrics)
+        await vm.load()
+
+        vm.update(elapsedMs: 1000)
+        #expect(vm.currentLineIndex == 0)
+        #expect(vm.activeLineIndices == [0, 1])
+
+        vm.update(elapsedMs: 3000)
+        #expect(vm.currentLineIndex == 0)
+        #expect(vm.activeLineIndices == [0, 1])
+
+        vm.update(elapsedMs: 5000)
+        #expect(vm.currentLineIndex == 2)
+        #expect(vm.activeLineIndices == [2])
+    }
+
+    @Test func loadUnsyncedLyrics_doesNotCrashOnInstrumentalGapCache() async throws {
+        // Regression: empty timed-lead starts used to build `1..<0` and trap with
+        // "Range requires lowerBound <= upperBound" during seedOriginalLyrics.
+        let id = UUID()
+        let (vm, _) = try makeViewModel(serverId: id, lyrics: unsyncedPlainList())
+        await vm.load()
+        guard case .loaded = vm.state else {
+            Issue.record("Expected loaded unsynced lyrics")
+            return
+        }
+        vm.update(elapsedMs: 1_000)
+        #expect(vm.currentLineIndex == nil)
+        #expect(vm.followsPlayback == false)
+    }
+
+    @Test func lrcLongPhraseIsNotReplacedByDotsTooEarly() async throws {
+        let lyrics = LyricsList(structuredLyrics: [
+            StructuredLyrics(
+                lang: "en",
+                synced: true,
+                line: [
+                    Line(value: "First line", start: 0),
+                    Line(value: "Second line", start: 3_000),
+                    Line(value: "This phrase is still being sung", start: 6_000),
+                    Line(value: "After the musical break", start: 20_000),
+                ]
+            )
+        ])
+        let id = UUID()
+        let (vm, _) = try makeViewModel(serverId: id, lyrics: lyrics)
+        await vm.load()
+
+        // The former fixed hold switched to dots at about 8.3 s, even though the
+        // LRC line can still be sung. Keep the phrase visible at that point.
+        vm.update(elapsedMs: 8_500)
+        #expect(vm.currentLineIndex == 2)
+        #expect(vm.instrumentalGapProgress == nil)
+
+        // Once the conservative phrase window has elapsed, the genuinely long
+        // remaining interval may use the instrumental indicator.
+        vm.update(elapsedMs: 16_000)
+        #expect(vm.currentLineIndex == nil)
+        #expect(vm.instrumentalGapProgress != nil)
+    }
+}
+
+// MARK: - userTapped(lineIndex:)
+
+@Suite("LyricsViewModel — userTapped(lineIndex:)")
+@MainActor
+struct LyricsViewModelSeekTests {
+
+    @Test func lyricTapScrollsImmediatelyAndIgnoresOldCompletion() async throws {
+        let (vm, player) = try makeViewModel(lyrics: syncedList())
+        await vm.load()
+        player.seekDelay = .milliseconds(180)
+        vm.userTapped(lineIndex: 2)
+        #expect(vm.currentLineIndex == 2)
+        #expect(vm.pendingSeekScrollIndex == 2)
+        #expect(vm.interpolatedElapsedMs() == 2_000)
+        try await Task.sleep(for: .milliseconds(20))
+        player.seekDelay = .milliseconds(10)
+        vm.userTapped(lineIndex: 1)
+        #expect(vm.currentLineIndex == 1)
+        try await Task.sleep(for: .milliseconds(220))
+        #expect(vm.currentLineIndex == 1)
+        #expect(vm.lastDisplayedPositionMs == 1_000)
+        #expect(player.seekCalledWith == 1)
+    }
+
+    @Test func pendingFileSeekPinsLyricsDespiteStaleClockAndAllowsTinyBackwardsSeeks() async throws {
+        let (vm, _) = try makeViewModel(lyrics: syncedList())
+        await vm.load()
+        vm.playerState.position = 0
+        vm.playerState.pendingSeekPosition = 2
+        vm.synchronizeSeekClock(to: 2)
+        #expect(vm.currentLineIndex == 2)
+        for _ in 0..<5 { #expect(vm.interpolatedElapsedMs() == 2_000) }
+        vm.playerState.pendingSeekPosition = nil
+        vm.synchronizeSeekClock(to: 1.01)
+        #expect(vm.currentLineIndex == 1)
+        vm.synchronizeSeekClock(to: 0.99)
+        #expect(vm.currentLineIndex == 0)
+        #expect(vm.karaokePlaybackMs == 990)
+    }
+
+    @Test func seeksSentWithCorrectTime() async throws {
+        let id = UUID()
+        let (vm, playerService) = try makeViewModel(serverId: id, lyrics: syncedList())
+        await vm.load()
+
+        vm.userTapped(lineIndex: 1) // start=1000ms, offset=0 → 1.0s
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(playerService.seekCalledWith == 1.0)
+    }
+
+    @Test func seekIncludesOffset() async throws {
+        let id = UUID()
+        let (vm, playerService) = try makeViewModel(serverId: id, lyrics: syncedList(offset: 200))
+        await vm.load()
+
+        vm.userTapped(lineIndex: 0) // start=0, offset=200 → (0+200)/1000 = 0.2s
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(playerService.seekCalledWith == 0.2)
+    }
+
+    @Test func noSeekOnUnsyncedState() async throws {
+        let unsynced = LyricsList(structuredLyrics: [
+            StructuredLyrics(lang: "en", synced: false, line: [Line(value: "Hello")])
+        ])
+        let id = UUID()
+        let (vm, playerService) = try makeViewModel(serverId: id, lyrics: unsynced)
+        await vm.load()
+
+        vm.userTapped(lineIndex: 0)
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(playerService.seekCalledWith == nil)
+    }
+
+    @Test func noSeekOnOutOfBoundsIndex() async throws {
+        let id = UUID()
+        let (vm, playerService) = try makeViewModel(serverId: id, lyrics: syncedList())
+        await vm.load()
+
+        vm.userTapped(lineIndex: 99)
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(playerService.seekCalledWith == nil)
+    }
+}
+
+// MARK: - Auto-scroll
+
+@Suite("LyricsViewModel — auto-scroll")
+@MainActor
+struct LyricsViewModelScrollTests {
+
+    @Test func providedReadingColumnsPreserveWordTimingAndRenderAllLayers() async throws {
+        let structured = StructuredLyrics(lang: "en", synced: true,
+            line: [Line(value: "We carry this melody", start: 0), Line(value: "Home again", start: 5000)])
+        let (vm, _) = try makeViewModel(lyrics: LyricsList(structuredLyrics: [structured]))
+        await vm.load()
+        vm.rawTTMLData = Data("""
+        <tt xmlns="http://www.w3.org/ns/ttml" xmlns:a="http://itunes.apple.com/lyric-ttml-extensions" xml:lang="en">
+        <head><metadata><iTunesMetadata>
+        <translations><translation xml:lang="ko"><text for="L1">우리는 이 노래를 간직해</text></translation></translations>
+        <transliterations><transliteration xml:lang="en-Hang"><text for="L1"><span begin="0" end="1">위 </span><span begin="1" end="2">캐리 </span><span begin="2" end="3">디스 </span><span begin="3" end="4">멜로디</span></text></transliteration></transliterations>
+        </iTunesMetadata></metadata></head>
+        <body><div><p a:key="L1" begin="0" end="4"><span begin="0" end="1">We </span><span begin="1" end="2">carry </span><span begin="2" end="3">this </span><span begin="3" end="4">melody</span></p><p a:key="L2" begin="5" end="7">Home again</p></div></body></tt>
+        """.utf8)
+        await vm.seedOriginalLyrics(from: structured, hideTranslations: false)
+        vm.update(elapsedMs: 1500)
+        #expect(vm.pronunciationPairs[0].count == 4)
+        #expect(vm.generatedPronunciationIndices.isEmpty)
+        #expect(vm.pronunciationPairs[0][1].reading.startMs == 1000)
+        let line = try #require(vm.translatedLyrics.first)
+        #expect(line.translatedText == "우리는 이 노래를 간직해")
+        for browsing in [false, true] {
+            vm.isUserScrolling = browsing
+            let fixture = VStack(alignment: .leading, spacing: 32) {
+                ForEach(Array(vm.translatedLyrics.enumerated()), id: \.offset) { index, line in
+                    LyricsPlaybackLineRow(viewModel: vm, index: index, line: line, showTranslation: true,
+                        pronunciationText: line.pronunciationText, reduceMotion: true, onTap: {})
+                }
+            }.padding(.vertical, 24).frame(width: 402).background(Color(red: 0.25, green: 0.10, blue: 0.09))
+            let renderer = ImageRenderer(content: fixture)
+            renderer.scale = 2
+            let image = try #require(renderer.cgImage)
+            #expect(image.width == 804 && image.height > 200 && image.height < 1200)
+            let name = browsing ? "luma-reading-columns-browsing.png" : "luma-reading-columns.png"
+            let url = FileManager.default.temporaryDirectory.appendingPathComponent(name)
+            let destination = try #require(CGImageDestinationCreateWithURL(url as CFURL, "public.png" as CFString, 1, nil))
+            CGImageDestinationAddImage(destination, image, nil)
+            #expect(CGImageDestinationFinalize(destination))
+        }
+    }
+
+    @Test func renderPlaybackAndBrowsingFixtures() async throws {
+        let text = ["A little light across the sky", "We carry every moment home",
+                    "우리 함께 걷는 이 길 위에", "And let the morning find us here"]
+        let lyrics = LyricsList(structuredLyrics: [StructuredLyrics(lang: "en", synced: true,
+            line: text.enumerated().map { Line(value: $0.element, start: $0.offset * 4000) })])
+        let (vm, _) = try makeViewModel(lyrics: lyrics)
+        await vm.load()
+        vm.update(elapsedMs: 4500)
+        #expect(vm.currentLineIndex == 1)
+        for browsing in [false, true] {
+            vm.isUserScrolling = browsing
+            let fixture = VStack(alignment: .leading, spacing: 32) {
+                ForEach(Array(vm.translatedLyrics.enumerated()), id: \.offset) { index, line in
+                    LyricsPlaybackLineRow(viewModel: vm, index: index, line: line,
+                        showTranslation: false, reduceMotion: true, onTap: {})
+                }
+            }
+            .padding(.vertical, 48).frame(width: 402)
+            .background(LinearGradient(colors: [Color(red: 0.20, green: 0.12, blue: 0.25),
+                Color(red: 0.32, green: 0.19, blue: 0.16)], startPoint: .topLeading, endPoint: .bottomTrailing))
+            let renderer = ImageRenderer(content: fixture)
+            renderer.scale = 2
+            let image = try #require(renderer.cgImage)
+            #expect(image.width == 804 && image.height > 700)
+            let name = browsing ? "luma-lyrics-browsing.png" : "luma-lyrics-following.png"
+            let url = FileManager.default.temporaryDirectory.appendingPathComponent(name)
+            let destination = try #require(CGImageDestinationCreateWithURL(url as CFURL, "public.png" as CFString, 1, nil))
+            CGImageDestinationAddImage(destination, image, nil)
+            #expect(CGImageDestinationFinalize(destination))
+        }
+    }
+
+    @Test func userStartedScrolling_setsFlag() throws {
+        let (vm, _) = try makeViewModel()
+        #expect(vm.isUserScrolling == false)
+        vm.userStartedScrolling()
+        #expect(vm.isUserScrolling == true)
+        #expect(vm.followState == .userDragging)
+    }
+
+    @Test func holdingLyricsDoesNotResumeUntilScrollEnds() async throws {
+        let (vm, _) = try makeViewModel()
+        let token = vm.scrollRestoreToken
+        vm.userStartedScrolling()
+        #expect(vm.isUserScrolling == true)
+        try await Task.sleep(for: .seconds(LyricsViewModel.scrollIdleSeconds + 0.2))
+        #expect(vm.isUserScrolling)
+        #expect(vm.scrollRestoreToken == token)
+        vm.userStoppedScrolling()
+        #expect(vm.followState == .userReading)
+        try await Task.sleep(for: .seconds(LyricsViewModel.scrollIdleSeconds + 0.2))
+        #expect(vm.isUserScrolling == false)
+        #expect(vm.followState == .reacquiringFollow)
+        #expect(vm.scrollRestoreToken == token + 1)
+        vm.userStoppedScrolling()
+        #expect(vm.followState == .followingPlayback)
+    }
+
+    @Test func renewedDragCancelsPendingResume() async throws {
+        let (vm, _) = try makeViewModel()
+        vm.userStartedScrolling()
+        vm.userStoppedScrolling()
+        vm.userStartedScrolling()
+        try await Task.sleep(for: .seconds(LyricsViewModel.scrollIdleSeconds + 0.2))
+        #expect(vm.isUserScrolling)
+        #expect(vm.scrollRestoreToken == 0)
+        #expect(vm.resumeTask == nil)
+    }
+
+    @Test func programmaticScrollIdleDoesNotScheduleRestore() throws {
+        let (vm, _) = try makeViewModel()
+        vm.userStoppedScrolling()
+        #expect(vm.resumeTask == nil)
+    }
+
+    @Test func backgroundCancelsReadingAndResynchronizesOnReturn() async throws {
+        let (vm, _) = try makeViewModel(lyrics: syncedList())
+        await vm.load()
+        vm.setVisible(true)
+        vm.userStartedScrolling()
+        vm.userStoppedScrolling()
+        vm.setScenePhase(.background)
+        let token = vm.scrollRestoreToken
+        #expect(vm.followState == .suspended)
+        #expect(vm.resumeTask == nil)
+        try await Task.sleep(for: .seconds(LyricsViewModel.scrollIdleSeconds + 0.1))
+        #expect(vm.scrollRestoreToken == token)
+        vm.setScenePhase(.active)
+        #expect(vm.followState == .followingPlayback)
+        #expect(vm.scrollRestoreToken == token + 1)
+        vm.setVisible(false)
+        #expect(vm.followState == .suspended)
+    }
+
+    @Test func generatedPronunciationIsSeparateFromOriginalAndHasNoInventedTiming() async throws {
+        let primary = StructuredLyrics(lang: "ko", synced: true,
+            line: [Line(value: "우리의 노래", start: 0), Line(value: "함께 가자", start: 1000)])
+        let (vm, _) = try makeViewModel(lyrics: LyricsList(structuredLyrics: [primary]))
+        await vm.load()
+        #expect(vm.hasPronunciation)
+        #expect(vm.generatedPronunciationIndices == [0, 1])
+        #expect(vm.displayRows[0].text == "우리의 노래")
+        #expect(vm.pronunciationRows[0].isEmpty) // no manufactured syllable timestamps
+        #expect(!vm.arePronunciationsVisible)
+        vm.togglePronunciationVisibility()
+        #expect(vm.arePronunciationsVisible)
+    }
+}
+
+// MARK: - Language selection
+
+@Suite("LyricsViewModel — selectLanguage")
+@MainActor
+struct LyricsViewModelLanguageTests {
+
+    @Test func selectLanguage_changesActiveSetAndResetsIndex() async throws {
+        let id = UUID()
+        let (vm, _) = try makeViewModel(serverId: id, lyrics: multiLanguageList())
+        await vm.load()
+
+        // After load, a language should be auto-selected
+        let initial = vm.selectedLanguage
+
+        // Simulate a non-nil currentLineIndex
+        vm.update(elapsedMs: 0)
+
+        await vm.selectLanguage("fr")
+        #expect(vm.selectedLanguage == "fr")
+        #expect(vm.currentLineIndex == nil)
+        if initial != "fr" {
+            // Language changed → state should reflect the fr set
+            if case .loaded(let structured) = vm.state {
+                #expect(structured.lang == "fr")
+            } else {
+                Issue.record("Expected .loaded state after language switch")
+            }
+        }
+    }
+
+    @Test func selectLanguage_noOpWhenSameLanguage() async throws {
+        let id = UUID()
+        let (vm, _) = try makeViewModel(serverId: id, lyrics: multiLanguageList())
+        await vm.load()
+
+        guard let lang = vm.selectedLanguage else { return }
+        let stateBefore = vm.state
+        await vm.selectLanguage(lang)
+        // State must not change
+        #expect(vm.state == stateBefore)
+    }
+}
+
+// MARK: - activeChorusBlock (x-bg timing)
+
+private func chorusedList() -> LyricsList {
+    LyricsList(structuredLyrics: [
+        StructuredLyrics(
+            lang: "en",
+            synced: true,
+            line: [
+                Line(value: "Just lift yourself (Change)", start: 120_400),
+                Line(value: "You know", start: 122_100),
+            ],
+            agents: [
+                LyricsAgent(id: "lead", role: "main"),
+                LyricsAgent(id: "choir", role: "bg"),
+            ],
+            cueLine: [
+                CueLine(index: 0, start: 120_400, value: "Just lift yourself", agentId: "lead", cue: [
+                    LyricCue(start: 120_400, end: 121_000, value: "Just", byteStart: 0, byteEnd: 3),
+                ]),
+                CueLine(index: 0, start: 120_150, value: "(Change)", agentId: "choir", cue: [
+                    LyricCue(start: 120_150, end: 120_800, value: "(Change)", byteStart: 0, byteEnd: 7),
+                ]),
+                CueLine(index: 1, start: 122_100, value: "You know", agentId: "lead", cue: [
+                    LyricCue(start: 122_100, end: 123_000, value: "You know", byteStart: 0, byteEnd: 7),
+                ]),
+            ]
+        )
+    ])
+}
+
+@Suite("LyricsViewModel — activeChorusBlock")
+@MainActor
+struct LyricsViewModelChorusTests {
+
+    @Test func chorusEndIsExclusive() async throws {
+        let id = UUID()
+        let (vm, _) = try makeViewModel(serverId: id, lyrics: chorusedList())
+        await vm.load()
+
+        // bg span 120_150...120_800 — inside → visible.
+        vm.update(elapsedMs: 120_400)
+        let inside = vm.activeChorusBlock(at: 0)
+        #expect(inside?.isVisible == true)
+
+        // Just before end → visible.
+        vm.update(elapsedMs: 120_799)
+        #expect(vm.activeChorusBlock(at: 0)?.isVisible == true)
+
+        // Exactly at end → hidden (strict end exclusive).
+        vm.update(elapsedMs: 120_800)
+        #expect(vm.activeChorusBlock(at: 0)?.isVisible == false)
+
+        // After end → hidden.
+        vm.update(elapsedMs: 120_801)
+        #expect(vm.activeChorusBlock(at: 0)?.isVisible == false)
+    }
+}
+
+// MARK: - load() — availableLanguages and auto-pick
+
+@Suite("LyricsViewModel — load()")
+@MainActor
+struct LyricsViewModelLoadTests {
+
+    @Test func load_populatesAvailableLanguages() async throws {
+        let id = UUID()
+        let (vm, _) = try makeViewModel(serverId: id, lyrics: multiLanguageList())
+        await vm.load()
+        #expect(vm.availableLanguages.contains("en"))
+        #expect(vm.availableLanguages.contains("fr"))
+        #expect(vm.availableLanguages.count == 2)
+    }
+
+    @Test func load_autoPicks_frFR_locale() async throws {
+        // The fr set will be picked when the preferred locale is fr_FR.
+        // We indirectly test this by creating a VM and loading with a pre-populated cache
+        // containing a multi-language list, then checking the state reflects a valid selection.
+        // (Direct locale injection not needed here — selectBestLanguage is covered in LyricsServiceTests.)
+        let id = UUID()
+        let (vm, _) = try makeViewModel(serverId: id, lyrics: multiLanguageList())
+        await vm.load()
+        if case .loaded(_) = vm.state {
+            // pass
+        } else {
+            Issue.record("Expected .loaded after successful load, got \(vm.state)")
+        }
+    }
+
+    @Test func load_setsUnsupportedOnNotSupportedError() async throws {
+        // MockLyricsServerService throws on makeSwiftSonicClient → cache miss → networkError,
+        // but we need notSupportedByServer. Use an empty cache (no pre-pop) and the mock
+        // will error. Confirm state is .error (since mock throws LumaError.notImplemented,
+        // not LyricsError.notSupportedByServer).
+        let (vm, _) = try makeViewModel(lyrics: nil)
+        await vm.load()
+        if case .error(_) = vm.state { /* pass */ }
+        else { Issue.record("Expected .error when network unavailable and cache empty, got \(vm.state)") }
+    }
+
+    @Test func load_setsEmptyWhenNoLyrics() async throws {
+        let empty = LyricsList(structuredLyrics: [])
+        // Empty list → LyricsService throws .notFound, but we need to hit network.
+        // Instead: populate cache with an empty LyricsList and confirm the VM ends up .empty.
+        let id = UUID()
+        let (vm, _) = try makeViewModel(serverId: id, lyrics: empty)
+        await vm.load()
+        // applyCurrentLanguage with no structuredLyrics → .empty
+        #expect(vm.state == .empty)
+    }
+}
+
+@Suite("Release candidate lyrics language lifecycle")
+@MainActor
+struct LyricsLanguageLifecycleTests {
+    @Test func obsoleteFailuresDoNotPersistAcrossLanguageChanges() async throws {
+        let (vm, _) = try makeViewModel(lyrics: syncedList())
+        await vm.load()
+        vm.appleTranslationRequestID = 20
+        await vm.failAppleTranslation(message: "Old failure", requestID: 20)
+        #expect(vm.translationErrorMessage == "Old failure")
+        vm.invalidateTranslationWork()
+        #expect(vm.translationErrorMessage == nil)
+        await vm.failAppleTranslation(message: "Late failure", requestID: 20)
+        #expect(vm.translationErrorMessage == nil)
+        vm.translationErrorMessage = "Previous provider"
+        vm.clearTranslation()
+        #expect(vm.translationErrorMessage == nil)
+    }
+
+    @Test func serverSelectionRejectsThePreviousClientTranslation() async throws {
+        let (vm, _) = try makeViewModel()
+        let original = StructuredLyrics(lang: "en", synced: true, line: [Line(value: "Hello", start: 0)])
+        let french = StructuredLyrics(lang: "fr", synced: true,
+            line: [Line(value: "Bonjour", start: 0)], kind: .translation)
+        vm.lyricsList = LyricsList(structuredLyrics: [original, french])
+        vm.state = .loaded(original)
+        vm.appleTranslationRequestID = 10
+        vm.isTranslating = true
+        let oldWork = Task<Void, Error> { try await Task.sleep(for: .seconds(20)) }
+        defer { oldWork.cancel() }
+        vm.translationTask = oldWork
+        await vm.selectServerTranslation(lang: "fr")
+        await vm.applyAppleTranslation(["Obsolete"], chorusTexts: [], requestID: 10, trackID: vm.songId)
+        #expect(oldWork.isCancelled)
+        #expect(!vm.isTranslating)
+        #expect(vm.areTranslationsVisible)
+        #expect(vm.translatedLyrics.map(\.translatedText) == ["Bonjour"])
+    }
+
+    @Test func serverLanguageSwitchReplacesOnlyTranslationAndKeepsRowIdentity() async throws {
+        let (vm, _) = try makeViewModel()
+        let original = StructuredLyrics(lang: "en", synced: true,
+            line: [Line(value: "Hello", start: 0), Line(value: "Goodbye", start: 1000)])
+        let french = StructuredLyrics(lang: "fr", synced: true,
+            line: [Line(value: "Bonjour", start: 0), Line(value: "Au revoir", start: 1000)], kind: .translation)
+        let korean = StructuredLyrics(lang: "ko", synced: true,
+            line: [Line(value: "안녕", start: 0), Line(value: "잘 가", start: 1000)], kind: .translation)
+        vm.lyricsList = LyricsList(structuredLyrics: [original, french, korean])
+        vm.state = .loaded(original)
+        await vm.selectServerTranslation(lang: "fr")
+        #expect(vm.translatedLyrics.map(\.translatedText) == ["Bonjour", "Au revoir"])
+        let ids = vm.translatedLyrics.map(\.id)
+        await vm.selectServerTranslation(lang: "ko")
+        #expect(vm.translatedLyrics.map(\.translatedText) == ["안녕", "잘 가"])
+        #expect(vm.translatedLyrics.map(\.id) == ids)
+        #expect(vm.translatedLyrics.map(\.originalText) == ["Hello", "Goodbye"])
+    }
+
+    @Test func staleAppleResultCannotCancelTheCurrentWatchdog() async throws {
+        let (vm, _) = try makeViewModel()
+        vm.appleTranslationRequestID = 2
+        vm.isTranslating = true
+        let watchdog = Task<Void, Never> { try? await Task.sleep(for: .seconds(20)) }
+        defer { watchdog.cancel() }
+        vm.appleTranslationTimeoutTask = watchdog
+        await vm.applyAppleTranslation([], chorusTexts: [], requestID: 1, trackID: vm.songId)
+        #expect(!watchdog.isCancelled)
+        #expect(vm.appleTranslationTimeoutTask != nil)
+        #expect(vm.isTranslating)
+    }
+
+    @Test func cancelledLoadDoesNotChangeTheExistingPresentation() async throws {
+        let (vm, _) = try makeViewModel(lyrics: syncedList())
+        vm.state = .empty
+        let task = Task { await vm.load() }
+        task.cancel()
+        await task.value
+        #expect(vm.state == .empty)
+    }
+}
+
+@Suite("Lyrics presentation lifetime")
+@MainActor
+struct LyricsPresentationLifetimeTests {
+    @Test func outgoingViewCannotStopIncomingLyricsOrClearChrome() async throws {
+        let (vm, _) = try makeViewModel(lyrics: syncedList())
+        await vm.load()
+        vm.playerState.playbackState = .playing
+        let outgoing = UUID(), incoming = UUID()
+        vm.setVisible(true, owner: outgoing)
+        vm.setVisible(true, owner: incoming)
+        vm.prefersHiddenChrome = true
+        vm.setVisible(false, owner: outgoing)
+        vm.setVisible(false, owner: outgoing) // Late/duplicate disappearance.
+        vm.setVisible(false) // A legacy caller cannot release the incoming owner.
+        #expect(vm.isShown)
+        #expect(vm.prefersHiddenChrome)
+        #expect(vm.trackingTask != nil)
+        vm.playerState.position = 1.2
+        try await Task.sleep(for: .milliseconds(180))
+        #expect(vm.currentLineIndex == 1)
+        vm.setVisible(false, owner: incoming)
+        #expect(!vm.isShown && vm.trackingTask == nil)
+        #expect(!vm.prefersHiddenChrome)
+    }
+
+    @Test func sameSongResumesAfterBackgroundPauseAndPanelChanges() async throws {
+        let (vm, _) = try makeViewModel(lyrics: syncedList())
+        let host = UUID(), portrait = UUID(), landscape = UUID()
+        vm.playerState.playbackState = .playing
+        vm.setVisible(true, owner: host)
+        await vm.load()
+        vm.reconcileTracking()
+        vm.setVisible(true, owner: portrait)
+        vm.setScenePhase(.background)
+        #expect(vm.trackingTask == nil && vm.isShown)
+        vm.setVisible(true, owner: landscape)
+        vm.setVisible(false, owner: portrait)
+        vm.setScenePhase(.active)
+        vm.playerState.position = 2.2
+        try await Task.sleep(for: .milliseconds(180))
+        #expect(vm.currentLineIndex == 2)
+        vm.playerState.playbackState = .paused
+        vm.reconcileTracking()
+        #expect(vm.trackingTask == nil)
+        vm.playerState.playbackState = .playing
+        vm.reconcileTracking()
+        #expect(vm.trackingTask != nil)
+        vm.setVisible(false, owner: landscape)
+        vm.setVisible(false, owner: host)
+        #expect(vm.trackingTask == nil && !vm.isShown)
+        vm.setVisible(true, owner: host)
+        #expect(vm.isShown && vm.trackingTask != nil)
+        vm.setVisible(false, owner: host)
+    }
+}

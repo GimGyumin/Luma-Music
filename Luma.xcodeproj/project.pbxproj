@@ -1,0 +1,965 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		DB04DC0F2FB3CA280077CCD3 /* LumaWidgetsExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = DBBC62D52FB3B9A600010D3F /* LumaWidgetsExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		DB2EFE092FBF805C00C2C11F /* AudioStreaming in Frameworks */ = {isa = PBXBuildFile; productRef = DB2EFE082FBF805C00C2C11F /* AudioStreaming */; };
+		DBA4A77D2F9BE3C8008BC5A9 /* SwiftSonic in Frameworks */ = {isa = PBXBuildFile; productRef = DBA4A77C2F9BE3C8008BC5A9 /* SwiftSonic */; };
+		DBBC62D82FB3B9A600010D3F /* WidgetKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = DBBC62D72FB3B9A600010D3F /* WidgetKit.framework */; };
+		DBBC62DA2FB3B9A600010D3F /* SwiftUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = DBBC62D92FB3B9A600010D3F /* SwiftUI.framework */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		DB04DC082FB3C9950077CCD3 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = DBA4A7492F9BBFCB008BC5A9 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = DBBC62D42FB3B9A600010D3F;
+			remoteInfo = "LumaWidgetsExtension";
+		};
+		DB04DC0C2FB3C9EE0077CCD3 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = DBA4A7492F9BBFCB008BC5A9 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = DBBC62D42FB3B9A600010D3F;
+			remoteInfo = "LumaWidgetsExtension";
+		};
+		DB04DC102FB3CA280077CCD3 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = DBA4A7492F9BBFCB008BC5A9 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = DBBC62D42FB3B9A600010D3F;
+			remoteInfo = "LumaWidgetsExtension";
+		};
+		DBA4A75F2F9BBFCC008BC5A9 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = DBA4A7492F9BBFCB008BC5A9 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = DBA4A7502F9BBFCB008BC5A9;
+			remoteInfo = Luma;
+		};
+		DBA4A7692F9BBFCC008BC5A9 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = DBA4A7492F9BBFCB008BC5A9 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = DBA4A7502F9BBFCB008BC5A9;
+			remoteInfo = Luma;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		DB04DC122FB3CA280077CCD3 /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				DB04DC0F2FB3CA280077CCD3 /* LumaWidgetsExtension.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
+/* Begin PBXFileReference section */
+		DBA4A7512F9BBFCB008BC5A9 /* Luma.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Luma.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		DBA4A75E2F9BBFCC008BC5A9 /* LumaTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = LumaTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		DBA4A7682F9BBFCC008BC5A9 /* LumaUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = LumaUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		DBBC62D52FB3B9A600010D3F /* LumaWidgetsExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = "LumaWidgetsExtension.appex"; sourceTree = BUILT_PRODUCTS_DIR; };
+		DBBC62D72FB3B9A600010D3F /* WidgetKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WidgetKit.framework; path = System/Library/Frameworks/WidgetKit.framework; sourceTree = SDKROOT; };
+		DBBC62D92FB3B9A600010D3F /* SwiftUI.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SwiftUI.framework; path = System/Library/Frameworks/SwiftUI.framework; sourceTree = SDKROOT; };
+		DBBC62EB2FB3BD0800010D3F /* LumaWidgetsExtension.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = "LumaWidgetsExtension.entitlements"; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		DBBC62E72FB3B9A700010D3F /* Exceptions for "LumaWidgets" folder in "LumaWidgetsExtension" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = DBBC62D42FB3B9A600010D3F /* LumaWidgetsExtension */;
+		};
+		DBBC62ED2FB3BD3000010D3F /* Exceptions for "Luma" folder in "LumaWidgetsExtension" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Shared/LibraryPreparationActivity.swift,
+				Shared/NowPlayingBridge.swift,
+				Shared/PlayPauseIntent.swift,
+				Shared/SharedNowPlayingState.swift,
+				Shared/SharedStorage.swift,
+				Shared/WidgetKind.swift,
+				Utilities/PlatformImage.swift,
+			);
+			target = DBBC62D42FB3B9A600010D3F /* LumaWidgetsExtension */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
+/* Begin PBXFileSystemSynchronizedRootGroup section */
+		DBA4A7532F9BBFCB008BC5A9 /* Luma */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				DBBC62ED2FB3BD3000010D3F /* Exceptions for "Luma" folder in "LumaWidgetsExtension" target */,
+			);
+			path = Luma;
+			sourceTree = "<group>";
+		};
+		DBA4A7612F9BBFCC008BC5A9 /* LumaTests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = LumaTests;
+			sourceTree = "<group>";
+		};
+		DBA4A76B2F9BBFCC008BC5A9 /* LumaUITests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = LumaUITests;
+			sourceTree = "<group>";
+		};
+		DBBC62DB2FB3B9A600010D3F /* LumaWidgets */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				DBBC62E72FB3B9A700010D3F /* Exceptions for "LumaWidgets" folder in "LumaWidgetsExtension" target */,
+			);
+			path = "LumaWidgets";
+			sourceTree = "<group>";
+		};
+/* End PBXFileSystemSynchronizedRootGroup section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		DBA4A74E2F9BBFCB008BC5A9 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				DB2EFE092FBF805C00C2C11F /* AudioStreaming in Frameworks */,
+				DBA4A77D2F9BE3C8008BC5A9 /* SwiftSonic in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		DBA4A75B2F9BBFCC008BC5A9 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		DBA4A7652F9BBFCC008BC5A9 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		DBBC62D22FB3B9A600010D3F /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				DBBC62DA2FB3B9A600010D3F /* SwiftUI.framework in Frameworks */,
+				DBBC62D82FB3B9A600010D3F /* WidgetKit.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		C5E5FF283008669F008BB23F /* Translation */ = {
+			isa = PBXGroup;
+			children = (
+			);
+			path = Translation;
+			sourceTree = "<group>";
+		};
+		DBA4A7482F9BBFCB008BC5A9 = {
+			isa = PBXGroup;
+			children = (
+				C5E5FF283008669F008BB23F /* Translation */,
+				DBBC62EB2FB3BD0800010D3F /* LumaWidgetsExtension.entitlements */,
+				DBA4A7532F9BBFCB008BC5A9 /* Luma */,
+				DBA4A7612F9BBFCC008BC5A9 /* LumaTests */,
+				DBA4A76B2F9BBFCC008BC5A9 /* LumaUITests */,
+				DBBC62DB2FB3B9A600010D3F /* LumaWidgets */,
+				DBBC62D62FB3B9A600010D3F /* Frameworks */,
+				DBA4A7522F9BBFCB008BC5A9 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		DBA4A7522F9BBFCB008BC5A9 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				DBA4A7512F9BBFCB008BC5A9 /* Luma.app */,
+				DBA4A75E2F9BBFCC008BC5A9 /* LumaTests.xctest */,
+				DBA4A7682F9BBFCC008BC5A9 /* LumaUITests.xctest */,
+				DBBC62D52FB3B9A600010D3F /* LumaWidgetsExtension.appex */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		DBBC62D62FB3B9A600010D3F /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				DBBC62D72FB3B9A600010D3F /* WidgetKit.framework */,
+				DBBC62D92FB3B9A600010D3F /* SwiftUI.framework */,
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		DBA4A7502F9BBFCB008BC5A9 /* Luma */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = DBA4A7722F9BBFCC008BC5A9 /* Build configuration list for PBXNativeTarget "Luma" */;
+			buildPhases = (
+				DBA4A74D2F9BBFCB008BC5A9 /* Sources */,
+				DBA4A74E2F9BBFCB008BC5A9 /* Frameworks */,
+				DBA4A74F2F9BBFCB008BC5A9 /* Resources */,
+				DB04DC122FB3CA280077CCD3 /* Embed Foundation Extensions */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				DB04DC092FB3C9950077CCD3 /* PBXTargetDependency */,
+				DB04DC0D2FB3C9EE0077CCD3 /* PBXTargetDependency */,
+				DB04DC112FB3CA280077CCD3 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				DBA4A7532F9BBFCB008BC5A9 /* Luma */,
+			);
+			name = Luma;
+			packageProductDependencies = (
+				DBA4A77C2F9BE3C8008BC5A9 /* SwiftSonic */,
+				DB2EFE082FBF805C00C2C11F /* AudioStreaming */,
+			);
+			productName = Luma;
+			productReference = DBA4A7512F9BBFCB008BC5A9 /* Luma.app */;
+			productType = "com.apple.product-type.application";
+		};
+		DBA4A75D2F9BBFCC008BC5A9 /* LumaTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = DBA4A7752F9BBFCC008BC5A9 /* Build configuration list for PBXNativeTarget "LumaTests" */;
+			buildPhases = (
+				DBA4A75A2F9BBFCC008BC5A9 /* Sources */,
+				DBA4A75B2F9BBFCC008BC5A9 /* Frameworks */,
+				DBA4A75C2F9BBFCC008BC5A9 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				DBA4A7602F9BBFCC008BC5A9 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				DBA4A7612F9BBFCC008BC5A9 /* LumaTests */,
+			);
+			name = LumaTests;
+			packageProductDependencies = (
+			);
+			productName = LumaTests;
+			productReference = DBA4A75E2F9BBFCC008BC5A9 /* LumaTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		DBA4A7672F9BBFCC008BC5A9 /* LumaUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = DBA4A7782F9BBFCC008BC5A9 /* Build configuration list for PBXNativeTarget "LumaUITests" */;
+			buildPhases = (
+				DBA4A7642F9BBFCC008BC5A9 /* Sources */,
+				DBA4A7652F9BBFCC008BC5A9 /* Frameworks */,
+				DBA4A7662F9BBFCC008BC5A9 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				DBA4A76A2F9BBFCC008BC5A9 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				DBA4A76B2F9BBFCC008BC5A9 /* LumaUITests */,
+			);
+			name = LumaUITests;
+			packageProductDependencies = (
+			);
+			productName = LumaUITests;
+			productReference = DBA4A7682F9BBFCC008BC5A9 /* LumaUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
+		DBBC62D42FB3B9A600010D3F /* LumaWidgetsExtension */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = DBBC62E82FB3B9A700010D3F /* Build configuration list for PBXNativeTarget "LumaWidgetsExtension" */;
+			buildPhases = (
+				DBBC62D12FB3B9A600010D3F /* Sources */,
+				DBBC62D22FB3B9A600010D3F /* Frameworks */,
+				DBBC62D32FB3B9A600010D3F /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				DBBC62DB2FB3B9A600010D3F /* LumaWidgets */,
+			);
+			name = "LumaWidgetsExtension";
+			packageProductDependencies = (
+			);
+			productName = "LumaWidgetsExtension";
+			productReference = DBBC62D52FB3B9A600010D3F /* LumaWidgetsExtension.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		DBA4A7492F9BBFCB008BC5A9 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 2640;
+				LastUpgradeCheck = 2720;
+				TargetAttributes = {
+					DBA4A7502F9BBFCB008BC5A9 = {
+						CreatedOnToolsVersion = 26.4.1;
+					};
+					DBA4A75D2F9BBFCC008BC5A9 = {
+						CreatedOnToolsVersion = 26.4.1;
+						TestTargetID = DBA4A7502F9BBFCB008BC5A9;
+					};
+					DBA4A7672F9BBFCC008BC5A9 = {
+						CreatedOnToolsVersion = 26.4.1;
+						TestTargetID = DBA4A7502F9BBFCB008BC5A9;
+					};
+					DBBC62D42FB3B9A600010D3F = {
+						CreatedOnToolsVersion = 26.4.1;
+					};
+				};
+			};
+			buildConfigurationList = DBA4A74C2F9BBFCB008BC5A9 /* Build configuration list for PBXProject "Luma" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				ko,
+				Base,
+			);
+			mainGroup = DBA4A7482F9BBFCB008BC5A9;
+			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				DBA4A77B2F9BE3C8008BC5A9 /* XCLocalSwiftPackageReference "Packages/SwiftSonic" */,
+				DB2EFE072FBF805C00C2C11F /* XCLocalSwiftPackageReference "Packages/AudioStreaming" */,
+			);
+			preferredProjectObjectVersion = 77;
+			productRefGroup = DBA4A7522F9BBFCB008BC5A9 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				DBA4A7502F9BBFCB008BC5A9 /* Luma */,
+				DBA4A75D2F9BBFCC008BC5A9 /* LumaTests */,
+				DBA4A7672F9BBFCC008BC5A9 /* LumaUITests */,
+				DBBC62D42FB3B9A600010D3F /* LumaWidgetsExtension */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		DBA4A74F2F9BBFCB008BC5A9 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		DBA4A75C2F9BBFCC008BC5A9 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		DBA4A7662F9BBFCC008BC5A9 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		DBBC62D32FB3B9A600010D3F /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		DBA4A74D2F9BBFCB008BC5A9 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		DBA4A75A2F9BBFCC008BC5A9 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		DBA4A7642F9BBFCC008BC5A9 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		DBBC62D12FB3B9A600010D3F /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		DB04DC092FB3C9950077CCD3 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = DBBC62D42FB3B9A600010D3F /* LumaWidgetsExtension */;
+			targetProxy = DB04DC082FB3C9950077CCD3 /* PBXContainerItemProxy */;
+		};
+		DB04DC0D2FB3C9EE0077CCD3 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = DBBC62D42FB3B9A600010D3F /* LumaWidgetsExtension */;
+			targetProxy = DB04DC0C2FB3C9EE0077CCD3 /* PBXContainerItemProxy */;
+		};
+		DB04DC112FB3CA280077CCD3 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = DBBC62D42FB3B9A600010D3F /* LumaWidgetsExtension */;
+			targetProxy = DB04DC102FB3CA280077CCD3 /* PBXContainerItemProxy */;
+		};
+		DBA4A7602F9BBFCC008BC5A9 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = DBA4A7502F9BBFCB008BC5A9 /* Luma */;
+			targetProxy = DBA4A75F2F9BBFCC008BC5A9 /* PBXContainerItemProxy */;
+		};
+		DBA4A76A2F9BBFCC008BC5A9 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = DBA4A7502F9BBFCB008BC5A9 /* Luma */;
+			targetProxy = DBA4A7692F9BBFCC008BC5A9 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		DBA4A7702F9BBFCC008BC5A9 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_LOCALIZABILITY_NONLOCALIZED = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 1029;
+				DEAD_CODE_STRIPPING = YES;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MARKETING_VERSION = 1.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		DBA4A7712F9BBFCC008BC5A9 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_LOCALIZABILITY_NONLOCALIZED = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 1029;
+				DEAD_CODE_STRIPPING = YES;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MARKETING_VERSION = 1.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_COMPILATION_MODE = wholemodule;
+			};
+			name = Release;
+		};
+		DBA4A7732F9BBFCC008BC5A9 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = Luma/Luma.entitlements;
+				"CODE_SIGN_ENTITLEMENTS[sdk=macosx*]" = "Luma/Luma-macOS.entitlements";
+				CODE_SIGN_STYLE = Automatic;
+				DEAD_CODE_STRIPPING = YES;
+				ENABLE_APP_SANDBOX = YES;
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_INCOMING_NETWORK_CONNECTIONS = NO;
+				ENABLE_OUTGOING_NETWORK_CONNECTIONS = NO;
+				ENABLE_PREVIEWS = YES;
+				ENABLE_RESOURCE_ACCESS_AUDIO_INPUT = NO;
+				ENABLE_RESOURCE_ACCESS_BLUETOOTH = NO;
+				ENABLE_RESOURCE_ACCESS_CALENDARS = NO;
+				ENABLE_RESOURCE_ACCESS_CAMERA = NO;
+				ENABLE_RESOURCE_ACCESS_CONTACTS = NO;
+				ENABLE_RESOURCE_ACCESS_LOCATION = NO;
+				ENABLE_RESOURCE_ACCESS_PRINTING = NO;
+				ENABLE_RESOURCE_ACCESS_USB = NO;
+				ENABLE_USER_SELECTED_FILES = readonly;
+				"EXECUTABLE_NAME[sdk=iphoneos*]" = "$(PRODUCT_NAME)-$(CURRENT_PROJECT_VERSION)";
+				"EXECUTABLE_NAME[sdk=iphonesimulator*]" = "$(PRODUCT_NAME)-$(CURRENT_PROJECT_VERSION)";
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "Luma-Info.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = Luma;
+				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.music";
+				INFOPLIST_KEY_NSCameraUsageDescription = "Luma needs to access your camera to take pictures for playlist artworks";
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Luma uses your local network only when you enable server discovery or connect to a local Navidrome/Jellyfin server.";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Luma needs to access your library to upload pictures for playlists";
+				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
+				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
+				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;
+				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphonesimulator*]" = YES;
+				"INFOPLIST_KEY_UILaunchScreen_Generation[sdk=iphoneos*]" = YES;
+				"INFOPLIST_KEY_UILaunchScreen_Generation[sdk=iphonesimulator*]" = YES;
+				INFOPLIST_KEY_UIRequiresFullScreen = NO;
+				"INFOPLIST_KEY_UIStatusBarStyle[sdk=iphoneos*]" = UIStatusBarStyleDefault;
+				"INFOPLIST_KEY_UIStatusBarStyle[sdk=iphonesimulator*]" = UIStatusBarStyleDefault;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				IPHONEOS_DEPLOYMENT_TARGET = 18.6;
+				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
+				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
+				MACOSX_DEPLOYMENT_TARGET = 15.6;
+				PRODUCT_BUNDLE_IDENTIFIER = com.kyumin.Music.Luma;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				REGISTER_APP_GROUPS = YES;
+				SDKROOT = auto;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx";
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				VERSIONING_SYSTEM = "apple-generic";
+			};
+			name = Debug;
+		};
+		DBA4A7742F9BBFCC008BC5A9 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = Luma/Luma.entitlements;
+				"CODE_SIGN_ENTITLEMENTS[sdk=macosx*]" = "Luma/Luma-macOS.entitlements";
+				CODE_SIGN_STYLE = Automatic;
+				DEAD_CODE_STRIPPING = YES;
+				ENABLE_APP_SANDBOX = YES;
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_INCOMING_NETWORK_CONNECTIONS = NO;
+				ENABLE_OUTGOING_NETWORK_CONNECTIONS = NO;
+				ENABLE_PREVIEWS = YES;
+				ENABLE_RESOURCE_ACCESS_AUDIO_INPUT = NO;
+				ENABLE_RESOURCE_ACCESS_BLUETOOTH = NO;
+				ENABLE_RESOURCE_ACCESS_CALENDARS = NO;
+				ENABLE_RESOURCE_ACCESS_CAMERA = NO;
+				ENABLE_RESOURCE_ACCESS_CONTACTS = NO;
+				ENABLE_RESOURCE_ACCESS_LOCATION = NO;
+				ENABLE_RESOURCE_ACCESS_PRINTING = NO;
+				ENABLE_RESOURCE_ACCESS_USB = NO;
+				ENABLE_USER_SELECTED_FILES = readonly;
+				"EXECUTABLE_NAME[sdk=iphoneos*]" = "$(PRODUCT_NAME)-$(CURRENT_PROJECT_VERSION)";
+				"EXECUTABLE_NAME[sdk=iphonesimulator*]" = "$(PRODUCT_NAME)-$(CURRENT_PROJECT_VERSION)";
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "Luma-Info.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = Luma;
+				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.music";
+				INFOPLIST_KEY_NSCameraUsageDescription = "Luma needs to access your camera to take pictures for playlist artworks";
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Luma uses your local network only when you enable server discovery or connect to a local Navidrome/Jellyfin server.";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Luma needs to access your library to upload pictures for playlists";
+				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
+				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
+				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;
+				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphonesimulator*]" = YES;
+				"INFOPLIST_KEY_UILaunchScreen_Generation[sdk=iphoneos*]" = YES;
+				"INFOPLIST_KEY_UILaunchScreen_Generation[sdk=iphonesimulator*]" = YES;
+				INFOPLIST_KEY_UIRequiresFullScreen = NO;
+				"INFOPLIST_KEY_UIStatusBarStyle[sdk=iphoneos*]" = UIStatusBarStyleDefault;
+				"INFOPLIST_KEY_UIStatusBarStyle[sdk=iphonesimulator*]" = UIStatusBarStyleDefault;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				IPHONEOS_DEPLOYMENT_TARGET = 18.6;
+				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
+				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
+				MACOSX_DEPLOYMENT_TARGET = 15.6;
+				PRODUCT_BUNDLE_IDENTIFIER = com.kyumin.Music.Luma;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				REGISTER_APP_GROUPS = YES;
+				SDKROOT = auto;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx";
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				VERSIONING_SYSTEM = "apple-generic";
+			};
+			name = Release;
+		};
+		DBA4A7762F9BBFCC008BC5A9 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				DEAD_CODE_STRIPPING = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.6;
+				MACOSX_DEPLOYMENT_TARGET = 15.6;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.kyumin.Music.LumaTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = auto;
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx";
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Luma.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Luma";
+				"TEST_HOST[sdk=iphoneos*]" = "$(BUILT_PRODUCTS_DIR)/Luma.app/Luma-$(CURRENT_PROJECT_VERSION)";
+				"TEST_HOST[sdk=iphonesimulator*]" = "$(BUILT_PRODUCTS_DIR)/Luma.app/Luma-$(CURRENT_PROJECT_VERSION)";
+			};
+			name = Debug;
+		};
+		DBA4A7772F9BBFCC008BC5A9 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				DEAD_CODE_STRIPPING = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.6;
+				MACOSX_DEPLOYMENT_TARGET = 15.6;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.kyumin.Music.LumaTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = auto;
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx";
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Luma.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Luma";
+				"TEST_HOST[sdk=iphoneos*]" = "$(BUILT_PRODUCTS_DIR)/Luma.app/Luma-$(CURRENT_PROJECT_VERSION)";
+				"TEST_HOST[sdk=iphonesimulator*]" = "$(BUILT_PRODUCTS_DIR)/Luma.app/Luma-$(CURRENT_PROJECT_VERSION)";
+			};
+			name = Release;
+		};
+		DBA4A7792F9BBFCC008BC5A9 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				DEAD_CODE_STRIPPING = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.6;
+				MACOSX_DEPLOYMENT_TARGET = 15.6;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.kyumin.Music.LumaUITests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = auto;
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx";
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = Luma;
+			};
+			name = Debug;
+		};
+		DBA4A77A2F9BBFCC008BC5A9 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				DEAD_CODE_STRIPPING = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.6;
+				MACOSX_DEPLOYMENT_TARGET = 15.6;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.kyumin.Music.LumaUITests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = auto;
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx";
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = Luma;
+			};
+			name = Release;
+		};
+		DBBC62E92FB3B9A700010D3F /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				ASSETCATALOG_COMPILER_WIDGET_BACKGROUND_COLOR_NAME = WidgetBackground;
+				CODE_SIGN_ENTITLEMENTS = "LumaWidgetsExtension.entitlements";
+				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
+				DEAD_CODE_STRIPPING = YES;
+				ENABLE_APP_SANDBOX = YES;
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_OUTGOING_NETWORK_CONNECTIONS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "LumaWidgets/Info.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = "Luma Widgets";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "© 2026 Kyumin";
+				IPHONEOS_DEPLOYMENT_TARGET = 18.6;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+					"@executable_path/../../../../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 15.6;
+				PRODUCT_BUNDLE_IDENTIFIER = com.kyumin.Music.Luma.LumaWidgetsExtension;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				PROVISIONING_PROFILE_SPECIFIER = "";
+				REGISTER_APP_GROUPS = YES;
+				SDKROOT = auto;
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx";
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		DBBC62EA2FB3B9A700010D3F /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				ASSETCATALOG_COMPILER_WIDGET_BACKGROUND_COLOR_NAME = WidgetBackground;
+				CODE_SIGN_ENTITLEMENTS = "LumaWidgetsExtension.entitlements";
+				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
+				DEAD_CODE_STRIPPING = YES;
+				ENABLE_APP_SANDBOX = YES;
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_OUTGOING_NETWORK_CONNECTIONS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "LumaWidgets/Info.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = "Luma Widgets";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "© 2026 Kyumin";
+				IPHONEOS_DEPLOYMENT_TARGET = 18.6;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+					"@executable_path/../../../../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 15.6;
+				PRODUCT_BUNDLE_IDENTIFIER = com.kyumin.Music.Luma.LumaWidgetsExtension;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				PROVISIONING_PROFILE_SPECIFIER = "";
+				REGISTER_APP_GROUPS = YES;
+				SDKROOT = auto;
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx";
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		DBA4A74C2F9BBFCB008BC5A9 /* Build configuration list for PBXProject "Luma" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				DBA4A7702F9BBFCC008BC5A9 /* Debug */,
+				DBA4A7712F9BBFCC008BC5A9 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		DBA4A7722F9BBFCC008BC5A9 /* Build configuration list for PBXNativeTarget "Luma" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				DBA4A7732F9BBFCC008BC5A9 /* Debug */,
+				DBA4A7742F9BBFCC008BC5A9 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		DBA4A7752F9BBFCC008BC5A9 /* Build configuration list for PBXNativeTarget "LumaTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				DBA4A7762F9BBFCC008BC5A9 /* Debug */,
+				DBA4A7772F9BBFCC008BC5A9 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		DBA4A7782F9BBFCC008BC5A9 /* Build configuration list for PBXNativeTarget "LumaUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				DBA4A7792F9BBFCC008BC5A9 /* Debug */,
+				DBA4A77A2F9BBFCC008BC5A9 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		DBBC62E82FB3B9A700010D3F /* Build configuration list for PBXNativeTarget "LumaWidgetsExtension" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				DBBC62E92FB3B9A700010D3F /* Debug */,
+				DBBC62EA2FB3B9A700010D3F /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		DB2EFE072FBF805C00C2C11F /* XCLocalSwiftPackageReference "Packages/AudioStreaming" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/AudioStreaming;
+		};
+		DBA4A77B2F9BE3C8008BC5A9 /* XCLocalSwiftPackageReference "Packages/SwiftSonic" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/SwiftSonic;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		DB2EFE082FBF805C00C2C11F /* AudioStreaming */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = DB2EFE072FBF805C00C2C11F /* XCLocalSwiftPackageReference "Packages/AudioStreaming" */;
+			productName = AudioStreaming;
+		};
+		DBA4A77C2F9BE3C8008BC5A9 /* SwiftSonic */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = DBA4A77B2F9BE3C8008BC5A9 /* XCLocalSwiftPackageReference "Packages/SwiftSonic" */;
+			productName = SwiftSonic;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = DBA4A7492F9BBFCB008BC5A9 /* Project object */;
+}

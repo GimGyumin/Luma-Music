@@ -1,0 +1,179 @@
+// Luma — Music client for Subsonic/OpenSubsonic servers
+// Copyright (C) 2026 Mathieu Dubart
+// Licensed under the Mozilla Public License 2.0.
+// See LICENSE file in the project root for full license information.
+
+import SwiftUI
+
+enum AwardIcon {
+    case sf(String)
+    case luma
+}
+
+struct WrappedAwardMedal: View {
+    let icon: AwardIcon
+    let value: String
+    let palette: [Color]
+    let isFocused: Bool
+
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.scenePhase) private var scenePhase
+    /// Observed so the holo ring stops immediately when the performance budget shrinks.
+    @State private var governor = PerformanceGovernor.shared
+    @State private var isVisible = false
+    @State private var ringRotation = 0.0
+
+    private var spinEnabled: Bool {
+        isFocused && isVisible && scenePhase == .active && governor.budget.allowsDecorativeMotion
+    }
+
+    var body: some View {
+        ZStack {
+            outerRing
+
+            // Intermediate accent ring
+            Circle()
+                .strokeBorder(.white.opacity(0.4), lineWidth: 2)
+                .frame(width: 116, height: 116)
+
+            // Central radial circle
+            Circle()
+                .fill(centralGradient)
+                .frame(width: 100, height: 100)
+
+            // Metal polish — top highlight
+            Circle()
+                .fill(
+                    LinearGradient(
+                        colors: [.white.opacity(0.15), .clear],
+                        startPoint: .top,
+                        endPoint: .center
+                    )
+                )
+                .frame(width: 100, height: 100)
+
+            // Metal polish — bottom shadow
+            Circle()
+                .fill(
+                    LinearGradient(
+                        colors: [.clear, .black.opacity(colorScheme == .dark ? 0.10 : 0.25)],
+                        startPoint: .center,
+                        endPoint: .bottom
+                    )
+                )
+                .frame(width: 100, height: 100)
+
+            // Icon + value
+            VStack(spacing: 4) {
+                iconView
+                Text(value)
+                    .font(.system(size: 24, weight: .black, design: .rounded))
+                    .foregroundStyle(.white)
+                    .shadow(color: .black.opacity(0.25), radius: 1, x: 0, y: 1)
+                    .shadow(color: .white.opacity(0.15), radius: 0, x: 0, y: -1)
+                    .minimumScaleFactor(0.65)
+                    .lineLimit(1)
+            }
+        }
+        .shadow(color: .black.opacity(0.15), radius: 8, x: 0, y: 4)
+        .onAppear { isVisible = true }
+        .onDisappear { isVisible = false }
+        .task(id: spinEnabled) {
+            var transaction = Transaction()
+            transaction.disablesAnimations = true
+            withTransaction(transaction) { ringRotation = 0 }
+            guard spinEnabled else { return }
+            await Task.yield()
+            guard !Task.isCancelled else { return }
+            withAnimation(.linear(duration: 12).repeatForever(autoreverses: false)) {
+                ringRotation = 360
+            }
+        }
+    }
+
+    // MARK: - Outer ring
+
+    private var outerRing: some View {
+        // Animate a transform on the ring alone; no frame-by-frame SwiftUI clock or
+        // offscreen rasterization of the whole medal, including its text and shadows.
+        Circle()
+            .strokeBorder(holoGradient, lineWidth: 12)
+            .frame(width: 140, height: 140)
+            .rotationEffect(.degrees(ringRotation))
+    }
+
+    // MARK: - Gradients
+
+    private var holoGradient: AngularGradient {
+        guard palette.count >= 3 else {
+            return AngularGradient(colors: [.gray], center: .center)
+        }
+        return AngularGradient(
+            stops: [
+                .init(color: palette[0], location: 0.00),
+                .init(color: palette[1], location: 0.33),
+                .init(color: palette[2], location: 0.66),
+                .init(color: palette[0], location: 1.00),
+            ],
+            center: .center
+        )
+    }
+
+    private var centralGradient: RadialGradient {
+        let baseOpacity: Double = colorScheme == .dark ? 0.30 : 0.55
+        let outerColor = colorScheme == .dark
+            ? (palette.last ?? palette[0]).opacity(0.10)
+            : (palette.last ?? palette[0]).opacity(0.50)
+        return RadialGradient(
+            colors: [
+                .black.opacity(baseOpacity),
+                outerColor,
+            ],
+            center: .center,
+            startRadius: 0,
+            endRadius: 50
+        )
+    }
+
+    // MARK: - Icon
+
+    @ViewBuilder
+    private var iconView: some View {
+        switch icon {
+        case .luma:
+            Image(systemName: "waveform")
+                .font(.system(size: 32, weight: .semibold))
+                .foregroundStyle(.white)
+                .shadow(color: .white.opacity(0.3), radius: 4)
+        case .sf(let name):
+            Image(systemName: name)
+                .font(.system(size: 32, weight: .semibold))
+                .foregroundStyle(.white)
+                .shadow(color: .white.opacity(0.3), radius: 4)
+        }
+    }
+}
+
+private var previewBackground: Color {
+    #if canImport(UIKit)
+    Color(UIColor.systemBackground)
+    #else
+    Color(NSColor.windowBackgroundColor)
+    #endif
+}
+
+#Preview {
+    let palette = WrappedYearPalette.colors(for: 2026)
+    ScrollView(.horizontal, showsIndicators: false) {
+        HStack(spacing: LumaSpacing.l) {
+            WrappedAwardMedal(icon: .luma,            value: "45",  palette: palette, isFocused: true)
+            WrappedAwardMedal(icon: .sf("flame.fill"),    value: "7",   palette: palette, isFocused: false)
+            WrappedAwardMedal(icon: .sf("music.note"),    value: "127", palette: palette, isFocused: false)
+            WrappedAwardMedal(icon: .sf("person.2.fill"), value: "42",  palette: palette, isFocused: false)
+            WrappedAwardMedal(icon: .sf("guitars.fill"),  value: "Pop", palette: palette, isFocused: false)
+        }
+        .padding(.horizontal, LumaSpacing.l)
+        .padding(.vertical, LumaSpacing.xl)
+    }
+    .background(previewBackground)
+}

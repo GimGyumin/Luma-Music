@@ -1,0 +1,27 @@
+// Luma — Music client for Subsonic/OpenSubsonic servers
+// Copyright (C) 2026 Mathieu Dubart
+// Licensed under the Mozilla Public License 2.0.
+// See LICENSE file in the project root for full license information.
+
+import SwiftUI
+
+/// Section label in SF Pro Rounded semibold. Use above lists or grids in detail screens.
+struct SectionHeader: View {
+    let title: String
+
+    var body: some View {
+        Text(title)
+            .font(.lumaSectionTitle)
+            .foregroundStyle(.primary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, LumaSpacing.l)
+            .padding(.vertical, LumaSpacing.s)
+    }
+}
+
+#Preview {
+    VStack(alignment: .leading, spacing: 0) {
+        SectionHeader(title: "Albums")
+        SectionHeader(title: "Top Tracks")
+    }
+}

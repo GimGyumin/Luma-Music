@@ -1,0 +1,58 @@
+# Luma의 논리적 Dolby Atmos 앨범·곡 매칭
+
+2026-10-13 구현. Navidrome의 앨범·트랙 ID나 서버 메타데이터는 변경하지 않는다.
+
+## 사용자 동작
+
+- `Dangerous`와 `Dangerous (Dolby Atmos)`는 동일한 앨범 아티스트이고 원본이 하나로 식별될 때 원본 앨범 카드로 표시한다. 다른 아티스트, 원본 후보가 여러 개이거나 원본이 없는 Atmos 앨범은 합치지 않는다.
+- 앨범 상세는 원본의 표지·메타데이터·수록곡을 유지한다. Atmos 앨범에만 있는 곡은 실제 ID를 유지하며 추가한다. 원본 앨범 조회 API는 통합하지 않는다.
+- 설정 → 오디오 품질 → **Dolby Atmos 우선 재생**에서 활성화한다. 기본값은 꺼짐이며 다음 곡부터 적용한다. 이미 준비한 다음 곡은 설정 변경 시 취소하고 다시 준비한다.
+- 곡 메뉴 → **Dolby Atmos 버전 선택…**에서 자동 매칭, 원래 곡 사용, 같은 아티스트의 Atmos 파일 중 직접 선택을 제공한다. 수동 설정은 계정 UUID별로 저장하고 로그아웃 시 정리한다.
+
+## 자동 매칭과 비용
+
+`AtmosVariantCatalogue`는 앨범명에서 독립된 `Dolby Atmos` 표기를 인식한다. `Michael Jackson's The Dolby Atmos`, `Michael Jackson's The Dolby Atmos Collection`, 대괄호·하이픈 표기도 음원 후보에 포함한다. 앨범 카드 통합을 위한 이름 정리는 기존처럼 끝의 `(Dolby Atmos)`만 제거한다. 별도 모음집의 이름을 원본 앨범명으로 바꾸거나 모음집 수록곡을 원본 앨범에 추가하지 않는다. 곡 제목·아티스트는 공백과 대소문자를 정규화하며, 곡 제목 끝의 `(Dolby Atmos)`, `[Dolby Atmos]`, `(Atmos Mix)` 및 하이픈 형식 표기도 제거해 비교한다. 앨범 이름뿐 아니라 곡 제목·태그·코멘트의 Atmos/JOC 메타데이터도 기존 음질 분류기로 인식한다. Live / Remix / Edit 등의 제목을 제거하지 않는다. 앨범의 라이브·리믹스 표기는 동일 길이 후보의 우선순위에만 반영하며, 제목과 길이가 맞는 후보를 제외하는 조건으로 사용하지 않는다.
+
+아티스트 이름과 제목이 같고, 알려진 재생 시간의 차이가 ±5초 이내이면 후보로 인정한다. Stereo/Atmos 믹스별 아티스트 ID나 MusicBrainz ID가 다르다는 이유로 제외하지 않는다. 같은 앨범의 Atmos 버전, MusicBrainz ID 일치, 가장 가까운 재생 시간 순서로 선택한다. 길이까지 같은 중복 후보는 앨범 문맥·clean/explicit 정보 일치와 다운로드된 원본을 우선하고, 최종 동률은 곡 ID로 안정적으로 결정한다. MusicBrainz ID가 같아도 제목·버전·길이 조건은 완화하지 않는다.
+
+라이브러리 인덱스를 설치할 때 제목·아티스트별 후보 버킷과 ID별 결과를 UI executor 밖에서 계산한다. 결과와 매칭 알고리즘 버전을 기존 계정별 인덱스에 저장한다. 매칭 버전은 3이며, 이전 버전의 결과는 저장된 곡 정보로 다시 계산한다. 라이브러리 전체를 서버에서 다시 다운로드할 필요가 없다. 재생 시 전체 라이브러리 스캔이나 서버 검색은 하지 않는다. 첫 앨범 상세는 해당 아티스트의 앨범 목록에서 짝이 되는 발매본과 Atmos 모음집을 불러와 매칭을 준비하므로 전체 라이브러리 인덱스 완료를 기다리지 않는다. 다른 앨범 아티스트 아래의 컴필레이션은 전체 인덱스 준비 후 매칭할 수 있다. 네트워크 요청은 기존 SwiftSonic 앨범 조회와 캐시를 사용한다.
+
+OpenSubsonic의 [Child 메타데이터](https://opensubsonic.netlify.app/docs/responses/child/)와 [AlbumID3의 앨범 아티스트 목록](https://opensubsonic.netlify.app/docs/responses/albumid3/)을 사용하며, 네트워크 요청은 기존 SwiftSonic 경로를 유지한다.
+
+## 재생·캐시·오프라인
+
+`PlayerState.currentTrack`와 큐에는 요청한 곡을 유지하고, `MediaSource.playbackSong`에 실제 대체 파일의 ID와 오디오 메타데이터를 보관한다. 시스템 플레이어 선택, ReplayGain, 음질 표시, 다운로드, Navidrome의 scrobble/reportPlayback은 실제 파일을 기준으로 처리한다. Luma의 화면·즐겨찾기·재생목록·로컬 청취 통계는 원래 곡을 기준으로 유지한다. 서버 기록은 대체 파일의 앨범에 남을 수 있다.
+
+Atmos로 지정된 파일은 원본 스트림을 요청하고 lossy 임시 캐시와 전체 파일 프리페치를 피한다. 오프라인에서는 확인된 원본 다운로드만 대체 파일로 사용한다. AAC 등으로 변환한 다운로드는 `isOriginalAudio = false`로 기록한다. 출처를 확인할 수 없는 오래된 다운로드는 Atmos 원본으로 사용하지 않으며 원래 곡으로 폴백한다. 원본 MIME 형식이 명확한 이전 다운로드는 계속 사용할 수 있다.
+
+다운로드 품질을 lossy로 설정한 경우 Atmos의 자동 다운로드는 생략한다. 일반 다운로드의 품질 선택은 유지하며, 변환된 파일은 Atmos 대체 재생에 사용하지 않는다.
+
+대체 파일이 없거나 초기 해석이 실패하면 원래 곡을 사용한다. 시스템 플레이어에서 대체 파일이 실패하면 원래 곡으로 한 번 복구한다. 두 파일 모두 재생할 수 없으면 기존 오류 상태를 표시한다. 유실된 다운로드 기록만으로 재생 가능하다고 판단하지 않는다.
+
+논리적 앨범 다운로드는 원래 곡 ID의 순서 목록을 별도로 저장해 Atmos 전용 추가 곡을 오프라인에서도 보존한다. 앨범/재생목록 삭제는 다른 다운로드 컬렉션이 참조하는 공유 파일을 보존한다. 새 SwiftData 필드는 모두 optional이다.
+
+## 검증과 한계
+
+`AtmosVariantTests`는 앨범 그룹화, 원본 없는 앨범, 모호한 후보, 다른 아티스트, 버전 표기, ±5초 경계, 서로 다른 Artist/MusicBrainz ID, 중복 후보의 안정적 선택, 저장된 인덱스와 수동 선택, 실제 스트림 ID/헤더/raw 형식, 변환된 로컬 파일 거부, 공유 파일 보존, 서로 다른 곡 수의 상세 통합 및 플레이어의 표시/재생 ID 분리를 검증한다.
+
+앨범 접미사는 사용자가 지정한 형식 표시다. 해당 파일이 실제 Atmos 비트스트림인지, 연결된 출력 기기가 Atmos를 렌더링하는지는 이름만으로 보증하지 않는다. 실제 iPhone·Navidrome 음원으로 원본 형식과 재생 경로를 확인해야 한다. 이번 작업에서는 실제 기기의 Atmos 출력·발열·배터리 소모를 측정하지 않았다.
+
+검증 결과:
+
+- macOS 전체 테스트: **1,083개 / 186개 suite 통과**, 65.882초. `.derivedData-20261013-atmos/full-tests-final.log`.
+- 이후 재생 시간 보존, 개별 곡 삭제 시 통합 앨범 유지, 로컬 대체 파일 실패 복구를 보완한 최종 코드에서 관련 **67개 / 4개 suite 통과**, 3.982초. `.derivedData-20261013-atmos/focused-final-2.log`.
+- 최종 iOS 앱·UI 테스트 대상 `build-for-testing` 성공. `.derivedData-20261013-atmos/ios-build-final.log`. iOS 시뮬레이터·UI 테스트 실행은 하지 않았다.
+- `git diff --check` 통과. 새 의존성, 서버 데이터 변경, 커밋·푸시는 없다.
+
+2026-10-20 Atmos 모음집 인식 확장 검증:
+
+- `AtmosVariantTests`, `AudioQualityClassifierTests`, `PlaybackSourceQualityTests`,
+  `EngineCapabilityConsistencyTests`: 매개변수별 실행 포함 **73건 통과**.
+  `/tmp/luma-atmos-collections-tests.log`.
+- iOS Simulator 앱 빌드 성공, 컴파일 경고·오류 없음.
+  `/tmp/luma-atmos-collections-ios.log`.
+- 새 모음집 이름·대괄호·하이픈 표기, v1 매칭 결과 재계산, 설정 켜기/끄기,
+  원본 스트림 ID, cold 앨범 상세에서 후보 준비, 표시 곡·큐의 전체 메타데이터
+  보존을 검증했다. 실제 서버의 음원 및 기기 Atmos 출력은 별도 확인 대상이다.
+
+2026-10-27: 제목·아티스트 이름·길이 기반 매칭으로 완화하고 Atmos 태그 후보 및 v2 인덱스 재계산 회귀 테스트를 추가했다. 관련 테스트 61개 / 4개 suite가 통과했고 iOS Simulator 빌드도 성공했다. 원시 로그는 `/tmp/luma-atmos-matching-20261027-tests.log`, 최종 재검증은 `/tmp/luma-atmos-matching-20261027-final-tests.log`에 기록한다.

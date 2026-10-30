@@ -1,0 +1,372 @@
+// Luma — Music client for Subsonic/OpenSubsonic servers
+// Copyright (C) 2026 Mathieu Dubart
+// Licensed under the Mozilla Public License 2.0.
+// See LICENSE file in the project root for full license information.
+
+import Foundation
+import MediaPlayer
+import OSLog
+#if os(iOS)
+import UIKit
+#endif
+
+extension NowPlayingService {
+    func beginPublication(_ publication: PlaybackPublication?) -> Int? {
+        if let publication {
+            guard publication.isCurrent, publication.sequence >= lastPublicationSequence else { return nil }
+            lastPublicationSequence = publication.sequence
+        }
+        playbackGeneration &+= 1
+        return playbackGeneration
+    }
+
+    @MainActor
+    func commitNowPlaying(_ publication: PlaybackPublication?, revision: Int,
+                          _ update: @MainActor @Sendable () -> Void) {
+        guard playbackRevision.accept(revision) else { return }
+        if let publication { publication.commit(update) } else { update() }
+    }
+
+    private nonisolated static func makeNowPlayingInfo(
+        for snapshot: NowPlayingSnapshot,
+        artwork: MPMediaItemArtwork? = nil
+    ) -> [String: Any] {
+        var info: [String: Any] = [
+            MPMediaItemPropertyTitle: snapshot.title,
+            MPNowPlayingInfoPropertyPlaybackRate: snapshot.playbackRate,
+            MPNowPlayingInfoPropertyDefaultPlaybackRate: 1.0
+        ]
+
+        if snapshot.isLiveStream {
+            info[MPNowPlayingInfoPropertyIsLiveStream] = true
+        } else {
+            info[MPNowPlayingInfoPropertyElapsedPlaybackTime] = snapshot.position
+            info[MPMediaItemPropertyPlaybackDuration] = snapshot.duration
+        }
+
+        if let artist = snapshot.artist { info[MPMediaItemPropertyArtist] = artist }
+        if let album = snapshot.album { info[MPMediaItemPropertyAlbumTitle] = album }
+        if let isrc = snapshot.isrc, !isrc.isEmpty {
+            info[MPNowPlayingInfoPropertyInternationalStandardRecordingCode] = isrc
+        }
+        if let identifier = snapshot.externalContentIdentifier {
+            info[MPNowPlayingInfoPropertyExternalContentIdentifier] = identifier
+        }
+        if let index = snapshot.queueIndex, index >= 0 {
+            info[MPNowPlayingInfoPropertyPlaybackQueueIndex] = index
+        }
+        if let count = snapshot.queueCount, count > 0 {
+            info[MPNowPlayingInfoPropertyPlaybackQueueCount] = count
+        }
+        if let artwork {
+            info[MPMediaItemPropertyArtwork] = artwork
+        }
+
+        return info
+    }
+
+    private nonisolated static func makeNowPlayingInfo(
+        for snapshot: NowPlayingSnapshot,
+        image: PlatformImage
+    ) -> [String: Any] {
+        makeNowPlayingInfo(for: snapshot, artwork: ArtworkLoader.makeArtwork(image))
+    }
+
+    // MARK: - Update
+
+    func update(with snapshot: NowPlayingSnapshot) async {
+        let snapshot = snapshot.projectingPlayback()
+        let publication = snapshot.publication
+        guard let revision = beginPublication(publication) else { return }
+        await updateNowPlayingEntity(with: snapshot, revision: revision)
+        guard revision == playbackGeneration else { return }
+        if snapshot.isLiveStream {
+            artworkRetryTask?.cancel()
+            artworkRetryTask = nil
+            hasArtwork = false
+            artworkRetryAttempt = 0
+            artworkRetryDate = .distantPast
+            artworkGeneration &+= 1
+            let generation = artworkGeneration
+            currentSong = snapshot
+            pendingArtwork = nil
+            // Live stream: fresh dict with the IsLiveStream flag set.
+            // Duration and elapsed time are intentionally omitted — Control Center hides
+            // the scrubber automatically when MPNowPlayingInfoPropertyIsLiveStream is true.
+            let baseInfo = Self.makeNowPlayingInfo(for: snapshot)
+            await commitNowPlaying(publication, revision: revision) {
+                guard artworkRevision.accept(generation) else { return }
+                NowPlayingMetadataSink.info = baseInfo
+                #if os(macOS)
+                MPNowPlayingInfoCenter.default().playbackState = .playing
+                #endif
+            }
+            #if os(macOS)
+            postDiscordRPC(.nowPlaying(.init(
+                title: snapshot.title,
+                artist: snapshot.artist ?? "",
+                album: snapshot.album ?? "",
+                duration: snapshot.duration,
+                startedAt: Date().timeIntervalSince1970
+            )))
+            #endif
+
+            // Check ArtworkImageCache — use hero tier for lock screen / Control Center quality.
+            if let coverArtId = snapshot.effectiveCoverArtId,
+               let cachedImage = await artworkImageCache.cached(for: coverArtId, tier: .hero) {
+                _ = await installArtwork(
+                    ArtworkLoader.makeArtwork(cachedImage),
+                    for: snapshot,
+                    generation: generation
+                )
+            }
+
+            await updateRemoteCommandsAvailability(isLiveStream: true)
+            return
+        }
+
+        await updateRemoteCommandsAvailability(isLiveStream: false)
+        guard revision == playbackGeneration, publication?.isCurrent != false else { return }
+
+        let isTrackChange = !isCurrent(snapshot)
+        if !isTrackChange {
+            currentSong = snapshot.preservingArtwork(from: currentSong)
+            let generation = artworkGeneration
+            // Position-only update (pause/resume/seek): merge into the existing dict so
+            // artwork already loaded for the current track is preserved.
+            await commitNowPlaying(publication, revision: revision) {
+                guard artworkRevision.matches(generation) else { return }
+                var info = NowPlayingMetadataSink.info ?? [:]
+                info[MPMediaItemPropertyTitle] = snapshot.title
+                info[MPNowPlayingInfoPropertyElapsedPlaybackTime] = snapshot.position
+                info[MPMediaItemPropertyPlaybackDuration] = snapshot.duration
+                info[MPNowPlayingInfoPropertyPlaybackRate] = snapshot.playbackRate
+                info[MPNowPlayingInfoPropertyDefaultPlaybackRate] = 1.0
+                if let artist = snapshot.artist { info[MPMediaItemPropertyArtist] = artist }
+                if let album = snapshot.album { info[MPMediaItemPropertyAlbumTitle] = album }
+                if let isrc = snapshot.isrc, !isrc.isEmpty {
+                    info[MPNowPlayingInfoPropertyInternationalStandardRecordingCode] = isrc
+                }
+                if let index = snapshot.queueIndex, index >= 0 {
+                    info[MPNowPlayingInfoPropertyPlaybackQueueIndex] = index
+                }
+                if let count = snapshot.queueCount, count > 0 {
+                    info[MPNowPlayingInfoPropertyPlaybackQueueCount] = count
+                }
+                NowPlayingMetadataSink.info = info
+                #if os(macOS)
+                MPNowPlayingInfoCenter.default().playbackState = snapshot.playbackRate > 0 ? .playing : .paused
+                #endif
+            }
+            #if os(macOS)
+            if snapshot.playbackRate == 0 {
+                postDiscordRPC(.stopped)
+            } else if let song = currentSong {
+                postDiscordRPC(.nowPlaying(.init(
+                    title: song.title,
+                    artist: song.artist ?? "",
+                    album: song.album ?? "",
+                    duration: song.duration,
+                    startedAt: Date().timeIntervalSince1970
+                )))
+            }
+            #endif
+            if !hasArtwork { await displayArtwork(currentSong ?? snapshot) }
+            return
+        }
+
+        // New track: build from scratch so stale artwork from the previous track is cleared
+        // before the new one loads. Text metadata is committed first so the lockscreen
+        // doesn't flash empty while the artwork fetch is in progress.
+        let info = Self.makeNowPlayingInfo(for: snapshot)
+        artworkRetryTask?.cancel()
+        artworkRetryTask = nil
+        currentSong = snapshot
+        artworkGeneration &+= 1
+        hasArtwork = false
+        artworkRetryAttempt = 0
+        artworkRetryDate = .distantPast
+        let generation = artworkGeneration
+        pendingArtwork = nil
+        let baseInfo = info
+        await commitNowPlaying(publication, revision: revision) {
+            guard artworkRevision.accept(generation) else { return }
+            NowPlayingMetadataSink.info = baseInfo
+            #if os(macOS)
+            MPNowPlayingInfoCenter.default().playbackState = snapshot.playbackRate > 0 ? .playing : .paused
+            #endif
+        }
+        #if os(macOS)
+        postDiscordRPC(.nowPlaying(.init(
+            title: snapshot.title,
+            artist: snapshot.artist ?? "",
+            album: snapshot.album ?? "",
+            duration: snapshot.duration,
+            startedAt: Date().timeIntervalSince1970
+        )))
+        #endif
+
+        await displayArtwork(snapshot)
+    }
+
+    // MARK: - Periodic position push
+
+    func pushPosition(elapsed: TimeInterval, rate: Float, duration: TimeInterval) async {
+        await pushPosition(elapsed: elapsed, rate: rate, duration: duration, publication: nil)
+    }
+
+    func pushPosition(elapsed: TimeInterval, rate: Float, duration: TimeInterval, publication: PlaybackPublication?) async {
+        guard elapsed.isFinite, duration.isFinite, elapsed >= 0, duration > 0, elapsed <= duration,
+              let revision = beginPublication(publication) else { return }
+        if let song = currentSong {
+            currentSong = song.updatingPlayback(position: elapsed, rate: rate, duration: duration, publication: publication)
+        }
+        if artworkRetryAttempt < Self.maximumArtworkRetryAttempts,
+           artworkLoadGeneration != artworkGeneration,
+           let pendingArtwork,
+           artworkRetryTask == nil,
+           Date() >= artworkRetryDate {
+            artworkRetryTask = Task {
+                await displayArtwork(pendingArtwork.snapshot)
+                artworkRetryTask = nil
+            }
+        }
+        await commitNowPlaying(publication, revision: revision) {
+            // Don't invent a Now Playing session before metadata (incl. ISRC) has been published.
+            guard var info = NowPlayingMetadataSink.info,
+                  info[MPMediaItemPropertyTitle] != nil else { return }
+            info[MPNowPlayingInfoPropertyElapsedPlaybackTime] = elapsed
+            info[MPNowPlayingInfoPropertyPlaybackRate] = rate
+            info[MPMediaItemPropertyPlaybackDuration] = duration
+            NowPlayingMetadataSink.info = info
+            #if os(macOS)
+            MPNowPlayingInfoCenter.default().playbackState = rate > 0 ? .playing : .paused
+            #endif
+        }
+    }
+
+    func setISRC(_ isrc: String) async {
+        let publication = currentSong?.publication
+        guard let revision = beginPublication(nil) else { return }
+        let trimmed = isrc.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        await commitNowPlaying(publication, revision: revision) {
+            guard var info = NowPlayingMetadataSink.info,
+                  info[MPMediaItemPropertyTitle] != nil else { return }
+            info[MPNowPlayingInfoPropertyInternationalStandardRecordingCode] = trimmed
+            NowPlayingMetadataSink.info = info
+        }
+        Logger.player.debug("Now Playing ISRC set for Music Haptics")
+    }
+
+    func setPlaybackRate(_ rate: Float) async {
+        await setPlaybackRate(rate, publication: nil)
+    }
+
+    func setPlaybackRate(_ rate: Float, publication: PlaybackPublication?) async {
+        guard let revision = beginPublication(publication) else { return }
+        let latest = currentSong?.projectingPlayback()
+        if let latest {
+            currentSong = latest.updatingPlayback(position: latest.position, rate: rate, duration: latest.duration, publication: publication)
+        }
+        let position = latest?.position
+        await commitNowPlaying(publication, revision: revision) {
+            guard var info = NowPlayingMetadataSink.info,
+                  info[MPMediaItemPropertyTitle] != nil else { return }
+            info[MPNowPlayingInfoPropertyPlaybackRate] = rate
+            if let position { info[MPNowPlayingInfoPropertyElapsedPlaybackTime] = position }
+            NowPlayingMetadataSink.info = info
+            #if os(macOS)
+            MPNowPlayingInfoCenter.default().playbackState = rate > 0 ? .playing : .paused
+            #endif
+        }
+    }
+
+    func clearISRC() async {
+        let publication: PlaybackPublication? = nil
+        guard let revision = beginPublication(nil) else { return }
+        await commitNowPlaying(publication, revision: revision) {
+            guard var info = NowPlayingMetadataSink.info else { return }
+            info.removeValue(forKey: MPNowPlayingInfoPropertyInternationalStandardRecordingCode)
+            NowPlayingMetadataSink.info = info
+        }
+    }
+
+    func publishTrackChange(_ snapshot: NowPlayingSnapshot) async {
+        let publication = snapshot.publication
+        guard let revision = beginPublication(publication) else { return }
+        await updateNowPlayingEntity(with: snapshot, revision: revision)
+        guard revision == playbackGeneration else { return }
+        localArtworkTask?.cancel()
+        finalArtworkImage = nil
+        // Fresh dict without artwork so the previous track's ISRC/rate cannot linger
+        // while we resolve cover art / credentials on the full update path.
+        let info = Self.makeNowPlayingInfo(for: snapshot)
+        artworkRetryTask?.cancel()
+        artworkRetryTask = nil
+        currentSong = snapshot
+        pendingArtwork = nil
+        artworkGeneration &+= 1
+        hasArtwork = false
+        artworkRetryAttempt = 0
+        artworkRetryDate = .distantPast
+        let generation = artworkGeneration
+        let published = info
+        await commitNowPlaying(publication, revision: revision) {
+            guard artworkRevision.accept(generation) else { return }
+            var metadata = published
+            let coverID = snapshot.coverArtId ?? preparedCoverIdProvider?(snapshot.albumId) ?? snapshot.effectiveCoverArtId
+            if let image = artworkImageCache.cached(for: coverID, tier: .hero)
+                ?? artworkImageCache.cached(for: coverID, tier: .thumb) {
+                metadata[MPMediaItemPropertyArtwork] = ArtworkLoader.makeArtwork(image)
+            }
+            NowPlayingMetadataSink.info = metadata
+            #if os(macOS)
+            MPNowPlayingInfoCenter.default().playbackState = snapshot.playbackRate > 0 ? .playing : .paused
+            #endif
+        }
+        await updateRemoteCommandsAvailability(isLiveStream: snapshot.isLiveStream)
+        guard revision == playbackGeneration, publication?.isCurrent != false else { return }
+        localArtworkTask = Task { [weak self] in await self?.displayLocalArtwork(snapshot) }
+    }
+
+    func updateNowPlayingEntity(with snapshot: NowPlayingSnapshot, revision: Int? = nil) async {
+        #if os(iOS)
+        if #available(iOS 27.0, *),
+           let publisher = nowPlayingEntityPublisher as? LumaNowPlayingEntityPublisher {
+            let predecessor = entityPublicationTask
+            predecessor?.cancel()
+            let token = revision ?? playbackGeneration
+            entityPublicationTask = Task { [weak self, playbackRevision] in
+                await predecessor?.value
+                guard !Task.isCancelled, let self,
+                      await MainActor.run(body: { playbackRevision.accept(token) }) else { return }
+                let serverId = await MainActor.run { self.serverState?.activeServer?.id }
+                guard !Task.isCancelled else { return }
+                await publisher.update(snapshot, serverId: serverId, isCurrent: {
+                    playbackRevision.accept(token) && snapshot.publication?.isCurrent != false
+                })
+            }
+        }
+        #endif
+    }
+}
+
+
+extension NowPlayingSnapshot {
+    nonisolated var externalContentIdentifier: String? {
+        if let trackId, !trackId.isEmpty {
+            return "luma.track.\(trackId)"
+        }
+        if let coverArtId, !coverArtId.isEmpty {
+            return "luma.cover.\(coverArtId)"
+        }
+
+        let parts = [title, artist, album]
+            .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        guard !parts.isEmpty else { return nil }
+        return "luma.metadata.\(parts.joined(separator: "|"))"
+    }
+}
+

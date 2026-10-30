@@ -1,0 +1,145 @@
+// Luma — Music client for Subsonic/OpenSubsonic servers
+// Copyright (C) 2026 Mathieu Dubart
+// Licensed under the Mozilla Public License 2.0.
+// See LICENSE file in the project root for full license information.
+
+import SwiftUI
+
+struct LoadingStateView: View {
+    var message: String? = nil
+
+    var body: some View {
+        VStack(spacing: LumaSpacing.m) {
+            ProgressView()
+                .controlSize(.large)
+                .tint(Color.lumaAccent)
+
+            if let message {
+                Text(message)
+                    .font(.lumaBody)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(LumaSpacing.xl)
+    }
+}
+
+// MARK: - Skeleton components
+
+struct SkeletonAlbumCard: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: LumaSpacing.xs) {
+            RoundedRectangle(cornerRadius: LumaCornerRadius.standard)
+                .fill(Color.primary.opacity(0.08))
+                .aspectRatio(1, contentMode: .fit)
+
+            RoundedRectangle(cornerRadius: 4)
+                .fill(Color.primary.opacity(0.08))
+                .frame(height: 12)
+                .frame(maxWidth: .infinity)
+
+            RoundedRectangle(cornerRadius: 4)
+                .fill(Color.primary.opacity(0.05))
+                .frame(height: 10)
+                .frame(maxWidth: 80)
+        }
+        .shimmer()
+    }
+}
+
+struct SkeletonSongRow: View {
+    var body: some View {
+        HStack(spacing: LumaSpacing.m) {
+            RoundedRectangle(cornerRadius: LumaCornerRadius.xs)
+                .fill(Color.primary.opacity(0.08))
+                .frame(width: 44, height: 44)
+
+            VStack(alignment: .leading, spacing: LumaSpacing.xs) {
+                RoundedRectangle(cornerRadius: 4)
+                    .fill(Color.primary.opacity(0.08))
+                    .frame(height: 13)
+                    .frame(maxWidth: 180)
+
+                RoundedRectangle(cornerRadius: 4)
+                    .fill(Color.primary.opacity(0.05))
+                    .frame(height: 11)
+                    .frame(maxWidth: 120)
+            }
+
+            Spacer(minLength: 0)
+        }
+        .padding(.vertical, LumaSpacing.xs)
+        .shimmer()
+    }
+}
+
+// MARK: - Shimmer modifier
+
+private struct ShimmerModifier: ViewModifier {
+    @State private var phase: CGFloat = -1
+    @State private var isVisible = false
+    @State private var governor = PerformanceGovernor.shared
+    @Environment(\.scenePhase) private var scenePhase
+
+    private var shouldAnimate: Bool {
+        isVisible && scenePhase == .active && governor.budget.allowsDecorativeMotion
+    }
+
+    func body(content: Content) -> some View {
+        content
+            .overlay {
+                GeometryReader { geo in
+                    let width = geo.size.width
+                    LinearGradient(
+                        stops: [
+                            .init(color: .clear, location: 0),
+                            .init(color: .white.opacity(0.25), location: 0.4),
+                            .init(color: .clear, location: 1),
+                        ],
+                        startPoint: .leading,
+                        endPoint: .trailing
+                    )
+                    .frame(width: width * 2)
+                    .offset(x: phase * width * 2)
+                }
+            }
+            .clipped()
+            .onAppear { isVisible = true }
+            .onDisappear { isVisible = false; syncAnimation() }
+            .onChange(of: shouldAnimate) { _, _ in syncAnimation() }
+    }
+
+    private func syncAnimation() {
+        withAnimation(shouldAnimate ? .linear(duration: 1.4).repeatForever(autoreverses: false) : nil) {
+            phase = shouldAnimate ? 1 : -1
+        }
+    }
+}
+
+extension View {
+    func shimmer() -> some View {
+        modifier(ShimmerModifier())
+    }
+}
+
+#Preview("Spinner") {
+    LoadingStateView(message: "Loading albums…")
+}
+
+#Preview("Skeleton cards") {
+    let columns = [GridItem(.adaptive(minimum: 140, maximum: 180), spacing: 12)]
+    ScrollView {
+        LazyVGrid(columns: columns, spacing: 12) {
+            ForEach(0..<8, id: \.self) { _ in SkeletonAlbumCard() }
+        }
+        .padding()
+    }
+}
+
+#Preview("Skeleton rows") {
+    List {
+        ForEach(0..<8, id: \.self) { _ in SkeletonSongRow() }
+    }
+    .listStyle(.plain)
+}

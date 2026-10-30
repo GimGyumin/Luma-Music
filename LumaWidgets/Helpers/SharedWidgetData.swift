@@ -1,0 +1,50 @@
+// Luma — Music client for Subsonic/OpenSubsonic servers
+// Copyright (C) 2026 Mathieu Dubart
+// Licensed under the Mozilla Public License 2.0.
+// See LICENSE file in the project root for full license information.
+
+import SwiftUI
+import WidgetKit
+
+enum SharedWidgetData {
+    /// Loads cover art from the shared container's CoverArt directory.
+    /// Returns nil if the file doesn't exist or fails to decode.
+    static func image(forCoverArtId coverArtId: String) -> PlatformImage? {
+        guard let url = SharedStorage.coverArtCacheDirectory?.appendingPathComponent("\(coverArtId).jpg") else {
+            return nil
+        }
+        guard let data = try? Data(contentsOf: url) else { return nil }
+        return PlatformImage(data: data)
+    }
+
+    /// Decodes a packed RGB Int (0xRRGGBB) to a SwiftUI Color.
+    static func color(fromPacked packed: Int) -> Color {
+        let r = Double((packed >> 16) & 0xFF) / 255.0
+        let g = Double((packed >> 8) & 0xFF) / 255.0
+        let b = Double(packed & 0xFF) / 255.0
+        return Color(red: r, green: g, blue: b)
+    }
+
+    /// Reads the latest recently played track from SharedStorage, or nil if empty.
+    static func latestRecentlyPlayed() -> SharedTrackInfo? {
+        SharedStorage.read { defaults in
+            guard let data = defaults.data(forKey: SharedStorageKey.recentlyPlayedItems.rawValue),
+                  let items = try? JSONDecoder().decode([SharedTrackInfo].self, from: data) else {
+                return nil
+            }
+            return items.first
+        }
+    }
+
+    /// Dominant color for a coverArtId, falling back to LumaAccent if absent.
+    static func dominantColor(forCoverArtId coverArtId: String?) -> Color {
+        let fallback = Color("LumaAccent")
+        guard let coverArtId else { return fallback }
+        let packed: Int? = SharedStorage.read { defaults in
+            let dict = defaults.dictionary(forKey: SharedStorageKey.dominantColors.rawValue)
+            return dict?[coverArtId] as? Int
+        }
+        guard let packed else { return fallback }
+        return color(fromPacked: packed)
+    }
+}

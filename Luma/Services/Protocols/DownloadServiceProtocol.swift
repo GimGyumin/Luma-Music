@@ -1,0 +1,104 @@
+// Luma — Music client for Subsonic/OpenSubsonic servers
+// Copyright (C) 2026 Mathieu Dubart
+// Licensed under the Mozilla Public License 2.0.
+// See LICENSE file in the project root for full license information.
+
+import Foundation
+import SwiftSonic
+
+nonisolated struct DownloadProgress: Sendable {
+    let songId: String
+    let serverId: UUID
+    let progress: Double    // 0.0 → 1.0
+    let totalBytes: Int64?
+    let receivedBytes: Int64
+}
+
+nonisolated struct LocalAlbumData: Sendable {
+    let albumId: String
+    let albumName: String
+    let artistName: String?
+    let coverArtId: String?
+    let songs: [DisplayableSong]
+}
+
+nonisolated struct LocalPlaylistData: Sendable {
+    let playlistId: String
+    let name: String
+    let coverArtId: String?
+    let songs: [DisplayableSong]
+}
+
+protocol DownloadServiceProtocol: AnyObject, Sendable {
+    /// Live stream of in-progress downloads for UI progress display.
+    var progressStream: AsyncStream<[DownloadProgress]> { get }
+
+    func downloadedURL(forSongId songId: String, serverId: UUID) async -> URL?
+    func downloadedOriginalURL(forSongId songId: String, serverId: UUID) async -> URL?
+    func isDownloaded(songId: String, serverId: UUID) async -> Bool
+    /// Returns all song IDs that have been fully downloaded for a given server.
+    func downloadedSongIds(serverId: UUID) async -> Set<String>
+
+    /// Returns the local file URL for a downloaded cover art, or nil if not cached.
+    func localCoverArtURL(forId coverArtId: String) async -> URL?
+
+    /// Persists cover image data to the shared cover art directory (best-effort, errors are logged).
+    func persistCover(_ data: Data, forId coverArtId: String) async
+
+    /// Removes the cached cover art file for the given ID. No-op if not on disk.
+    func removeCover(forId coverArtId: String) async
+    func localCoverArtURL(forId coverArtId: String, serverId: UUID) async -> URL?
+    func persistCover(_ data: Data, forId coverArtId: String, serverId: UUID) async
+    func removeCover(forId coverArtId: String, serverId: UUID) async
+
+    /// Deletes orphaned cover files whose name is not in `referencedIds`. Returns count deleted.
+    @discardableResult
+    func garbageCollectOrphanedCovers(referencedIds: Set<String>) async -> Int
+
+    /// Returns offline-playable album data assembled from persisted tracks, or nil if not downloaded.
+    func localAlbumData(albumId: String, serverId: UUID) async -> LocalAlbumData?
+    /// Returns offline-playable playlist data assembled from persisted tracks, or nil if not downloaded.
+    func localPlaylistData(playlistId: String, serverId: UUID) async -> LocalPlaylistData?
+
+    /// Repairs a downloaded playlist whose `songIds` is empty (e.g. records written before the
+    /// field existed) by persisting the authoritative track order intersected with the tracks
+    /// actually on disk. No-op when `songIds` is already populated or the record is absent.
+    /// Lets pre-migration downloads become readable offline after one online open.
+    func backfillPlaylistSongIds(playlistId: String, serverId: UUID, orderedSongIds: [String]) async
+
+    func download(song: Song, serverId: UUID) async throws
+    /// Explicit spatial downloads must retain the original bitstream.
+    func downloadOriginal(song: Song, serverId: UUID) async throws
+    func download(album: AlbumID3, serverId: UUID) async throws
+    func download(playlist: PlaylistWithSongs, serverId: UUID) async throws
+
+    /// Returns `true` if a download task is currently in-flight for this song.
+    func isDownloading(songId: String, serverId: UUID) async -> Bool
+    func isDownloadingAlbum(_ albumId: String) async -> Bool
+    func isDownloadingPlaylist(_ playlistId: String) async -> Bool
+    func cancelAlbumDownload(albumId: String, serverId: UUID) async
+    func cancelPlaylistDownload(playlistId: String, serverId: UUID) async
+    func cancelDownload(songId: String, serverId: UUID) async
+    func remove(songId: String, serverId: UUID) async throws
+    func remove(albumId: String, serverId: UUID) async throws
+    func remove(playlistId: String, serverId: UUID) async throws
+}
+
+// Alternate implementations can retain per-song cancellation as the fallback.
+extension DownloadServiceProtocol {
+    func downloadOriginal(song: Song, serverId: UUID) async throws {
+        try await download(song: song, serverId: serverId)
+    }
+    func downloadedOriginalURL(forSongId songId: String, serverId: UUID) async -> URL? { nil }
+    func localCoverArtURL(forId coverArtId: String, serverId: UUID) async -> URL? {
+        await localCoverArtURL(forId: coverArtId)
+    }
+    func persistCover(_ data: Data, forId coverArtId: String, serverId: UUID) async {
+        await persistCover(data, forId: coverArtId)
+    }
+    func removeCover(forId coverArtId: String, serverId: UUID) async {
+        await removeCover(forId: coverArtId)
+    }
+    func cancelAlbumDownload(albumId: String, serverId: UUID) async {}
+    func cancelPlaylistDownload(playlistId: String, serverId: UUID) async {}
+}

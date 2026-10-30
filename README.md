@@ -1,1 +1,3 @@
+# Luma-Music
+
 Luma Music is an AI-assisted, open-source iOS music player inspired by Apple Music. It brings a beautiful, native listening experience to Navidrome and OpenSubsonic, featuring synchronized lyrics, lossless audio, gapless playback, smooth animations, and seamless iOS integration.

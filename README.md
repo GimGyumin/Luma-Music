@@ -1,3 +1,5 @@
+![Luma Music — Your music, beautifully.](Luma-Music-README-Hero.png)
+
 # Luma Music
 
 **Your music, beautifully.**

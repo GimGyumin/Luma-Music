@@ -1,7 +1,6 @@
 ![Luma Music — Your music, beautifully.](Luma-Music-README-Hero.png)
 
-![Luma Music iPhone Screenshots](Luma-Music-Screenshots.jpeg)
-  
+
 # Luma Music
 
 **Your music, beautifully.**
@@ -14,6 +13,9 @@ Luma Music is an AI-assisted, open-source music player for **Navidrome**, **Open
 
 ---
 
+![Luma Music iPhone Screenshots](Luma-Music-Screenshots.jpeg)
+
+  
 ## ✨ Highlights
 
 - **Beautiful native experience** — An artwork-focused interface for iPhone, iPad, and Mac.

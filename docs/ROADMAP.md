@@ -4,6 +4,12 @@
 
 This page outlines the next areas of work for Luma Music. These are **plans, not released features**, and priorities may change as development and testing continue.
 
+> **Work in progress:** Luma Music and this GitHub repository are still being polished. We're improving the documentation, release information, and overall experience as the project develops.
+
+## 2026 release goal
+
+We are **aiming to release the stable Luma Music 1.0 version before the end of 2026** for iPhone and iPad. We are still testing, fixing bugs, and preparing the release, so this is a **target rather than a guaranteed date**. Current IPA release candidates remain previews, not the final 1.0 release.
+
 ## What's next
 
 ### Documentation & getting started
@@ -21,6 +27,8 @@ This page outlines the next areas of work for Luma Music. These are **plans, not
 Luma Music is currently distributed as an **IPA preview for iPhone and iPad**. A compatible, separately hosted music server is required.
 
 [Browse releases](https://github.com/GimGyumin/Luma-Music/releases) · [Back to Luma Music](../README.md) · [Share feedback](https://github.com/GimGyumin/Luma-Music/issues)
+
+If you enjoy using Luma Music or want to follow its progress, please consider [⭐ starring the repository](https://github.com/GimGyumin/Luma-Music). Every bit of support helps while we're polishing the project.
 
 ---
 

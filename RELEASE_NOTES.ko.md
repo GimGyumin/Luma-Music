@@ -1,6 +1,8 @@
 # Luma Music 1.0 RC1
 
-Luma Music 1.0 RC1은 Luma Music의 첫 공개 릴리즈 후보입니다. Navidrome, OpenSubsonic 및 지원되는 Jellyfin 서버에 보관된 개인 음악 라이브러리를 iPhone, iPad 및 Mac에 맞춘 네이티브 인터페이스에서 감상할 수 있습니다. 스트리밍, 다운로드, 동기화 가사 및 보관함 탐색을 하나의 경험으로 연결하고, 사용자가 설정한 음악 서버의 콘텐츠를 Apple 플랫폼에서 자연스럽게 이용할 수 있도록 구성했습니다.
+> **RC1 당시 릴리스 기록입니다.** 이 빌드는 iPhone·iPad용 IPA 미리보기이며 정식 1.0 출시가 아닙니다. 현재 TestFlight·App Store 배포나 정식 macOS 앱은 제공되지 않습니다. 최신 정보는 [README](README.md)와 [로드맵](docs/ROADMAP.md)을 확인하세요.
+
+Luma Music 1.0 RC1은 Luma Music의 첫 공개 릴리즈 후보입니다. Navidrome, OpenSubsonic 및 지원되는 Jellyfin 서버에 보관된 개인 음악 라이브러리를 iPhone과 iPad에 맞춘 네이티브 인터페이스에서 감상할 수 있습니다. 스트리밍, 다운로드, 동기화 가사 및 보관함 탐색을 하나의 경험으로 연결하고, 사용자가 설정한 음악 서버의 콘텐츠를 Apple 플랫폼에서 자연스럽게 이용할 수 있도록 구성했습니다.
 
 이번 릴리즈는 음악 감상에 필요한 전체 흐름을 제공합니다. 앨범이나 플레이리스트에서 재생을 시작하고, gapless playback 또는 crossfade로 곡을 이어서 감상하며, 네트워크에 연결할 수 없을 때는 다운로드한 음악으로 돌아갈 수 있습니다. 시스템 재생 제어, Siri 동작, Spotlight 색인, 위젯 및 Live Activities를 통해 앱을 열지 않은 상태에서도 관련 기능을 이용할 수 있습니다. 네트워크 변화, 재생 복구, 서버별 캐시 분리 및 장시간 실행되는 보관함 준비 작업을 고려한 안정성 보호 기능도 포함되어 있습니다.
 

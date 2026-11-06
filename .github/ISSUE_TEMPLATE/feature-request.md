@@ -1,21 +1,28 @@
 ---
 name: Feature request
-about: Suggest new features and improvements for Luma Music.
-title: "[Feature]"
-labels: Feature Request
+about: Suggest a more enjoyable way to use Luma Music.
+title: "[Feature] "
+labels: "Feature Request"
 assignees: ''
 type: Feature
+---
+
+## The idea
+
+What would you like Luma Music to do?
+
+## Why it matters
+
+What problem would this solve or what would it make easier?
+
+## Your ideal experience
+
+How do you imagine this working in the app?
+
+## Anything else?
+
+Optional screenshots, examples, or other approaches.
 
 ---
 
-**Is your feature request related to a problem? Please describe.**
-A clear and concise description of what the problem is. Ex. I'm always frustrated when [...]
-
-**Describe the solution you'd like**
-A clear and concise description of what you want to happen.
-
-**Describe alternatives you've considered**
-A clear and concise description of any alternative solutions or features you've considered.
-
-**Additional context**
-Add any other context or screenshots about the feature request here.
+Check the [roadmap](../../docs/ROADMAP.md) for what's already planned.

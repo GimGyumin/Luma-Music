@@ -1,6 +1,8 @@
 # Luma Music 1.0 RC1
 
-Luma Music 1.0 RC1 is the first public release candidate of Luma Music, a native music player for personal libraries hosted on Navidrome, OpenSubsonic, and supported Jellyfin servers. It brings streaming, downloads, synchronized lyrics, and library browsing together in an interface designed for iPhone, iPad, and Mac. Your library remains on the server you configure, while Luma provides the playback controls, artwork, and navigation needed to make that library feel at home on Apple platforms.
+> **Archived RC1 notes.** RC1 is an iPhone/iPad IPA preview, **not** the final stable release. No TestFlight/App Store distribution or dedicated macOS app is currently offered. Refer to the [README](README.md) and [Roadmap](docs/ROADMAP.md) for current availability.
+
+Luma Music 1.0 RC1 is the first public release candidate of Luma Music, a native music player for personal libraries hosted on Navidrome, OpenSubsonic, and supported Jellyfin servers. It brings streaming, downloads, synchronized lyrics, and library browsing together in an interface designed for iPhone and iPad. Your library remains on the server you configure, while Luma provides the playback controls, artwork, and navigation needed to make that library feel at home on Apple platforms.
 
 This release focuses on a complete listening experience: browse a large library with local indexing, start playback from an album or playlist, continue with gapless transitions or crossfade, and return to downloaded music when a network connection is unavailable. System playback controls, Siri actions, Spotlight indexing, widgets, and Live Activities extend the experience beyond the app. The release candidate also includes safeguards for changing network conditions, playback recovery, cache isolation between servers, and the long-running tasks involved in preparing a library.
 

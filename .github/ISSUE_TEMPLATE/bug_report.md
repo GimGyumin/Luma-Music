@@ -1,47 +1,44 @@
 ---
 name: Bug report
-about: Report bugs, crashes, playback issues, and server connection problems in Luma
-  Music.
-title: "[Big]"
+about: Tell us when something isn't working as expected.
+title: "[Bug] "
 labels: bug
 assignees: ''
 type: Bug
-
 ---
 
-## 🐛 Bug Description
-Describe the problem clearly.
+## What happened?
 
-## 🔁 Steps to Reproduce
-1. Open Luma Music
-2. Navigate to...
-3. Tap...
-4. Observe the issue
+Describe the issue clearly and briefly.
 
-## ✅ Expected Behavior
-What did you expect to happen?
+## Steps to reproduce
 
-## 📱 Device & App
-- Device:
-- OS version:
-- Luma Music version:
-- Installation method: SideStore / AltStore / Other
+1. Open Luma Music…
+2. Go to…
+3. Tap…
+4. Notice…
 
-## 🎵 Music Server
-- Server: Navidrome / OpenSubsonic / Jellyfin / Other
-- Server version:
-- Connection: Wi-Fi / Cellular
-- Audio format: FLAC / ALAC / AAC / MP3 / Other
+## What did you expect?
 
-## 🔊 Issue Details
-- Category: Playback / Lyrics / Search / Library / UI / Other
+Describe the expected behavior.
+
+## Your setup
+
+- Luma Music version / release tag:
+- iPhone or iPad model:
+- iOS or iPadOS version:
+- Installation method (SideStore / AltStore / other):
+- Server type / version (Navidrome / OpenSubsonic / Jellyfin):
+- Connection (Wi-Fi / cellular):
 - Streaming or offline:
-- Gapless or Crossfade enabled:
+- Audio format, if relevant:
 
-## 📋 Logs & Screenshots
-Attach screenshots or diagnostic logs if available.
+## Screenshots or logs
 
-**Privacy:** Remove passwords, access tokens, and private server URLs before uploading logs.
+Attach helpful evidence, if available.
 
-## 📝 Additional Context
-Anything else that could help reproduce the issue?
+**Privacy:** Remove private server URLs, passwords, access tokens, and personal account information before posting.
+
+## Anything else?
+
+Optional context or workarounds.

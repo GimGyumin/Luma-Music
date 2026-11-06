@@ -1,5 +1,9 @@
 # Contributing to Luma
 
+Luma Music and its GitHub repository are **still being refined** as we work toward a **stable 1.0 release in 2026** (a target, not a fixed release date). See the [public roadmap](docs/ROADMAP.md) for upcoming documentation and platform plans.
+
+Issues, constructive feedback, and contributions are welcome. If you enjoy the project but aren't ready to contribute code, consider giving the [repository a ⭐ star](https://github.com/GimGyumin/Luma-Music).
+
 ## Development Rules
 
 ### B2 — No SwiftSonic bypass, ever

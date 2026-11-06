@@ -1,102 +1,108 @@
 <p align="center">
-  <img src="./Luma-Music-README-Hero.png" alt="Luma Music — Your music, beautifully." width="100%">
+  <img src="./Luma-Music-README-Hero.png" alt="Luma Music" width="100%">
 </p>
 
 <h1 align="center">Luma Music</h1>
 
-<p align="center"><strong>Your music. The experience it deserves.</strong></p>
-<p align="center">A beautiful, native listening experience for the music you own.</p>
 <p align="center">
-  <a href="#a-closer-look">Take a look</a>
-  &nbsp; · &nbsp;
-  <a href="#download--installation">Get the IPA</a>
-  &nbsp; · &nbsp;
-  <a href="https://github.com/GimGyumin/Luma-Music/issues">Share feedback</a>
+  <strong>Your music. The experience it deserves.</strong><br>
+  A beautiful, native listening experience for your own music library.
 </p>
 
-<p align="center"><sub>For Navidrome · OpenSubsonic-compatible servers · Supported Jellyfin libraries</sub></p>
+<p align="center">
+  <a href="#discover-luma">Explore</a> &nbsp; · &nbsp;
+  <a href="#get-luma-music">Get the IPA</a> &nbsp; · &nbsp;
+  <a href="https://github.com/GimGyumin/Luma-Music/issues">Give feedback</a>
+</p>
+
+<p align="center">
+  <sub>iPhone & iPad — IPA preview &nbsp; | &nbsp; macOS — Coming next year (2027)</sub>
+</p>
+
+<p align="center"><sub>Navidrome · OpenSubsonic-compatible servers · Supported Jellyfin libraries</sub></p>
 
 ---
 
-## A closer look
+## Discover Luma
 
 <p align="center">
-  <img src="./assets/screenshots/now-playing.jpg" alt="Immersive Now Playing with expressive album artwork" width="30%" />
-  <img src="./assets/screenshots/lyrics-translation.jpg" alt="Synchronized lyrics with translation" width="30%" />
-  <img src="./assets/screenshots/lyrics-pronunciation.jpg" alt="Lyrics with available pronunciation and romanization" width="30%" />
+  <img src="./assets/screenshots/now-playing.jpg" alt="Immersive Now Playing screen" width="30%" />
+  <img src="./assets/screenshots/lyrics-translation.jpg" alt="Synchronized lyrics and translation" width="30%" />
+  <img src="./assets/screenshots/lyrics-pronunciation.jpg" alt="Synchronized lyrics with available pronunciation" width="30%" />
 </p>
 <p align="center"><sub>Now Playing &nbsp; · &nbsp; Lyrics & translation &nbsp; · &nbsp; Pronunciation</sub></p>
 
 <p align="center">
-  <img src="./assets/screenshots/album-page.jpg" alt="Immersive blue-toned album page" width="30%" />
-  <img src="./assets/screenshots/lock-screen.jpg" alt="Lock Screen with artwork and playback controls" width="30%" />
+  <img src="./assets/screenshots/album-page-hopeless-romantic.jpg" alt="Luma Music immersive album page — Hopeless Romantic" width="30%" />
+  <img src="./assets/screenshots/lock-screen-childhood.jpg" alt="Luma Music Lock Screen playback — Childhood" width="30%" />
 </p>
-<p align="center"><sub>Album experience &nbsp; · &nbsp; Lock Screen</sub></p>
+<p align="center"><sub>Album artwork &nbsp; · &nbsp; Lock Screen playback</sub></p>
 
 ---
 
-## Beautifully yours.
+## Your albums, brought to life.
 
-Bring your personal music library to life with an **artwork-first interface**, thoughtful motion, and the familiarity of a native Apple-platform app. Designed to feel at home on iPhone and iPad, with a Mac project available to build from source.
+Your music collection deserves more than a list of tracks. Luma brings an **Apple Music-inspired**, artwork-first interface to your personal server — with immersive color, thoughtful transitions, and album pages designed to let the artwork shine.
 
-Immersive presentation can extend from albums to Now Playing and supported Lock Screen experiences. **Some album covers do not support immersive artwork**, and system features depend on the device and signing configuration.
+Immersive presentation is available for **compatible album covers only**. The result can vary with the cover, device, and supported system features.
 
-## Every word matters.
+## Lyrics that move with the music.
 
-Follow the music with smooth, synchronized lyrics, including **TTML word-timed highlighting** when the connected server or a compatible source provides the necessary data.
+Follow each line with fluid animations and **TTML word-timed highlighting** whenever compatible timing data is available.
 
-Optional Apple or OpenAI-powered translation makes available lyric text easier to understand. **Pronunciation and romanization are displayed only when the lyric data includes a compatible pronunciation layer.** Luma does not generate that layer for every song.
+Translate supported lyric text using optional Apple or OpenAI-powered features. **Pronunciation and romanization appear only if the available lyric data includes a compatible pronunciation layer**; Luma cannot supply pronunciation for every track.
 
-Lyrics are available only when the server holds or supplies compatible lyric data, or when an enabled external source such as LRCLIB can provide it. Translation, precise timing, and pronunciation each have their own data requirements.
+Lyrics are shown when your connected server contains or supplies supported lyric data, or an enabled external source such as LRCLIB can provide them. Not every song has lyrics, translations, or word-level timing.
 
-## Hear the album as intended.
+## Hear every moment.
 
-From the first note to the last, Luma focuses on uninterrupted listening.
+Keep full albums and live performances flowing with **gapless playback** when supported. Enjoy lossless audio with compatible source files and playback routes, plus crossfade, ReplayGain, Up Next, and offline downloads.
 
-- **Gapless playback** for supported albums and live recordings.
-- **Lossless streaming** where the source, server, and playback route support it.
-- **Crossfade and ReplayGain**, playback queue management, shuffle, and repeat.
-- **Offline downloads**, adaptive streaming, caching, and network recovery.
+Adaptive streaming, caching, and network recovery help your personal library fit into everyday listening.
 
-## Thoughtful in every detail.
+## Details you can feel.
 
-Responsive browsing, local library indexing, artwork caching, and performance-aware visual effects help keep the experience fluid. Luma also offers supported Siri and Shortcuts actions, Spotlight search, widgets, and system playback controls.
+Fast local library search, refined artwork handling, and efficient display updates make the experience feel responsive. Supported Apple-platform integrations include Siri, Shortcuts, Spotlight, widgets, and system playback controls.
 
-Accessibility and privacy matter too: VoiceOver, Dynamic Type, Reduce Motion, English/Korean localization, and **no built-in analytics or telemetry**.
+Accessibility is part of the experience, with VoiceOver, Dynamic Type, Reduce Motion, and English/Korean localization.
 
-> Actual battery use varies with brightness, device, connectivity, media format, and output. Luma does not claim independently verified battery-life superiority over other players.
+> Power use depends on the display brightness, device, network, source format, and playback output. Luma does not claim independently verified battery-life superiority over other players.
 
 ---
 
-## Download & installation
+## Get Luma Music
 
-**IPA distribution only.** The next IPA build will be uploaded **separately, after this GitHub page refresh**; it is not part of this README update. The Releases page may still contain an older preview build.
+**Available now:** iPhone and iPad preview builds are distributed as **IPA files only**.
 
-**[View available IPA releases](https://github.com/GimGyumin/Luma-Music/releases)**
+**[Browse GitHub Releases](https://github.com/GimGyumin/Luma-Music/releases)**
 
-To get started once the new build is published:
+The new post-rebrand IPA build has **not been uploaded yet**. The Releases page currently includes the earlier [RC1 preview](https://github.com/GimGyumin/Luma-Music/releases/tag/v1.0.0-rc1). Please check the release tag before installing.
 
-1. Download the IPA from [GitHub Releases](https://github.com/GimGyumin/Luma-Music/releases).
-2. Sign and install it on a compatible iPhone or iPad with a sideloading tool such as SideStore or AltStore.
-3. Connect Luma Music to **your own music server** and sign in.
+To install a published IPA:
 
-**There is currently no App Store or TestFlight distribution.** Luma does not include a commercial music catalog; a compatible self-hosted server and music library are required. Sideloading requires a compatible signing method, and some system integrations may need specific entitlements.
+1. Download the IPA from the relevant [GitHub release](https://github.com/GimGyumin/Luma-Music/releases).
+2. Sign and install it on an eligible iPhone or iPad using a compatible solution such as SideStore or AltStore.
+3. Open Luma Music and connect to **your own** compatible music server.
 
-### Compatibility
+**No App Store or TestFlight distribution is currently available.** Luma does not provide a music streaming catalog. Signing methods and some system integrations may have entitlement requirements.
 
-| Platform | Minimum version |
-| --- | --- |
-| iPhone | iOS 18.6 |
-| iPad | iPadOS 18.6 |
-| Mac | macOS 15.6 (build from source) |
+### Platform availability
 
-**Music servers:** Navidrome, OpenSubsonic-compatible servers, and supported Jellyfin libraries.
+| Platform | Status |
+| :--- | :--- |
+| **iPhone** | IPA preview · iOS 18.6 or later |
+| **iPad** | IPA preview · iPadOS 18.6 or later |
+| **macOS** | **Coming next year (2027)** · Not available yet |
 
-**Playback formats:** MP3, AAC, FLAC, Ogg Vorbis, Opus, and WAV through supported playback routes. Available codecs, lyrics, artwork, transcoding, and integrations depend on the server and device.
+The macOS version is in the roadmap for 2027. **No macOS release or macOS installer is currently provided**, and an iPhone/iPad IPA should not be presented as a macOS build.
 
-### Build from source
+Supported servers: **Navidrome, OpenSubsonic-compatible servers, and supported Jellyfin libraries**.
 
-Requires a Mac with **Xcode 26 or later** and a suitable development signing configuration.
+Playback formats include MP3, AAC, FLAC, Ogg Vorbis, Opus, and WAV when supported by the server and playback route.
+
+### Building and contributing
+
+Luma is open source. The source project can be explored and built for supported iPhone/iPad development targets using a Mac, Xcode 26 or later, and the appropriate signing configuration. This is **not** an announced macOS app release.
 
 ```bash
 git clone https://github.com/GimGyumin/Luma-Music.git
@@ -104,27 +110,25 @@ cd Luma-Music
 open Luma.xcodeproj
 ```
 
-Choose the **Luma** scheme, configure **Signing & Capabilities**, and let Swift Package Manager resolve dependencies. Audio and background-playback behavior should be tested on a physical device. The iOS/iPadOS IPA is not a standalone Mac installer.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidance. Device testing is recommended for audio and background playback.
 
 ---
 
 ## Your library stays yours.
 
-Luma Music connects to the server you choose, stores server credentials in the system Keychain, and does not include built-in advertising, analytics, or tracking SDKs.
+Luma connects to the music server you select, keeps credentials in the system Keychain, and has **no built-in advertising, analytics, or tracking SDKs**.
 
-**Optional external services**
+Optional external services may receive relevant data when you enable or use them:
 
-- **LRCLIB lyrics fallback:** May send song title, artist, album, and duration when enabled. To disable it, choose **Settings → Lyrics → Source → Server only**.
-- **OpenAI translation:** When selected and configured, sends lyric text to the translation provider. Available Apple translation options depend on supported system capabilities.
-- **Metadata:** Optional lookups through MusicBrainz, Wikidata, Wikipedia, or Cover Art Archive may send artist and album information.
+- **Lyrics:** Optional LRCLIB fallback can send track title, artist, album, and duration. Disable it using **Settings → Lyrics → Source → Server only**.
+- **Translation:** Optional OpenAI translation sends lyric text to the selected provider. Apple translation depends on device and OS support.
+- **Metadata:** Optional lookups through MusicBrainz, Wikidata, Wikipedia, and Cover Art Archive can send artist or album information.
 
-Unencrypted HTTP connections require explicit confirmation and may expose traffic on untrusted networks; use HTTPS where possible.
+Unencrypted HTTP server connections require explicit confirmation. Use HTTPS where possible.
 
 ## Made to grow with your music.
 
-Luma Music is open source. Feedback, bug reports, and contributions are welcome.
-
-[Report an issue](https://github.com/GimGyumin/Luma-Music/issues) &nbsp; · &nbsp; [Contributing guide](CONTRIBUTING.md) &nbsp; · &nbsp; [Releases](https://github.com/GimGyumin/Luma-Music/releases)
+[Report an issue](https://github.com/GimGyumin/Luma-Music/issues) &nbsp; · &nbsp; [Contribute](CONTRIBUTING.md) &nbsp; · &nbsp; [Releases](https://github.com/GimGyumin/Luma-Music/releases)
 
 ---
 

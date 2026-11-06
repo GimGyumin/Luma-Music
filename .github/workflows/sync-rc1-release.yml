@@ -1,0 +1,26 @@
+name: Synchronize RC1 release notes
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/sync-rc1-release.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  update-rc1-notes:
+    if: github.repository == 'GimGyumin/Luma-Music'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Refresh RC1 release title and description
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release edit v1.0.0-rc1 \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "Luma Music 1.0 RC1 — Preview" \
+            --notes-file docs/releases/v1.0.0-rc1.md \
+            --prerelease

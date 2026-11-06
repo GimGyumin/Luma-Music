@@ -18,9 +18,22 @@ Luma Music brings the polish of a native Apple music app to **your own self-host
 
 **No separate Luma account. No built-in analytics or tracking. Your server, your collection.**
 
+## See Luma Music in action
+
 <p align="center">
-  <img src="./Luma-Music-Screenshots.jpeg" alt="Luma Music interface screenshots on iPhone" width="100%">
+  <img src="./assets/screenshots/now-playing.jpg" alt="Luma Music immersive Now Playing screen" width="29%" />
+  <img src="./assets/screenshots/lyrics-translation.jpg" alt="Synchronized lyrics with Korean translation" width="29%" />
+  <img src="./assets/screenshots/lyrics-pronunciation.jpg" alt="Synchronized lyrics with romanized pronunciation" width="29%" />
 </p>
+<p align="center"><sub>Immersive Now Playing · Synchronized lyrics & translation · Pronunciation when supported</sub></p>
+
+<p align="center">
+  <img src="./assets/screenshots/album-page.jpg" alt="Artwork-focused Luma Music album page" width="29%" />
+  <img src="./assets/screenshots/lock-screen.jpg" alt="Album-color coordinated Lock Screen music controls" width="29%" />
+</p>
+<p align="center"><sub>Artwork-focused album pages · Lock Screen playback controls</sub></p>
+
+> Lyrics appear only when the connected server or a supported lyric source can provide them. Word-timed karaoke requires compatible timing data, and pronunciation appears only when compatible pronunciation data is available. Some album covers may not support immersive artwork.
 
 ## The Luma experience
 

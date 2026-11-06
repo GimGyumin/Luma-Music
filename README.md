@@ -28,7 +28,7 @@ Luma Music brings the polish of a native Apple music app to **your own self-host
 
 **Music should look as good as it sounds.**
 
-- Immersive artwork presentations across Now Playing, albums, and supported Lock Screen experiences.
+- Immersive artwork presentations across Now Playing, albums, and supported Lock Screen experiences **when the album artwork and device support them**. Some album covers may not be compatible with the immersive presentation.
 - Artwork-driven colors, fluid transitions, and a native interface for Apple platforms.
 - Designed to put the album and the listening experience first — not another dashboard.
 
@@ -36,13 +36,13 @@ Luma Music brings the polish of a native Apple music app to **your own self-host
 
 **More than a scrolling wall of text.**
 
-- Smooth, synchronized line-by-line lyrics and **TTML word-timed karaoke** when timing data is available.
+- Smooth, synchronized line-by-line lyrics and **TTML word-timed karaoke** when compatible lyrics and timing data are available from the connected server or a supported lyric source.
 - Optional **AI-assisted lyric translation** using supported Apple or OpenAI integrations.
 - Translation of available lyric text through supported optional integrations.
 - Pronunciation/romanization display **only when the supplied lyrics include a supported pronunciation layer**. Luma does not generate pronunciation for every track.
-- Server-provided lyrics, with optional LRCLIB fallback and lyric caching.
+- Lyrics from a connected server when it has supported lyric data or provides them through a compatible feature; optional LRCLIB fallback may supply lyrics where available. Lyrics are not guaranteed for every song.
 
-**What to expect:** Translation can work with available lyric text; karaoke-style word animation requires compatible timing data. **Pronunciation appears only for lyrics that provide compatible pronunciation data.** Not every song or language has the same lyric coverage, and optional translation features may require setup or compatible hardware/software.
+**What to expect:** Lyrics appear only when the server or a configured compatible source can provide them. Translation requires available lyric text; karaoke-style word animation additionally requires compatible timing data. **Pronunciation appears only for lyrics that provide compatible pronunciation data.** Not every track or language has the same coverage, and optional translation features may require setup or compatible hardware/software.
 
 ### 03 — Listen to the album, not the gaps
 
@@ -94,7 +94,7 @@ Luma Music is distributed **as an IPA only**, using a compatible signing and sid
 | **Playback** | MP3, AAC, FLAC, Ogg Vorbis, Opus, WAV via compatible playback routes |
 | **Languages** | English, Korean |
 
-Some codecs, transcoding paths, lyric formats, audio enhancements, and integrations depend on server and device support.
+Some codecs, transcoding paths, lyric formats, audio enhancements, and integrations depend on server and device support. Immersive artwork is not available for every album cover.
 
 ## Built for your library, with your privacy in mind
 

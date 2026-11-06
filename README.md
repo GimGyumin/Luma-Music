@@ -11,6 +11,7 @@
 
 <p align="center">
   <a href="#discover-luma">Explore</a> &nbsp; · &nbsp;
+  <a href="./docs/ROADMAP.md">Roadmap</a> &nbsp; · &nbsp;
   <a href="#get-luma-music">Get the IPA</a> &nbsp; · &nbsp;
   <a href="https://github.com/GimGyumin/Luma-Music/issues">Give feedback</a>
 </p>

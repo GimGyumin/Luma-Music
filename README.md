@@ -6,7 +6,7 @@
 <p align="center"><strong>Your music. The experience it deserves.</strong></p>
 <p align="center">An immersive, Apple Music-inspired player for the music you own.</p>
 <p align="center">
-  <a href="https://github.com/GimGyumin/Luma-Music/releases"><strong>Get Luma Music</strong></a>
+  <a href="#release-and-installation"><strong>Release & installation</strong></a>
   · <a href="#the-luma-experience">Explore the experience</a>
   · <a href="https://github.com/GimGyumin/Luma-Music/issues">Share feedback</a>
 </p>
@@ -38,10 +38,11 @@ Luma Music brings the polish of a native Apple music app to **your own self-host
 
 - Smooth, synchronized line-by-line lyrics and **TTML word-timed karaoke** when timing data is available.
 - Optional **AI-assisted lyric translation** using supported Apple or OpenAI integrations.
-- Translation and pronunciation/romanization layers where supported by the source and selected features.
+- Translation of available lyric text through supported optional integrations.
+- Pronunciation/romanization display **only when the supplied lyrics include a supported pronunciation layer**. Luma does not generate pronunciation for every track.
 - Server-provided lyrics, with optional LRCLIB fallback and lyric caching.
 
-**What to expect:** Translation can work with available lyric text; karaoke-style word animation requires compatible timing data. Not every song or language has the same lyric coverage, and optional translation features may require setup or compatible hardware/software.
+**What to expect:** Translation can work with available lyric text; karaoke-style word animation requires compatible timing data. **Pronunciation appears only for lyrics that provide compatible pronunciation data.** Not every song or language has the same lyric coverage, and optional translation features may require setup or compatible hardware/software.
 
 ### 03 — Listen to the album, not the gaps
 
@@ -64,17 +65,21 @@ Luma is designed with attention to efficient UI updates, adaptive effects, and b
 
 > Battery life depends on device, display brightness, media format, network, and audio output. We do not claim an independently verified battery-life advantage over other players.
 
-## Get Luma Music
+## Release and installation
 
-**[Download the latest available GitHub release](https://github.com/GimGyumin/Luma-Music/releases)**
+**The next Luma Music IPA build will be uploaded after the GitHub page rebrand is completed.** The upcoming build is not available to download yet.
 
-The current public distribution is a **preview IPA**. It requires a compatible signing and sideloading method; it is **not an App Store or TestFlight install**.
+**[Check GitHub Releases for available builds](https://github.com/GimGyumin/Luma-Music/releases)**
 
-1. Open [Releases](https://github.com/GimGyumin/Luma-Music/releases) and download the available IPA.
-2. Install it on a compatible iPhone or iPad with a signing/sideloading solution, such as SideStore or AltStore.
+Luma Music is distributed **as an IPA only**, using a compatible signing and sideloading method; there is currently **no App Store or TestFlight distribution**. An earlier preview release may still appear on the Releases page, but it is not the upcoming rebranded build.
+
+**Once the new IPA is published:**
+
+1. Open [Releases](https://github.com/GimGyumin/Luma-Music/releases) and select the newly published build.
+2. Download the IPA and install it on a compatible iPhone or iPad using SideStore, AltStore, or another suitable signing/sideloading solution.
 3. Launch Luma Music and connect to your own Navidrome, OpenSubsonic-compatible, or supported Jellyfin server.
 
-**You need your own music server and library.** Luma does not provide a streaming music catalog. For macOS, the repository also includes source code to build with Xcode; the current GitHub IPA is not a standalone macOS installer.
+**You need your own music server and library.** Luma does not provide a streaming music catalog. macOS source code can be built with Xcode; an iOS/iPadOS IPA is not a standalone macOS installer.
 
 > Some features depend on OS version, device capabilities, source files, server responses, and signing entitlements. If installation fails, please [report the device, OS version, signing method, and error](https://github.com/GimGyumin/Luma-Music/issues).
 
@@ -117,7 +122,7 @@ Choose the **Luma** scheme in Xcode and configure **Signing & Capabilities**. Sw
 
 Luma Music is open source and welcomes bug reports, improvement ideas, and pull requests.
 
-- [Releases and downloads](https://github.com/GimGyumin/Luma-Music/releases)
+- [Releases — check for the upcoming IPA](https://github.com/GimGyumin/Luma-Music/releases)
 - [Report an issue or request a feature](https://github.com/GimGyumin/Luma-Music/issues)
 - [Contributing guide](CONTRIBUTING.md)
 

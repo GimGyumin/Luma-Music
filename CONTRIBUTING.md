@@ -1,8 +1,14 @@
-# Contributing to Luma
+# Contributing to Luma Music
 
-Luma Music and its GitHub repository are **still being refined** as we work toward a **stable 1.0 release in 2026** (a target, not a fixed release date). See the [public roadmap](docs/ROADMAP.md) for upcoming documentation and platform plans.
+**Good music deserves thoughtful software.**
 
-Issues, constructive feedback, and contributions are welcome. If you enjoy the project but aren't ready to contribute code, consider giving the [repository a ⭐ star](https://github.com/GimGyumin/Luma-Music).
+Luma Music is an independent, open-source player. We're refining the project and targeting a stable iPhone/iPad 1.0 release in **2026**, subject to testing.
+
+Looking for a way to help? Start with the [documentation](docs/README.md), review the [roadmap](docs/ROADMAP.md), join [Discussions](https://github.com/GimGyumin/Luma-Music/discussions), or [report a problem](https://github.com/GimGyumin/Luma-Music/issues/new/choose).
+
+If you enjoy the project, consider [giving it a ⭐ star](https://github.com/GimGyumin/Luma-Music). Every little bit helps.
+
+---
 
 ## Development Rules
 

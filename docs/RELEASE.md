@@ -1,19 +1,21 @@
-# Releasing Luma
+# Releasing Luma — historical pipeline draft
 
-> **RC1 release note:** GitHub Actions release workflows are not currently installed. The v1.0.0-rc1 release must be created manually as a source-only pre-release. Pushing a tag will not automatically build or upload binaries.
+> **Archived design, not the current release process.** As of November 2026, Luma Music is distributed as an **iPhone/iPad IPA preview through GitHub Releases**. There is no active TestFlight/App Store distribution or released macOS version. The automation described below is a historical plan, **not a working deployment pipeline**. Do not follow it to publish current releases.
+>
+> For present availability, see [GitHub Releases](https://github.com/GimGyumin/Luma-Music/releases), [Getting started](GETTING_STARTED.md), and the [Roadmap](ROADMAP.md).
 
+## Planned channels (not active)
 
-Luma ships through two independent channels, both triggered by pushing a
-`v*` git tag (e.g. `v1.0.0-rc1` for the first public release candidate).
+The earlier design proposed two channels activated by version tags. These are retained for technical reference only:
 
-| Channel | Target | Driver | Artifact |
-| --- | --- | --- | --- |
-| iOS | TestFlight → App Store | **Xcode Cloud** (configured in App Store Connect) | `.ipa` uploaded to TestFlight |
-| macOS | Direct download / Homebrew | **GitHub Actions** (`.github/workflows/release.yml`) | notarized `.dmg` on the GitHub Release, cask bumped in the tap |
+| Proposed channel | Intended target | Intended driver |
+| --- | --- | --- |
+| iOS | TestFlight → App Store | Xcode Cloud |
+| macOS | Direct download / Homebrew | GitHub Actions |
 
-The two channels do not depend on each other; a tag push fans out to both.
+Neither proposed channel is currently a published Luma Music distribution method.
 
-## Release flow
+## Historical release flow — not currently in use
 
 1. Bump the version locally if you want a specific marketing version, or let the
    pipelines derive it from the tag (both read `v<version>`).

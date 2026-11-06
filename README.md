@@ -22,6 +22,11 @@
 
 <p align="center"><sub>Navidrome · OpenSubsonic-compatible servers · Supported Jellyfin libraries</sub></p>
 
+<p align="center">
+  <sub>We're still polishing Luma Music and this repository. A stable 1.0 release is planned for 2026.</sub><br>
+  <sub>If you like the project, consider giving it a ⭐ on GitHub. It really helps!</sub>
+</p>
+
 ---
 
 ## Discover Luma
@@ -129,7 +134,9 @@ Unencrypted HTTP server connections require explicit confirmation. Use HTTPS whe
 
 ## Made to grow with your music.
 
-[Report an issue](https://github.com/GimGyumin/Luma-Music/issues) &nbsp; · &nbsp; [Contribute](CONTRIBUTING.md) &nbsp; · &nbsp; [Releases](https://github.com/GimGyumin/Luma-Music/releases)
+[Report an issue](https://github.com/GimGyumin/Luma-Music/issues) &nbsp; · &nbsp; [Roadmap](docs/ROADMAP.md) &nbsp; · &nbsp; [Contribute](CONTRIBUTING.md) &nbsp; · &nbsp; [Releases](https://github.com/GimGyumin/Luma-Music/releases)
+
+The repository, documentation, and release experience are still being refined. If Luma Music is useful to you, a [⭐ GitHub star](https://github.com/GimGyumin/Luma-Music) is a great way to support its development.
 
 ---
 

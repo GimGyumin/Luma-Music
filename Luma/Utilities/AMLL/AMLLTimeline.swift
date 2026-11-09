@@ -33,7 +33,7 @@ nonisolated struct AMLLTimeline: Sendable {
         var gaps: [Interlude] = [], maximum = 0
         for i in bounds.indices {
             let next = bounds[i].start
-            if next - maximum >= 7000 { gaps.append(Interlude(start: maximum, end: next, after: i - 1)) }
+            if next - maximum >= 6000 { gaps.append(Interlude(start: maximum, end: next, after: i - 1)) }
             maximum = max(maximum, bounds[i].end)
         }
         self.gaps = gaps

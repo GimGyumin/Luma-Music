@@ -279,7 +279,7 @@ nonisolated enum LyricsLanguage: Sendable {
         case "en":
             // Mostly Latin letters already → skip.
             let letters = text.unicodeScalars.filter { CharacterSet.letters.contains($0) }
-            guard !letters.isEmpty else { return true }
+            guard !letters.isEmpty else { return false }
             let latin = letters.filter { CharacterSet(charactersIn: "A"..."Z").contains($0) || CharacterSet(charactersIn: "a"..."z").contains($0) }
             return Double(latin.count) / Double(letters.count) < 0.6
         case "ja":

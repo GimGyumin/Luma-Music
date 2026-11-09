@@ -16,9 +16,42 @@ actor StatsService {
     private let modelContainer: ModelContainer
     private let preparation: Task<Void, Never>?
 
-    init(modelContainer: ModelContainer, preparation: Task<Void, Never>? = nil) {
+    private let replay: ReplayHistorySync?
+    private let account: @MainActor @Sendable () -> ServerSnapshot?
+    private let songs: @MainActor @Sendable (UUID) -> [String: DisplayableSong]
+
+    init(modelContainer: ModelContainer, preparation: Task<Void, Never>? = nil, replay: ReplayHistorySync? = nil,
+         account: @escaping @MainActor @Sendable () -> ServerSnapshot? = { nil },
+         songs: @escaping @MainActor @Sendable (UUID) -> [String: DisplayableSong] = { _ in [:] }) {
+        self.replay = replay
+        self.account = account
+        self.songs = songs
         self.modelContainer = modelContainer
         self.preparation = preparation
+    }
+
+    @concurrent static func backupLocalHistory(container: ModelContainer, serverID: String, to url: URL) async throws {
+        let fm = FileManager.default
+        guard !fm.fileExists(atPath: url.path) else { return }
+        let temporary = url.deletingLastPathComponent().appendingPathComponent(UUID().uuidString)
+        guard fm.createFile(atPath: temporary.path, contents: nil) else { throw CocoaError(.fileWriteUnknown) }
+        defer { if fm.fileExists(atPath: temporary.path) { try? fm.removeItem(at: temporary) } }
+        let output = try FileHandle(forWritingTo: temporary)
+        defer { try? output.close() }
+        let encoder = JSONEncoder()
+        let descriptor = FetchDescriptor<PlaybackEvent>(predicate: #Predicate { $0.serverId == serverID })
+        try ModelContext(container).enumerate(descriptor, batchSize: 256) { e in
+            try Task.checkCancellation()
+            let dto = PlaybackEventDTO(id: e.id, trackId: e.trackId, trackTitle: e.trackTitle, albumId: e.albumId,
+                albumTitle: e.albumTitle, artistId: e.artistId, artistName: e.artistName, genre: e.genre,
+                timestamp: e.timestamp, durationListened: e.durationListened, trackDuration: e.trackDuration,
+                wasCompleted: e.wasCompleted, serverId: e.serverId)
+            var line = try encoder.encode(dto)
+            line.append(10)
+            try output.write(contentsOf: line)
+        }
+        try output.synchronize()
+        try fm.moveItem(at: temporary, to: url)
     }
 
     // MARK: - Public API
@@ -27,6 +60,7 @@ actor StatsService {
         await preparation?.value
         let context = ModelContext(modelContainer)
         let model = PlaybackEvent(
+            id: event.id,
             trackId: event.trackId,
             trackTitle: event.trackTitle,
             albumId: event.albumId,
@@ -55,9 +89,11 @@ actor StatsService {
 
     func eventCount(forServer serverId: String) async -> Int {
         await preparation?.value
+        let active = await account()
+        let sid = replay == nil ? serverId : (active?.id.uuidString == serverId ? active?.localReplayID ?? "" : "")
         let context = ModelContext(modelContainer)
         let descriptor = FetchDescriptor<PlaybackEvent>(
-            predicate: #Predicate { $0.serverId == serverId }
+            predicate: #Predicate { $0.serverId == sid }
         )
         return (try? context.fetchCount(descriptor)) ?? 0
     }
@@ -66,15 +102,18 @@ actor StatsService {
     /// Returns Sendable DTOs — PlaybackEvent instances never leave this actor.
     func recentEvents(limit: Int, serverId: String) async -> [PlaybackEventDTO] {
         await preparation?.value
+        let active = await account()
+        let sid = replay == nil ? serverId : (active?.id.uuidString == serverId ? active?.localReplayID ?? "" : "")
         let context = ModelContext(modelContainer)
         var descriptor = FetchDescriptor<PlaybackEvent>(
-            predicate: #Predicate { $0.serverId == serverId },
+            predicate: #Predicate { $0.serverId == sid },
             sortBy: [SortDescriptor(\.timestamp, order: .reverse)]
         )
         descriptor.fetchLimit = limit
         let events = (try? context.fetch(descriptor)) ?? []
         return events.map { event in
             PlaybackEventDTO(
+                id: event.id,
                 trackId: event.trackId,
                 trackTitle: event.trackTitle,
                 albumId: event.albumId,
@@ -89,6 +128,90 @@ actor StatsService {
                 serverId: event.serverId
             )
         }
+    }
+
+    /// Local, album-level listening candidates for the Playlists “listen again” shelf.
+    /// Reads only the app's listening store; it never contacts the server and never
+    /// fabricates an album when no event exists.
+    func albumListenAgainCandidates(serverId: String, limit: Int = 3,
+                                    now: Date = Date()) async -> [AlbumListenAgainRecommendation] {
+        await preparation?.value
+        let active = await account()
+        let sid = replay == nil ? serverId : (active?.id.uuidString == serverId ? active?.localReplayID ?? "" : "")
+        let cutoff = now.addingTimeInterval(-Double(AlbumListenAgainPolicy.lookbackDays) * 86_400)
+        let context = ModelContext(modelContainer)
+        var descriptor = FetchDescriptor<PlaybackEvent>(
+            predicate: #Predicate { $0.serverId == sid && $0.timestamp >= cutoff },
+            sortBy: [SortDescriptor(\.timestamp, order: .reverse)]
+        )
+        // Bound the local read; this is a recommendation shelf, not a history export.
+        descriptor.fetchLimit = 1_200
+        let events = (try? context.fetch(descriptor)) ?? []
+
+        struct Aggregate {
+            var albumTitle: String
+            var artistName: String
+            var lastPlayed: Date
+            var playCount = 0
+            var tracks = Set<String>()
+            var completed = 0
+            var seconds: TimeInterval = 0
+            var completionSum = 0.0
+        }
+        var aggregates: [String: Aggregate] = [:]
+        for event in events {
+            guard let albumId = event.albumId?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !albumId.isEmpty,
+                  let title = event.albumTitle?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !title.isEmpty else { continue }
+            let completion: Double
+            if event.trackDuration > 0 {
+                completion = min(1, max(0, event.durationListened / event.trackDuration))
+            } else {
+                completion = event.wasCompleted ? 1 : 0
+            }
+            var aggregate = aggregates[albumId] ?? Aggregate(
+                albumTitle: title,
+                artistName: event.artistName,
+                lastPlayed: event.timestamp
+            )
+            aggregate.albumTitle = title
+            aggregate.artistName = event.artistName
+            aggregate.lastPlayed = max(aggregate.lastPlayed, event.timestamp)
+            aggregate.playCount += 1
+            if !event.trackId.isEmpty { aggregate.tracks.insert(event.trackId) }
+            if event.wasCompleted { aggregate.completed += 1 }
+            aggregate.seconds += max(0, event.durationListened)
+            aggregate.completionSum += completion
+            aggregates[albumId] = aggregate
+        }
+
+        let recommendations = aggregates.compactMap { albumId, aggregate -> AlbumListenAgainRecommendation? in
+            let averageCompletion = aggregate.playCount > 0 ? aggregate.completionSum / Double(aggregate.playCount) : 0
+            guard AlbumListenAgainPolicy.qualifies(
+                distinctTracks: aggregate.tracks.count,
+                completedTracks: aggregate.completed,
+                totalListenedSeconds: aggregate.seconds,
+                averageCompletion: averageCompletion
+            ) else { return nil }
+            return AlbumListenAgainRecommendation(
+                albumId: albumId,
+                albumTitle: aggregate.albumTitle,
+                artistName: aggregate.artistName,
+                lastPlayed: aggregate.lastPlayed,
+                playCount: aggregate.playCount,
+                distinctTrackCount: aggregate.tracks.count,
+                completedTrackCount: aggregate.completed,
+                totalListenedSeconds: aggregate.seconds
+            )
+        }
+        return AlbumListenAgainPolicy.ranked(recommendations, limit: limit)
+    }
+
+    /// Home has exactly one leading “Listen Again” card. The caller uses this method so
+    /// no surface can accidentally render a second album recommendation.
+    func albumListenAgainRecommendation(serverId: String, now: Date = Date()) async -> AlbumListenAgainRecommendation? {
+        await albumListenAgainCandidates(serverId: serverId, limit: 1, now: now).first
     }
 
     func deleteAllEvents(forServer serverId: String) async {
@@ -112,16 +235,41 @@ actor StatsService {
 
     // MARK: - Phase 2: Wrapped aggregation
 
+    private func reportingCalendar(for profile: ServerSnapshot?, period: WrappedPeriod, local: Calendar) async -> Calendar {
+        guard let profile, let mirror = try? await replay?.mirror(account: profile) else { return local }
+        let utc = WrappedPeriod.serverCalendar
+        let range = period.dateRange(in: utc)
+        guard (try? ReplayHistoryStore(url: mirror.url).hasEvents(uid: mirror.uid, start: range.start, end: range.end)) == true else { return local }
+        return utc
+    }
+
+    func firstHistoryDate(for profile: ServerSnapshot) async -> Date? {
+        await preparation?.value
+        let sid = profile.localReplayID
+        let context = ModelContext(modelContainer)
+        var query = FetchDescriptor<PlaybackEvent>(predicate: #Predicate { $0.serverId == sid }, sortBy: [SortDescriptor(\.timestamp)])
+        query.fetchLimit = 1
+        let firstLocal = try? context.fetch(query).first?.timestamp
+        guard let mirror = try? await replay?.mirror(account: profile),
+              let firstServer = try? ReplayHistoryStore(url: mirror.url).firstDate(uid: mirror.uid) else { return firstLocal }
+        return min(firstLocal ?? firstServer, firstServer)
+    }
+
     func hasEventsInPeriod(_ period: WrappedPeriod, serverId: String, calendar: Calendar) async -> Bool {
+        let active = await account()
+        let profile = active?.id.uuidString == serverId ? active : nil
+        let calendar = await reportingCalendar(for: profile, period: period, local: calendar)
         let range = period.dateRange(in: calendar)
         let start = range.start
         let end = range.end
-        let sid = serverId
+        let sid = replay == nil ? serverId : (profile?.localReplayID ?? "")
         await preparation?.value
         let context = ModelContext(modelContainer)
         var descriptor = FetchDescriptor<PlaybackEvent>(
             predicate: #Predicate { $0.serverId == sid && $0.timestamp >= start && $0.timestamp < end }
         )
+        if let profile, let mirror = try? await replay?.mirror(account: profile),
+           let db = try? ReplayHistoryStore(url: mirror.url), (try? db.hasEvents(uid: mirror.uid, start: start, end: end)) == true { return true }
         descriptor.fetchLimit = 1
         return ((try? context.fetchCount(descriptor)) ?? 0) > 0
     }
@@ -131,10 +279,13 @@ actor StatsService {
         let t0 = CFAbsoluteTimeGetCurrent()
         #endif
 
+        let active = await account()
+        let profile = active?.id.uuidString == serverId ? active : nil
+        let calendar = await reportingCalendar(for: profile, period: period, local: calendar)
         let range = period.dateRange(in: calendar)
         let start = range.start
         let end = range.end
-        let sid = serverId
+        let sid = replay == nil ? serverId : (profile?.localReplayID ?? "")
         await preparation?.value
         let context = ModelContext(modelContainer)
         let descriptor = FetchDescriptor<PlaybackEvent>(
@@ -149,6 +300,7 @@ actor StatsService {
             events = []
         }
 
+        if let data = await serverSummary(period: period, account: profile, local: events, calendar: calendar, limit: 10) { return data }
         let data = aggregate(events: events, period: period, serverId: serverId, periodRange: range, calendar: calendar)
 
         #if DEBUG
@@ -162,10 +314,13 @@ actor StatsService {
     }
 
     func topTracks(forPeriod period: WrappedPeriod, serverId: String, limit: Int, calendar: Calendar) async -> [TopTrackEntry] {
+        let active = await account()
+        let profile = active?.id.uuidString == serverId ? active : nil
+        let calendar = await reportingCalendar(for: profile, period: period, local: calendar)
         let range = period.dateRange(in: calendar)
         let start = range.start
         let end = range.end
-        let sid = serverId
+        let sid = replay == nil ? serverId : (profile?.localReplayID ?? "")
         await preparation?.value
         let context = ModelContext(modelContainer)
         let descriptor = FetchDescriptor<PlaybackEvent>(
@@ -178,6 +333,7 @@ actor StatsService {
             Logger.stats.error("topTracks fetch failed for serverId=\(sid, privacy: .public): \(error, privacy: .public)")
             return []
         }
+        if let data = await serverSummary(period: period, account: profile, local: events, calendar: calendar, limit: limit) { return data.topTracks }
         guard !events.isEmpty else { return [] }
         var groups: [String: (duration: TimeInterval, count: Int, title: String, artist: String, album: String?)] = [:]
         for e in events {
@@ -208,6 +364,83 @@ actor StatsService {
     }
 
     // MARK: - Private aggregation
+
+    private func serverSummary(period: WrappedPeriod, account: ServerSnapshot?, local: [PlaybackEvent], calendar: Calendar, limit: Int) async -> WrappedData? {
+        guard let account, let mirror = try? await replay?.mirror(account: account) else { return nil }
+        let catalogue = await songs(account.id)
+        let range = period.dateRange(in: calendar)
+        var counts: [String: Int] = [:]
+        var days: [Date: Int] = [:]
+        var first: String?
+        var last: String?
+        var count = 0
+        var matched: Set<UUID> = []
+        do {
+            let db = try ReplayHistoryStore(url: mirror.url)
+            try db.enumerate(uid: mirror.uid, start: range.start, end: range.end) { _, track, stamp in
+                counts[track, default: 0] += 1
+                days[calendar.startOfDay(for: Date(timeIntervalSince1970: Double(stamp))), default: 0] += 1
+                if first == nil { first = track }
+                last = track
+                count += 1
+            }
+            matched = try db.linkedSessions(uid: mirror.uid, owner: account.outboxOwner, start: range.start, end: range.end)
+        } catch { return nil }
+        guard count > 0 else { return nil }
+        var seconds: [String: Double] = [:]
+        var metadata: [String: PlaybackEvent] = [:]
+        for event in local {
+            seconds[event.trackId, default: 0] += effectiveDuration(for: event)
+            metadata[event.trackId] = event
+        }
+        func entry(_ id: String, rank: Int) -> TopTrackEntry {
+            TopTrackEntry(rank: rank, trackId: id, title: catalogue[id]?.title ?? metadata[id]?.trackTitle ?? id,
+                artistName: catalogue[id]?.artist ?? metadata[id]?.artistName ?? "", albumTitle: catalogue[id]?.albumName ?? metadata[id]?.albumTitle,
+                totalSecondsListened: seconds[id] ?? 0, playCount: counts[id] ?? 0)
+        }
+        struct Group {
+            var title: String
+            var artist: String
+            var count = 0
+            var tracks = 0
+            var seconds = 0.0
+            mutating func add(_ plays: Int, _ duration: Double) { count += plays; tracks += 1; seconds += duration }
+        }
+        var albums: [String: Group] = [:]
+        var artists: [String: Group] = [:]
+        var genres: [String: Int] = [:]
+        let ordered = counts.keys.sorted { (counts[$0]! != counts[$1]!) ? counts[$0]! > counts[$1]! : $0 < $1 }
+        for id in ordered {
+            let track = entry(id, rank: 0)
+            if let album = catalogue[id]?.albumId ?? metadata[id]?.albumId {
+                albums[album, default: Group(title: track.albumTitle ?? album, artist: track.artistName)].add(track.playCount, track.totalSecondsListened)
+            }
+            if let artist = catalogue[id]?.artistId ?? metadata[id]?.artistId {
+                artists[artist, default: Group(title: track.artistName, artist: track.artistName)].add(track.playCount, track.totalSecondsListened)
+            }
+            if let genre = catalogue[id]?.genre ?? metadata[id]?.genre { genres[genre, default: 0] += track.playCount }
+        }
+        func ranked(_ groups: [String: Group]) -> [(key: String, value: Group)] {
+            groups.sorted { $0.value.count != $1.value.count ? $0.value.count > $1.value.count : $0.key < $1.key }
+        }
+        var day = calendar.startOfDay(for: min(Date(), range.end.addingTimeInterval(-1)))
+        var streak = 0
+        while days[day] != nil, let previous = calendar.date(byAdding: .day, value: -1, to: day) { streak += 1; day = previous }
+        return WrappedData(period: period, serverId: account.id.uuidString, generatedAt: Date(),
+            totalSecondsListened: seconds.values.reduce(0,+), totalTracksPlayed: count, totalUniqueTracks: counts.count,
+            totalUniqueArtists: artists.count, totalUniqueAlbums: albums.count,
+            topTracks: ordered.prefix(limit).enumerated().map { entry($1, rank: $0 + 1) },
+            topAlbums: ranked(albums).prefix(10).enumerated().map { i, g in
+                TopAlbumEntry(rank: i+1, albumId: g.key, title: g.value.title, artistName: g.value.artist,
+                    totalSecondsListened: g.value.seconds, playCount: g.value.count, uniqueTracks: g.value.tracks)
+            },
+            topArtists: ranked(artists).prefix(10).enumerated().map { i, g in
+                TopArtistEntry(rank: i+1, artistId: g.key, name: g.value.title, totalSecondsListened: g.value.seconds,
+                    playCount: g.value.count, uniqueTracks: g.value.tracks)
+            }, dominantGenre: genres.sorted { $0.value != $1.value ? $0.value > $1.value : $0.key < $1.key }.first?.key,
+            streakDays: streak, firstTrackOfPeriod: first.map { entry($0, rank: 0) }, lastTrackOfPeriod: last.map { entry($0, rank: 0) },
+            serverSyncedAt: mirror.lastSync, dailyPlays: days, unlinkedLocalListens: local.filter { !matched.contains($0.id) }.count)
+    }
 
     private func aggregate(
         events: [PlaybackEvent],

@@ -30,7 +30,11 @@ struct WrappedStatHero: View {
 
     private var heroContent: some View {
         VStack(alignment: .leading, spacing: 0) {
-            AnimatedHeroText(seconds: animatedSeconds)
+            if data.serverSyncedAt != nil && data.totalSecondsListened == 0 {
+                Text("Listening time unavailable").font(.title.bold()).foregroundStyle(.white)
+            } else {
+                AnimatedHeroText(seconds: animatedSeconds)
+            }
 
             Color.white.opacity(0.2)
                 .frame(maxWidth: .infinity)
@@ -54,7 +58,9 @@ struct WrappedStatHero: View {
     private var accessibilityDescription: String {
         let totalMinutes = Int(data.totalSecondsListened / 60)
         let durationText: String
-        if totalMinutes < 60 {
+        if data.serverSyncedAt != nil && data.totalSecondsListened == 0 {
+            durationText = String(localized: "Listening time unavailable")
+        } else if totalMinutes < 60 {
             durationText = "\(totalMinutes) \(totalMinutes == 1 ? "minute" : "minutes") listened"
         } else {
             let hours = totalMinutes / 60

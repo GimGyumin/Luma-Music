@@ -18,15 +18,38 @@ import UIKit
 extension PlayerService {
     // MARK: - Playback engine (AudioStreaming vs AVPlayer Spatial)
 
+    /// Keeps the streaming-cache lease in lockstep with the engine's current
+    /// source. This is deliberately actor-owned: cleanup re-checks the lease
+    /// immediately before unlinking a file.
+    func replaceCurrentSource(_ source: MediaSource?) async {
+        cacheLeaseGeneration &+= 1
+        let generation = cacheLeaseGeneration
+        let previous = currentSource
+        currentSource = source
+        if let previous, case .cached(let url, _) = previous {
+            await cacheService.releasePlayback(url: url)
+        }
+        guard generation == cacheLeaseGeneration else { return }
+        if let source, case .cached(let url, _) = source {
+            await cacheService.retainPlayback(url: url)
+            // A newer source won while the actor was awaiting; do not leak this lease.
+            if generation != cacheLeaseGeneration {
+                await cacheService.releasePlayback(url: url)
+            }
+        }
+    }
+
     func startEnginePlayback(
         url: URL,
         headers: [String: String],
         useSystemPlayer: Bool,
         reusingSystemPlayer: Bool = false,
         isLimitedNetwork: Bool = true,
-        initialVolume: Float? = nil
+        initialVolume: Float? = nil,
+        preferredSampleRate: Double? = nil
     ) {
         guard !transport.interrupted else { return }
+        telemetry.markEngineStarted()
         recordPlaybackDiagnostic(event: "engine_start", source: "startEnginePlayback",
             target: pendingRestoreInfo?.seekTime ?? 0)
         Logger.player.notice("[ENGINE-START] epoch=\(self.playbackEpoch) requestedNative=\(useSystemPlayer) reuseNative=\(reusingSystemPlayer) restore=\(self.pendingRestoreInfo?.seekTime ?? 0, format: .fixed(precision: 2))s")
@@ -44,6 +67,7 @@ extension PlayerService {
         let useAVPlayer = useSystemPlayer || currentSource?.supportsTranscodeOffset == true
         #endif
 
+        Logger.player.debug("[VISUALIZER] playback_engine=\(useAVPlayer ? "AVPlayer" : "AudioStreaming", privacy: .public) source_type=\(self.currentSource?.visualizationSourceType ?? "unknown", privacy: .public)")
         if useAVPlayer {
             engine.stop()
             if reusingSystemPlayer, systemPlayback.isActive {
@@ -54,11 +78,21 @@ extension PlayerService {
                 tearDownSystemPlayer()
             }
             systemPlayback.isActive = true
-            Task { @MainActor in PlaybackBeatMeter.shared.setEnabled(true) }
+            let nativeEngine = systemEngine
+            Task { @MainActor [nativeEngine] in
+                PlaybackBeatMeter.shared.setNativeSourceProvider(
+                    { [weak nativeEngine] in nativeEngine?.spectrumSource },
+                    analysisProvider: { [weak nativeEngine] in nativeEngine?.analysisSource },
+                    clockProvider: { [weak nativeEngine] in nativeEngine?.analysisClock })
+                PlaybackBeatMeter.shared.setEnabled(true)
+            }
 
             #if os(iOS)
             // Re-assert multichannel / Spatial Audio session before AVPlayer starts decoding.
-            configureAudioSessionIfNeeded(preferMultichannel: true)
+            // Lossless sources also request their native sample rate here; the route may
+            // clamp it to the connected hardware, but Luma never asks for a lower rate.
+            configureAudioSessionIfNeeded(preferMultichannel: true,
+                                          preferredSampleRate: preferredSampleRate)
             #endif
 
             pendingRestoreInfo = nil
@@ -82,23 +116,33 @@ extension PlayerService {
             // so this branch only exists on iOS.
             tearDownSystemPlayer()
             systemPlayback.isActive = false
+            configureAudioSessionIfNeeded(preferMultichannel: false,
+                                          preferredSampleRate: preferredSampleRate)
             engine.volume = initialVolume ?? restoredVolume
             if transcodeRequest != nil {
                 pendingRestoreInfo = restoreInfo?.pause == true ? (seekTime: 0, pause: true) : nil
             }
             engine.play(url: requestURL, headers: headers)
             if restoreInfo?.pause == true, transcodeRequest != nil { engine.pause() }
-            Task { @MainActor in PlaybackBeatMeter.shared.setEnabled(true) }
+            let streamingEngine = engine as? AudioStreamingPlayerEngine
+            Task { @MainActor [streamingEngine] in
+                PlaybackBeatMeter.shared.setNativeSourceProvider(nil,
+                    clockProvider: { [weak streamingEngine] in streamingEngine?.analysisClock })
+                PlaybackBeatMeter.shared.setEnabled(true)
+            }
             #endif
         }
         recordPlaybackDiagnostic(event: "engine_installed", source: "startEnginePlayback")
+        engineInstalledAt = Date()
+        startPlaybackTrace(reason: "engine_installed_native=\(useAVPlayer)")
     }
 
     func handleSystemEngineEvent(_ event: AVPlayerPlaybackEngine.Event, expectedContext: PlaybackContext? = nil) async {
         guard expectedContext == nil || expectedContext == playbackContext else { return }
         switch event {
         case .itemChanged(let generation): await handleSystemPlayerItemChanged(generation: generation)
-        case .ended(let generation, let itemID): await handleSystemPlayerDidReachEnd(generation: generation, itemID: itemID)
+        case .ended(let generation, let itemID, let itemTime):
+            await handleSystemPlayerDidReachEnd(generation: generation, itemID: itemID, itemTime: itemTime)
         case .failed(let generation, let itemID, let failure):
             guard systemEngine.observedItemID == itemID else { return }
             await handleSystemPlayerFailure(generation: generation, failure: failure)
@@ -125,11 +169,10 @@ extension PlayerService {
 
     func handleSystemPlayerItemChanged(generation: UInt64) async {
         guard generation == systemPlayback.generation, systemPlayback.isActive,
-              !hasPendingSelection, !isHandlingEndOfTrack, systemEngine.consumeQueuedTransition() else { return }
+              transport.permitsAudio, !hasPendingSelection, !isHandlingEndOfTrack, systemEngine.hasSelectedQueuedItem else { return }
         isHandlingEndOfTrack = true
         defer { isHandlingEndOfTrack = false }
         stopSystemPlayerProgressWatchdog()
-        gaplessBridge.wasSelected = true
         _ = await finalizeGaplessBridge(epoch: playbackEpoch)
         guard generation == systemPlayback.generation else { return }
         startSystemPlayerProgressWatchdog(generation: generation)
@@ -179,6 +222,9 @@ extension PlayerService {
                 attempted: systemPlayback.recoveredCurrentStall,
                 canRefresh: currentSource?.isLocal == false && currentSource?.isLiveStream == false) == .refreshSource
         else { return false }
+        let reconnect = telemetry.beginReconnect()
+        var reconnectResult = DiagnosticsResult.success
+        defer { reconnect?.finish(reconnectResult) }
         let seekRequest = seekRequestGeneration
         let snapshot = await MainActor.run { (state.currentTrack, state.position, serverService.state.activeServer?.id) }
         guard contextIsCurrent(context), seekRequest == seekRequestGeneration,
@@ -195,7 +241,9 @@ extension PlayerService {
             guard contextIsCurrent(context) else { return true }
             scheduleStallRecoveryCompletion(songID: song.id, epoch: context.epoch, position: position)
         } catch {
+            reconnectResult = .failure
             guard contextIsCurrent(context), seekRequest == seekRequestGeneration else { return true }
+            DiagnosticsCenter.shared.report(.streamRecovery)
             await finishPlaybackFailure(.playbackFailed(.classify(error)), context: context, position: position)
         }
         return true
@@ -204,6 +252,10 @@ extension PlayerService {
     /// Retry once after a sustained stall, retaining the current item while resolving its replacement.
     func recoverFromStalledStream() async {
         let epoch = playbackEpoch
+        if Self.playbackTraceEnabled {
+            let snapshot = await MainActor.run { (state.playbackState, state.position) }
+            print("[PB-STALL] recover request attempt=\(epoch) state=\(snapshot.0) uiPos=\(String(format: "%.2f", snapshot.1)) engine=\(engineProgress()) tc=\(systemEngine.timeControlStatus.rawValue) buffered=\(String(format: "%.1f", systemEngine.bufferedDuration))")
+        }
         let generation = systemPlayback.generation
         let command = transportCommandID
         let stalledProgress = engineProgress()
@@ -222,6 +274,9 @@ extension PlayerService {
               !systemPlayback.recoveredCurrentStall,
               context.4.hasPlaybackIntent,
               let song = context.0, let serverId = context.1 else { return }
+        let reconnect = telemetry.beginReconnect()
+        var reconnectResult = DiagnosticsResult.success
+        defer { reconnect?.finish(reconnectResult) }
         systemPlayback.recoveredCurrentStall = true
         if await recoverAcquiringPlaybackFromLocalMedia(
             song: song,
@@ -257,12 +312,14 @@ extension PlayerService {
                                            reason: "sustained playback stall")
             scheduleStallRecoveryCompletion(songID: song.id, epoch: epoch, position: stalledProgress)
         } catch {
+            reconnectResult = .failure
             guard epoch == playbackEpoch, command == transportCommandID,
                   generation == systemPlayback.generation, !Task.isCancelled else { return }
             let stillIntendsPlayback = await MainActor.run { state.playbackState.hasPlaybackIntent }
             guard epoch == playbackEpoch, command == transportCommandID, stillIntendsPlayback,
                   engineProgress() <= stalledProgress + 0.1 else { return }
             Logger.player.error("[STALL] source refresh failed: \(error, privacy: .public)")
+            DiagnosticsCenter.shared.report(.streamRecovery)
             await finishPlaybackFailure(.playbackFailed(.classify(error)), context: playbackContext, position: stalledProgress)
         }
     }
@@ -502,7 +559,7 @@ extension PlayerService {
             isTrackTransitionPending = false
             return
         }
-        currentSource = source
+        await replaceCurrentSource(source)
         finalizePlaySegment()
         pendingRestoreInfo = (useSystemPlayer || source.supportsTranscodeOffset)
             ? (seekTime: resumeAt, pause: false) : nil
@@ -533,7 +590,11 @@ extension PlayerService {
         startEnginePlayback(
             url: source.url,
             headers: source.customHeaders,
-            useSystemPlayer: useSystemPlayer
+            useSystemPlayer: useSystemPlayer,
+            preferredSampleRate: AudioQualityClassifier.nativePlaybackSampleRate(
+                for: source.playbackSong ?? song,
+                source: source
+            )
         )
         startProgressTimer()
     }
@@ -558,6 +619,12 @@ extension PlayerService {
         let snapshot = await MainActor.run { (state.currentTrack, serverService.state.activeServer?.id,
                                               state.playbackState.hasPlaybackIntent, state.position) }
         guard contextIsCurrent(context), snapshot.2, let song = snapshot.0, let server = snapshot.1 else { return false }
+        // The failed source still owns the playback lease, and the cache's removal guard
+        // refuses to touch a leased file. Detach it first; otherwise eviction is a no-op
+        // and the resolver hands the same unplayable payload straight back (the
+        // "invalid cached audio" loop).
+        await replaceCurrentSource(nil)
+        guard contextIsCurrent(context) else { return true }
         await cacheService.invalidate(songId: actualTrack?.id ?? song.id, serverId: server, matching: failedSource.url)
         guard contextIsCurrent(context) else { return true }
         guard !systemPlayback.recoveredCurrentStall else { return false }
@@ -724,12 +791,14 @@ extension PlayerService {
         }
     }
 
-    private func handleSystemPlayerDidReachEnd(generation: UInt64, itemID: ObjectIdentifier) async {
+    private func handleSystemPlayerDidReachEnd(generation: UInt64, itemID: ObjectIdentifier, itemTime: Double?) async {
+        let endedContext = playbackContext
         guard systemPlayback.isActive, generation == systemPlayback.generation,
               systemEngine.observedItemID == itemID else { return }
         if let target = seekState.target, !systemEngine.isSeeking, !systemEngine.lastSeekFailed {
             let end = await MainActor.run { (state.duration, state.playbackState.hasPlaybackIntent) }
-            guard generation == systemPlayback.generation, systemEngine.observedItemID == itemID else { return }
+            guard contextIsCurrent(endedContext), generation == systemPlayback.generation,
+                  systemEngine.observedItemID == itemID else { return }
             if end.1, end.0 > 0, target >= end.0 - 1 {
                 seekState = .idle
                 seekNeedsCommit = false
@@ -756,17 +825,32 @@ extension PlayerService {
             await handleSystemPlayerItemChanged(generation: generation)
             guard !isHandlingEndOfTrack, epoch == playbackEpoch else { return }
             // Preserve an explicit user pause; resume will retain the queued item.
-            let paused = await MainActor.run { state.playbackState == .paused }
-            guard !paused, generation == systemPlayback.generation, epoch == playbackEpoch else { return }
+            let next = await MainActor.run {
+                let index = state.currentIndex + 1
+                let id = state.repeatMode != .one && state.queue.indices.contains(index) ? state.queue[index].id : nil
+                return (paused: state.playbackState == .paused, id: id)
+            }
+            guard !next.paused, generation == systemPlayback.generation, contextIsCurrent(endedContext),
+                  !hasPendingSelection, !isHandlingEndOfTrack,
+                  systemEngine.observedItemID == itemID, transport.permitsAudio else { return }
+            if let id = next.id, gaplessBridge.next?.id == id, gaplessBridge.epoch == epoch,
+               let source = gaplessBridge.source,
+               systemEngine.advanceToPreparedNext(expectedURL: source.url) {
+                await handleSystemPlayerItemChanged(generation: generation)
+                return
+            }
             Logger.player.warning("[GAPLESS] native handoff did not complete — advancing through the regular queue")
-            cancelGaplessBridge()
+            // play() can reuse the resolved source even when the native item failed to advance.
+            systemEngine.cancelQueuedItem()
         }
         let liveStation = await MainActor.run { state.currentRadio?.name }
-        guard systemPlayback.isActive, generation == systemPlayback.generation else { return }
+        guard systemPlayback.isActive, generation == systemPlayback.generation,
+              contextIsCurrent(endedContext), systemEngine.observedItemID == itemID else { return }
         if let liveStation {
             await handleLiveStreamFailure(stationName: liveStation, error: nil)
         } else {
-            await handleEndOfTrack(engineConfirmed: true)
+            let finished = itemTime.flatMap { $0.isFinite && $0 >= 0 ? streamTimeOffset + $0 : nil }
+            await handleEndOfTrack(engineConfirmed: true, expectedContext: endedContext, finishedProgress: finished)
         }
     }
 
@@ -777,6 +861,9 @@ extension PlayerService {
 
         switch status {
         case .playing:
+            if Self.playbackTraceEnabled {
+                print("[PB-TRACE] avplayer playing t=\(Int(Date().timeIntervalSince1970)) buffered=\(String(format: "%.1f", systemEngine.bufferedDuration)) progress=\(String(format: "%.2f", engineProgress()))")
+            }
             let limited = await MainActor.run { serverService.state.isLimitedNetwork }
             guard generation == systemPlayback.generation, !isTrackTransitionPending,
                   systemEngine.timeControlStatus == .playing else { return }
@@ -798,12 +885,13 @@ extension PlayerService {
                 state.isSeekable = seekable
             }
         case .waitingToPlayAtSpecifiedRate:
+            if Self.playbackTraceEnabled {
+                print("[PB-TRACE] avplayer waiting t=\(Int(Date().timeIntervalSince1970)) buffered=\(String(format: "%.1f", systemEngine.bufferedDuration)) likely=\(systemEngine.isLikelyToKeepUp) progress=\(String(format: "%.2f", engineProgress()))")
+            }
             cancelPendingCacheDownload()
             cancelPendingPrefetch()
-            if engineProgress() > 0.25 {
-                cancelGaplessBridge()
-                nextGaplessPreparationAttempt = Date().addingTimeInterval(5)
-            }
+            // A waiting notification can precede both EOF and the current-item change.
+            // Keep AVQueuePlayer's prepared item. Sustained stall recovery owns teardown.
             // Throttled diagnostics: "no audio at all" from the AVPlayer path is almost always this
             // state, and the buffered amount tells us whether the incoming stream is simply faster than
             // the link (a hi-res lossless original on a slower connection).
@@ -860,6 +948,14 @@ extension PlayerService {
             return true
         }
         guard confirmed, context == playbackContext, transport.permitsAudio else { return }
+        if Self.playbackTraceEnabled {
+            let requestElapsed = playbackRequestStartedAt.map { Date().timeIntervalSince($0) } ?? -1
+            let engineElapsed = engineInstalledAt.map { Date().timeIntervalSince($0) } ?? -1
+            print("[PB-TRACE] first-audio epoch=\(playbackEpoch) requestToAudio=\(String(format: "%.2f", requestElapsed))s engineToAudio=\(String(format: "%.2f", engineElapsed))s native=\(systemPlayback.isActive) position=\(String(format: "%.2f", engineProgress()))")
+        }
+        telemetry.markConfirmed()
+        DiagnosticsCenter.shared.updateContext(.playbackMode,
+            value: systemPlayback.isActive ? .native : .audioStreaming)
         RuntimeDiagnostics.mark(.playbackReady)
         Logger.player.notice("[PLAYBACK] run=\(RuntimeDiagnostics.sessionID, privacy: .public) event=confirmed epoch=\(self.playbackEpoch, privacy: .public) engine=\(self.systemPlayback.isActive ? "AVPlayer" : "AudioStreaming", privacy: .public) position_s=\(self.engineProgress(), format: .fixed(precision: 2), privacy: .public)")
         // Buffer acquisition is not audible time: start the ramp only after confirmation.

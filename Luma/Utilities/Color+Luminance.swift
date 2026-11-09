@@ -11,6 +11,38 @@ import AppKit
 #endif
 
 extension Color {
+    /// Mixes two colours in device RGB. Used by the player's translucent
+    /// controls so their tracks pick up the current artwork's atmosphere
+    /// instead of reading as a neutral gray.
+    func blended(with other: Color, amount: Double) -> Color {
+        let t = max(0, min(1, amount))
+        #if canImport(UIKit)
+        let first = UIColor(self)
+        let second = UIColor(other)
+        var r1: CGFloat = 0, g1: CGFloat = 0, b1: CGFloat = 0, a1: CGFloat = 0
+        var r2: CGFloat = 0, g2: CGFloat = 0, b2: CGFloat = 0, a2: CGFloat = 0
+        guard first.getRed(&r1, green: &g1, blue: &b1, alpha: &a1),
+              second.getRed(&r2, green: &g2, blue: &b2, alpha: &a2) else { return self }
+        return Color(uiColor: UIColor(
+            red: r1 + (r2 - r1) * CGFloat(t),
+            green: g1 + (g2 - g1) * CGFloat(t),
+            blue: b1 + (b2 - b1) * CGFloat(t),
+            alpha: a1 + (a2 - a1) * CGFloat(t)
+        ))
+        #elseif canImport(AppKit)
+        guard let first = NSColor(self).usingColorSpace(.deviceRGB),
+              let second = NSColor(other).usingColorSpace(.deviceRGB) else { return self }
+        return Color(nsColor: NSColor(
+            red: first.redComponent + (second.redComponent - first.redComponent) * CGFloat(t),
+            green: first.greenComponent + (second.greenComponent - first.greenComponent) * CGFloat(t),
+            blue: first.blueComponent + (second.blueComponent - first.blueComponent) * CGFloat(t),
+            alpha: first.alphaComponent + (second.alphaComponent - first.alphaComponent) * CGFloat(t)
+        ))
+        #else
+        return self
+        #endif
+    }
+
     /// Perceived luminance using ITU-R BT.601 coefficients.
     /// Values > 0.6 indicate a light background that needs dark content.
     ///

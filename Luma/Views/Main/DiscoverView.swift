@@ -57,7 +57,8 @@ struct DiscoverView: View {
         .navigationTitle(String(localized: "Discover", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale))
         .lumaAccountProfileToolbar(isVisible: !isHeaderScrolled)
         .lumaScrollingRootHeader(isScrolled: $isHeaderScrolled)
-        .task(id: container?.serverState.activeServer?.id) {
+        .task(id: container?.serverState.activeServer?.localReplayID) {
+            replaySummary = nil
             guard let container else { return }
             let serverId = container.serverState.activeServer?.id.uuidString
             if vm == nil || loadedServerID != serverId {
@@ -217,11 +218,14 @@ struct DiscoverView: View {
         isLoadingReplaySummary = true
         defer { isLoadingReplaySummary = false }
         let period = WrappedPeriod.currentMonth()
-        replaySummary = await container.statsService.wrappedData(
+        let profile = container.serverState.activeServer?.localReplayID
+        let result = await container.statsService.wrappedData(
             for: period,
             serverId: serverId,
             calendar: .current
         )
+        guard !Task.isCancelled, container.serverState.activeServer?.localReplayID == profile else { return }
+        replaySummary = result
     }
 
     private var internetRadioSection: some View {

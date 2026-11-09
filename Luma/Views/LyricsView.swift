@@ -28,9 +28,6 @@ struct LyricsView: View {
     /// Height of player chrome drawn over the bottom of this view (scrubber / transport).
     /// Applied as scroll content margins so auto-scroll anchors above the obscured region.
     var bottomChromeInset: CGFloat = 0
-    /// Fade only the scrolling lyrics; the shared backdrop and overlaid buttons stay clear.
-    var fadesTopEdge = true
-    var fadesBottomEdge = true
     /// Reveals the full-player transport while the user taps or browses the lyrics.
     var onInteraction: (() -> Void)? = nil
     /// When chrome is hidden, the first tap only reveals it. It must not also seek
@@ -52,12 +49,22 @@ struct LyricsView: View {
     @State private var translationSourceLanguageCode: String?
     /// Bumped whenever the Apple session must die; in-flight work checks this before touching `session`.
     @State private var translationEpoch: Int = 0
-    @State private var explicitlyScrolledSeekIndex: Int?
+    @State private var lastScrollLayout: LyricLayoutConfiguration?
     @State private var lastAutoScrolledIndex: Int?
     @State private var viewportHeight: CGFloat = 0
     @State private var rowHeights: [Int: CGFloat] = [:]
+    @State private var visibleReadingRows: Set<Int> = []
     @State private var lastAMLLSeekRevision = 0
     @State private var lineCascade = LyricLineCascade()
+    @State private var lyricsEnterTrace: PerformanceTrace?
+    @State private var lyricsFirstRenderTrace: PerformanceTrace?
+    /// Slow lyrics browsing must not summon the player chrome. A deliberate
+    /// scroll (points/second) above this threshold reveals it once. Raised from
+    /// 420 so ordinary reading-speed drags stay calm; only a clear flick reveals.
+    private nonisolated static let chromeRevealVelocity: CGFloat = 650
+    /// Per-scroll velocity sampling lives in a reference box: mutating it must
+    /// not invalidate this view's body at scroll cadence.
+    @State private var scrollRevealTracker = LyricsScrollRevealTracker()
 
     private var lineFrameAlignment: Alignment {
         lineAlignment == .center ? .center : .leading
@@ -107,7 +114,7 @@ struct LyricsView: View {
     private var allowsLineCascade: Bool {
         !reduceMotion && !viewModel.isUserScrolling && viewModel.isPlaying
             && viewModel.isShown && scenePhase == .active
-            && governor.budget.allowsDecorativeMotion
+            && governor.budget.allowsLyricScrollMotion
     }
 
     /// Fixed spacing — never derived from viewport height (that feedback loop cooked the main thread).
@@ -143,6 +150,13 @@ struct LyricsView: View {
         let rowHeight = index.flatMap { rowHeights[$0] } ?? primaryFontSize * 2.4
         return UnitPoint(x: 0.5, y: LyricScrollGeometry.anchor(
             viewportHeight: viewportHeight, bottomInset: bottomChromeInset, rowHeight: rowHeight, preferredTop: phoneLandscape ? 40 : 64))
+    }
+
+    private var scrollLayout: LyricLayoutConfiguration {
+        LyricLayoutConfiguration(viewportHeight: viewportHeight, bottomInset: bottomChromeInset,
+            rowHeight: viewModel.scrollLineIndex.flatMap { rowHeights[$0] },
+            translations: viewModel.areTranslationsVisible, pronunciations: viewModel.arePronunciationsVisible,
+            primary: largerLyricsText)
     }
 
     private var sourceLanguageCode: String {
@@ -209,6 +223,7 @@ struct LyricsView: View {
                                 usesSpeakerLayout: viewModel.usesSpeakerLayout,
                                 horizontalInset: phoneLandscape ? 0 : (density == .compact ? 32 : 16),
                                 onTap: {
+                                    HapticFeedback.lyricTap.trigger()
                                     if consumesLineTapToRevealChrome {
                                         onInteraction?()
                                     } else {
@@ -220,10 +235,14 @@ struct LyricsView: View {
                                 geometry.size.height.rounded(.up)
                             } action: { height in
                                 guard rowHeights[index] != height else { return }
-                                let previouslyMeasured = rowHeights[index] != nil
                                 rowHeights[index] = height
-                                if viewModel.scrollLineIndex == index {
-                                    scrollToCurrentLine(proxy: proxy, index: index, reposition: previouslyMeasured)
+                            }
+                            .onScrollVisibilityChange(threshold: 0.01) { visible in
+                                if visible { visibleReadingRows.insert(index) }
+                                else { visibleReadingRows.remove(index) }
+                                if presentationIsVisible != false, !viewModel.followsPlayback, viewModel.followState.isBrowsing,
+                                   let first = visibleReadingRows.min() {
+                                    viewModel.unsyncedScrollIndex = first
                                 }
                             }
                             .modifier(LyricLineCascadeModifier(motion: lineCascade, row: index,
@@ -274,83 +293,66 @@ struct LyricsView: View {
                 geometry.size.height.rounded(.up)
             } action: { height in
                 viewportHeight = height
-                scrollToCurrentLine(proxy: proxy, index: viewModel.scrollLineIndex, reposition: true)
             }
             .lumaHideScrollEdgeEffects()
             .contentMargins(.bottom, bottomChromeInset, for: .scrollContent)
             .contentMargins(.bottom, bottomChromeInset, for: .scrollIndicators)
-            .lumaContentEdgeFade(top: fadesTopEdge ? 52 : 0, bottom: fadesBottomEdge ? (phoneLandscape ? 120 : 88) : 0)
+            .lumaContentEdgeFade(top: 52, bottom: phoneLandscape ? 120 : 88)
             .onScrollPhaseChange { _, phase in
-                if phase == .interacting || phase == .tracking {
+                if phase == .interacting {
                     lineCascade = LyricLineCascade()
+                    scrollRevealTracker.reset()
                     viewModel.userStartedScrolling()
-                    onInteraction?()
+                    // While chrome is visible, any scroll resets the 5-second idle
+                    // timer. While it is hidden, only a deliberate scroll should
+                    // reveal it; the velocity check below owns that decision.
+                    if !consumesLineTapToRevealChrome {
+                        onInteraction?()
+                    }
                 } else if phase == .idle {
                     viewModel.userStoppedScrolling()
+                    scrollRevealTracker.reset()
+                }
+            }
+            .onScrollGeometryChange(for: CGFloat.self) { geometry in
+                geometry.contentOffset.y
+            } action: { _, offset in
+                // Track velocity only while hidden chrome could be revealed.
+                // Writing a `@State` sample on every scroll tick invalidated
+                // this whole view at scroll cadence even though the value was
+                // never read by the body.
+                guard consumesLineTapToRevealChrome, viewModel.isUserScrolling else {
+                    scrollRevealTracker.reset()
+                    return
+                }
+                if scrollRevealTracker.observe(offset: offset, now: CACurrentMediaTime()) {
+                    onInteraction?()
                 }
             }
             .simultaneousGesture(
                 TapGesture().onEnded { onInteraction?() }
             )
-            .onChange(
-                of: viewModel.scrollLineIndex
-            ) { _, newIndex in
-                if let explicit = explicitlyScrolledSeekIndex {
-                    if newIndex == explicit { return }
-                    explicitlyScrolledSeekIndex = nil
-                }
-                // A tapped line has one explicit scroll token. Do not launch a second
-                // competing animation from its synchronous highlight update.
-                guard viewModel.pendingSeekScrollIndex == nil else { return }
-                scrollToCurrentLine(proxy: proxy, index: newIndex)
+            .onChange(of: scrollRequest, initial: true) { _, request in
+                guard let request else { return }
+                follow(request, proxy: proxy)
             }
-            .onChange(of: bottomChromeInset) { _, _ in
-                guard viewModel.pendingSeekScrollIndex == nil,
-                      explicitlyScrolledSeekIndex == nil || explicitlyScrolledSeekIndex != viewModel.scrollLineIndex else { return }
-                if viewModel.hasInstrumentalGap {
-                    scrollToInstrumentalGap(proxy: proxy)
-                } else {
-                    scrollToCurrentLine(proxy: proxy, index: viewModel.scrollLineIndex, reposition: true)
-                }
-            }
-            .task(id: LyricLayoutConfiguration(translations: viewModel.areTranslationsVisible,
-                pronunciations: viewModel.arePronunciationsVisible, primary: largerLyricsText)) {
-                // Let the new text blocks participate in layout before anchoring.
+            .task(id: presentationIsVisible) {
+                guard presentationIsVisible != false else { return }
+                // The retained ScrollView can discard its offset while hidden. Restore
+                // after the presentation layout has materialized even if the line is unchanged.
                 await Task.yield()
-                guard !Task.isCancelled, !viewModel.isUserScrolling else { return }
-                scrollToCurrentLine(proxy: proxy, index: viewModel.scrollLineIndex, reposition: true)
+                guard !Task.isCancelled else { return }
+                restorePresentation(proxy: proxy)
+                do { try await Task.sleep(for: .milliseconds(180)) } catch { return }
+                guard !Task.isCancelled else { return }
+                restorePresentation(proxy: proxy)
             }
-            .task(id: "\(viewModel.hasInstrumentalGap):\(viewModel.instrumentalGapAfterIndex ?? -1)") {
-                guard viewModel.hasInstrumentalGap else { return }
-                // Let the newly inserted indicator finish layout before resolving its ID.
-                await Task.yield()
-                guard !Task.isCancelled, viewModel.hasInstrumentalGap else { return }
-                scrollToInstrumentalGap(proxy: proxy)
-            }
-            .onChange(of: viewModel.scrollRestoreToken) { _, _ in
-                guard viewModel.followState.allowsAutomaticScroll else { return }
-                lineCascade = LyricLineCascade()
-                if viewModel.hasInstrumentalGap {
-                    withAnimation(reduceMotion ? nil : LumaAnimation.lyricScroll) {
-                        proxy.scrollTo("instrumental-gap", anchor: currentLineScrollAnchor)
-                    }
-                } else if let tappedIndex = viewModel.pendingSeekScrollIndex {
-                    explicitlyScrolledSeekIndex = tappedIndex
-                    viewModel.pendingSeekScrollIndex = nil
-                    scroll(to: tappedIndex, proxy: proxy, seeking: true)
-                } else {
-                    if viewModel.followState == .reacquiringFollow, let index = viewModel.scrollLineIndex {
-                        // Browsing is a viewport operation, not an audio seek. Return
-                        // smoothly even if the same long line is still playing.
-                        lastAutoScrolledIndex = index
-                        withAnimation(reduceMotion ? nil : .smooth(duration: 0.55)) {
-                            proxy.scrollTo(index, anchor: scrollAnchor(for: index))
-                        }
-                        if reduceMotion { viewModel.followState = .followingPlayback }
-                    } else {
-                        forceScrollToCurrentLine(proxy: proxy, index: viewModel.scrollLineIndex)
-                    }
-                }
+            .task(id: scrollLayout) {
+                // Chrome animates the viewport through intermediate heights. Correct
+                // the anchor once layout settles, unless a newer scroll already used it.
+                do { try await Task.sleep(for: .milliseconds(180)) } catch { return }
+                guard let request = scrollRequest, lastScrollLayout != scrollLayout else { return }
+                follow(request, proxy: proxy, correctingLayout: true)
             }
             .onChange(of: viewModel.playerState.pendingSeekPosition) { _, target in
                 if let target {
@@ -358,9 +360,6 @@ struct LyricsView: View {
                 } else if !viewModel.isPlaying {
                     viewModel.synchronizeSeekClock(to: viewModel.playerState.position)
                 }
-            }
-            .onChange(of: viewModel.amllSeekRevision) { _, _ in
-                lineCascade = LyricLineCascade()
             }
             .task(id: viewModel.followState) {
                 guard viewModel.followState == .reacquiringFollow else { return }
@@ -371,6 +370,23 @@ struct LyricsView: View {
                 if viewModel.followState == .reacquiringFollow { viewModel.followState = .followingPlayback }
             }
         }
+    }
+
+    /// Pure threshold used by the scroll-reveal gesture. Kept separate so the
+    /// slow-browse / deliberate-scroll behavior can be regression-tested without
+    /// a live scroll view.
+    nonisolated static func shouldRevealChrome(
+        offsetDelta: CGFloat,
+        elapsed: CFTimeInterval,
+        threshold: CGFloat = chromeRevealVelocity
+    ) -> Bool {
+        let seconds = max(elapsed, 1.0 / 240.0)
+        return abs(offsetDelta) / seconds >= threshold
+    }
+
+    private var lyricsAreLoaded: Bool {
+        if case .loaded = viewModel.state { return true }
+        return false
     }
 
     private var stateContent: some View {
@@ -401,8 +417,10 @@ struct LyricsView: View {
                 )
             case .loaded:
                 loadedContent
+                    .transition(.opacity)
             }
         }
+        .lumaContentReveal(isReady: lyricsAreLoaded)
     }
 
     var body: some View {
@@ -444,8 +462,26 @@ struct LyricsView: View {
             }
         }
         .onAppear {
+            if presentationIsVisible != false { HapticFeedback.prepareLyricTap() }
             viewModel.setScenePhase(scenePhase)
             viewModel.setVisible(presentationIsVisible ?? true, owner: visibilityOwner)
+            if lyricsEnterTrace == nil {
+                let enter = DiagnosticsCenter.shared.begin(.lyricsScreenEnter)
+                let firstRender = DiagnosticsCenter.shared.begin(.lyricsFirstRender)
+                lyricsEnterTrace = enter
+                lyricsFirstRenderTrace = firstRender
+                if viewModel.displayRows.isEmpty {
+                    Task { @MainActor in
+                        await Task.yield()
+                        guard !viewModel.displayRows.isEmpty else { return }
+                        firstRender.finish(.success)
+                        enter.finish(.success)
+                    }
+                } else {
+                    firstRender.finish(.success)
+                    enter.finish(.success)
+                }
+            }
             if settings.provider == .apple,
                AppleIntelligenceLyricsTranslator.normalizedPrompt(viewModel.effectiveAppleIntelligencePrompt).isEmpty,
                viewModel.isTranslating,
@@ -454,7 +490,29 @@ struct LyricsView: View {
                 Task { await triggerAppleTranslation(requestID: requestID) }
             }
         }
+        .onChange(of: viewModel.displayRows.count) { _, count in
+            guard count > 0 else { return }
+            lyricsFirstRenderTrace?.finish(.success)
+            lyricsEnterTrace?.finish(.success)
+            lyricsFirstRenderTrace = nil
+            lyricsEnterTrace = nil
+        }
+        .onChange(of: viewModel.state) { _, state in
+            switch state {
+            case .empty, .unsupported, .error:
+                lyricsFirstRenderTrace?.finish(.failure)
+                lyricsEnterTrace?.finish(.failure)
+                lyricsFirstRenderTrace = nil
+                lyricsEnterTrace = nil
+            default:
+                break
+            }
+        }
         .onDisappear {
+            lyricsFirstRenderTrace?.finish(.cancelled)
+            lyricsEnterTrace?.finish(.cancelled)
+            lyricsFirstRenderTrace = nil
+            lyricsEnterTrace = nil
             tearDownAppleTranslationSession()
             viewModel.setVisible(false, owner: visibilityOwner)
         }
@@ -465,6 +523,7 @@ struct LyricsView: View {
             tearDownAppleTranslationSession()
         }
         .onChange(of: presentationIsVisible) { _, visible in
+            if visible == true { HapticFeedback.prepareLyricTap() }
             if visible == false {
                 tearDownAppleTranslationSession()
             }
@@ -609,42 +668,53 @@ struct LyricsView: View {
         translationConfiguration = nil
     }
 
-    private func scrollToCurrentLine(proxy: ScrollViewProxy, index: Int?, reposition: Bool = false) {
-        guard
-            viewModel.followsPlayback,
-            !viewModel.hasInstrumentalGap,
-            let index,
-            viewModel.autoScrollEnabled
-        else {
-            return
+    private var scrollRequest: LyricFollowRequest? {
+        guard presentationIsVisible != false, viewModel.followsPlayback,
+              viewModel.followState.allowsAutomaticScroll,
+              viewModel.autoScrollEnabled || viewModel.pendingSeekScrollIndex != nil else { return nil }
+        let target: LyricFollowRequest.Target
+        if viewModel.hasInstrumentalGap {
+            target = .gap(after: viewModel.instrumentalGapAfterIndex)
+        } else {
+            target = .line(viewModel.scrollLineIndex)
         }
-        guard viewModel.followState.allowsAutomaticScroll else { return }
-        scroll(to: index, proxy: proxy,
-               seeking: viewModel.playerState.pendingSeekPosition != nil || viewModel.justSeeked,
-               reposition: reposition)
+        return LyricFollowRequest(target: target, restoreToken: viewModel.scrollRestoreToken)
     }
 
-    private func forceScrollToCurrentLine(proxy: ScrollViewProxy, index: Int?) {
-        guard
-            viewModel.followsPlayback,
-            !viewModel.hasInstrumentalGap,
-            let index,
-            viewModel.autoScrollEnabled
-        else {
-            return
+    private func restorePresentation(proxy: ScrollViewProxy) {
+        if let request = scrollRequest {
+            follow(request, proxy: proxy, correctingLayout: true)
+        } else if !viewModel.followsPlayback, let index = viewModel.unsyncedScrollIndex,
+                  viewModel.displayRows.indices.contains(index) {
+            proxy.scrollTo(index, anchor: .top)
         }
-
-        scroll(to: index, proxy: proxy, seeking: true)
     }
 
-    private func scroll(to index: Int, proxy: ScrollViewProxy, seeking: Bool, reposition: Bool = false) {
-        let previous = lastAutoScrolledIndex
-        guard seeking || reposition || previous != index else { return }
-        lastAutoScrolledIndex = index
-        let isSeek = seeking || lastAMLLSeekRevision != viewModel.amllSeekRevision
-        lastAMLLSeekRevision = viewModel.amllSeekRevision
-        let animate = LyricScrollTiming.duration(previous: previous, target: index,
-            seeking: isSeek, reduceMotion: reduceMotion) != nil
+    private func follow(_ request: LyricFollowRequest, proxy: ScrollViewProxy, correctingLayout: Bool = false) {
+        let returningFromGap = lastScrollLayout != nil && lastAutoScrolledIndex == nil
+        lastScrollLayout = scrollLayout
+        let tapped = viewModel.pendingSeekScrollIndex
+        if tapped != nil { viewModel.pendingSeekScrollIndex = nil }
+        switch tapped.map({ LyricFollowRequest.Target.line($0) }) ?? request.target {
+        case .gap:
+            lastAutoScrolledIndex = nil
+            lineCascade = LyricLineCascade()
+            withAnimation(reduceMotion ? nil : LumaAnimation.lyricScroll) {
+                proxy.scrollTo("instrumental-gap", anchor: currentLineScrollAnchor)
+            }
+        case .line(nil):
+            return
+        case .line(let index?):
+            let previous = lastAutoScrolledIndex
+            lastAutoScrolledIndex = index
+            let seeking = tapped != nil || returningFromGap || viewModel.followState == .reacquiringFollow
+                || viewModel.playerState.pendingSeekPosition != nil || lastAMLLSeekRevision != viewModel.amllSeekRevision
+            lastAMLLSeekRevision = viewModel.amllSeekRevision
+            scroll(to: index, from: previous, proxy: proxy, seeking: seeking, correctingLayout: correctingLayout)
+        }
+    }
+
+    private func scroll(to index: Int, from previous: Int?, proxy: ScrollViewProxy, seeking: Bool, correctingLayout: Bool) {
         let interval: Double? = index > 0 && viewModel.displayRows.indices.contains(index)
             ? viewModel.displayRows[index].startMs.flatMap { start in
                 viewModel.displayRows[index - 1].startMs.map { Double(start - $0) }
@@ -653,39 +723,20 @@ struct LyricsView: View {
             heights: rowHeights, spacing: lineStackSpacing, viewportHeight: viewportHeight)
         let distance = previous.flatMap { rowHeights[$0].map { $0 + lineStackSpacing } }
         let nativeSpring = LyricScrollConfiguration.spring(intervalMs: interval, distance: distance)
-        let animation: Animation? = animate
-            ? .interpolatingSpring(nativeSpring) : nil
-        if animate, !reposition, allowsLineCascade, density == .compact,
-           !viewModel.usesSpeakerLayout,
-           let travel {
+        let style = LyricScrollTiming.style(previous: previous, target: index,
+            seeking: seeking || correctingLayout, reduceMotion: reduceMotion)
+        let animation: Animation?
+        switch style {
+        case .stationary: animation = nil
+        case .glide: animation = .smooth(duration: 0.46)
+        case .spring: animation = .interpolatingSpring(nativeSpring)
+        }
+        if style == .spring, allowsLineCascade, density == .compact, !viewModel.usesSpeakerLayout, let travel {
             lineCascade.retarget(to: index, travel: travel, spring: nativeSpring, now: CACurrentMediaTime())
         } else {
             lineCascade = LyricLineCascade()
         }
-        // scrollTo measures the real row, including wrapped lines and translation.
-        // An absent animation jumps directly; it never sweeps across a distant verse.
-        var transaction = Transaction(animation: animation)
-        transaction.disablesAnimations = animation == nil
-        withTransaction(transaction) { proxy.scrollTo(index, anchor: scrollAnchor(for: index)) }
-    }
-
-    private func scrollToInstrumentalGap(proxy: ScrollViewProxy) {
-        guard
-            viewModel.followsPlayback,
-            !viewModel.isUserScrolling,
-            viewModel.autoScrollEnabled
-        else {
-            return
-        }
-
-        if reduceMotion {
-            proxy.scrollTo("instrumental-gap", anchor: currentLineScrollAnchor)
-        } else {
-            let spring = AMLLSpringPolicy.position(seeking: false, interlude: true, intervalMs: nil)
-            withAnimation(.interpolatingSpring(mass: 1, stiffness: spring.stiffness, damping: spring.damping)) {
-                proxy.scrollTo("instrumental-gap", anchor: currentLineScrollAnchor)
-            }
-        }
+        withAnimation(animation) { proxy.scrollTo(index, anchor: scrollAnchor(for: index)) }
     }
 
     @MainActor
@@ -776,16 +827,61 @@ struct LyricsView: View {
 
 }
 
+/// Samples scroll offset/time without touching SwiftUI state. The view keeps
+/// one instance alive via `@State`; mutations stay out of the invalidation graph.
+@MainActor
+final class LyricsScrollRevealTracker {
+    private var lastOffset: CGFloat?
+    private var lastSampleTime: CFTimeInterval = 0
+
+    func reset() {
+        lastOffset = nil
+        lastSampleTime = 0
+    }
+
+    /// Returns true when the current sample crosses the deliberate-scroll
+    /// threshold. The sample is recorded even when it does not reveal chrome.
+    func observe(offset: CGFloat, now: CFTimeInterval) -> Bool {
+        defer {
+            lastOffset = offset
+            lastSampleTime = now
+        }
+        guard let previousOffset = lastOffset, lastSampleTime > 0 else {
+            return false
+        }
+        return LyricsView.shouldRevealChrome(
+            offsetDelta: offset - previousOffset,
+            elapsed: now - lastSampleTime
+        )
+    }
+}
+
+private struct LyricFollowRequest: Equatable {
+    enum Target: Equatable {
+        case line(Int?)
+        case gap(after: Int?)
+    }
+    let target: Target
+    let restoreToken: Int
+}
+
 private struct LyricLayoutConfiguration: Equatable {
+    let viewportHeight: CGFloat
+    let bottomInset: CGFloat
+    let rowHeight: CGFloat?
     let translations: Bool
     let pronunciations: Bool
     let primary: String
 }
 
 nonisolated enum LyricScrollTiming {
-    static func duration(previous: Int?, target: Int, seeking: Bool, reduceMotion: Bool) -> Double? {
-        guard !reduceMotion, !seeking, let previous, abs(target - previous) <= 3 else { return nil }
-        return 0.46
+    enum Style { case stationary, glide, spring }
+
+    static func style(previous: Int?, target: Int, seeking: Bool, reduceMotion: Bool) -> Style {
+        if reduceMotion { return .stationary }
+        if seeking { return .glide }
+        guard let previous else { return .stationary }
+        return abs(target - previous) <= 3 ? .spring : .glide
     }
 }
 

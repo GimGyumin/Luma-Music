@@ -26,11 +26,21 @@ extension AlbumDetailContentView {
                 albumHeaderInformation(vm: vm, songs: songs, includesTitle: false)
                     .padding(.bottom, LumaSpacing.xxl)
             }
-            .id(albumCoverId)
+            // Page identity, plus the explicit cover-upload revision. Never the
+            // resolved cover ID: that changes when album info loads and would rebuild
+            // the hero while a navigation transition is in flight.
+            .id("\(albumId):\(coverArtUploadVersion)")
         } else if artworkStyle == .uniform {
             VStack(spacing: 0) {
                 SeamlessArtworkHero(coverArtId: albumCoverId, initialImage: effectiveInitialImage,
                                     background: atmosphere.pageColor)
+                    .overlay(alignment: .bottom) {
+                        if atmosphere.pageColor != contentBackgroundColor {
+                            LinearGradient(colors: [atmosphere.pageColor.opacity(0), atmosphere.pageColor],
+                                           startPoint: .top, endPoint: .bottom)
+                                .frame(height: heroHeight * 0.14).allowsHitTesting(false)
+                        }
+                    }
                 albumHeaderInformation(vm: vm, songs: songs)
                     .padding(.top, LumaSpacing.s)
                     .padding(.bottom, LumaSpacing.xxl)
@@ -82,6 +92,7 @@ extension AlbumDetailContentView {
         includesTitle: Bool = true
     ) -> some View {
         let textAlign: TextAlignment = alignment == .leading ? .leading : .center
+        let artist = vm?.artistName ?? initialArtist
         VStack(alignment: alignment, spacing: 0) {
             if includesTitle {
                 Text(albumDisplayName)
@@ -92,38 +103,47 @@ extension AlbumDetailContentView {
                     .frame(maxWidth: .infinity, alignment: alignment == .leading ? .leading : .center)
                     .lineSpacing(1)
                     .padding(.bottom, LumaSpacing.xs)
+                    .contentTransition(.opacity)
             }
-            if vm == nil {
-                SkeletonBlock(width: 140, height: 18, cornerRadius: 4)
-                    .padding(.bottom, LumaSpacing.s)
-            } else if let artist = vm?.artistName {
-                if let artistId = vm?.artistId, vm?.isOffline != true {
-                    // A unique push (see `HomeDestination.artistPush`): an id-only `artistById` value that
-                    // matches an artist already in the path makes NavigationStack reuse that entry — the
-                    // album would be dropped from the stack and the back button would stop responding.
-                    DetailNavigationLink(destination: HomeDestination.artistPush(
-                        id: artistId,
-                        name: artist,
-                        coverArtId: nil,
-                        token: artistRouteToken
-                    )) {
+            if let artist, !artist.isEmpty {
+                Group {
+                    if let artistId = vm?.artistId, vm?.isOffline != true {
+                        // A unique push (see `HomeDestination.artistPush`): an id-only `artistById` value that
+                        // matches an artist already in the path makes NavigationStack reuse that entry — the
+                        // album would be dropped from the stack and the back button would stop responding.
+                        DetailNavigationLink(destination: HomeDestination.artistPush(
+                            id: artistId,
+                            name: artist,
+                            coverArtId: nil,
+                            token: artistRouteToken
+                        )) {
+                            Text(artist)
+                                .font(.lumaAlbumArtist)
+                                .foregroundStyle(heroTitleInk)
+                                .lineLimit(1)
+                                .contentTransition(.opacity)
+                        }
+                        .buttonStyle(.plain)
+                    } else {
                         Text(artist)
                             .font(.lumaAlbumArtist)
                             .foregroundStyle(heroTitleInk)
+                            .lineLimit(1)
+                            .contentTransition(.opacity)
                     }
-                    .buttonStyle(.plain)
-                    .padding(.bottom, LumaSpacing.s)
-                } else {
-                    Text(artist)
-                        .font(.lumaAlbumArtist)
-                        .foregroundStyle(heroTitleInk)
-                        .padding(.bottom, LumaSpacing.s)
                 }
+                .transition(.opacity)
+                .padding(.bottom, LumaSpacing.s)
+            } else {
+                // Reserve the one-line artist slot so the action row stays put when
+                // the server metadata arrives. The glyph is intentionally invisible.
+                Text(" ")
+                    .font(.lumaAlbumArtist)
+                    .padding(.bottom, LumaSpacing.s)
+                    .accessibilityHidden(true)
             }
-            if vm == nil {
-                SkeletonBlock(width: 100, height: 14, cornerRadius: 4)
-            } else if let vm {
-                let qualities = vm.audioQualities
+            if let vm {
+                let qualities = vm.audioQualities(for: songs)
                 HStack(spacing: LumaSpacing.xs) {
                     if let genre = vm.genre, !genre.isEmpty {
                         Text(genre)
@@ -148,8 +168,12 @@ extension AlbumDetailContentView {
                 .foregroundStyle(albumMetadataInk)
                 .lineLimit(1)
                 .minimumScaleFactor(0.85)
+                .task(id: vm.atmosAlternativeIDs(for: songs)) {
+                    await vm.refreshLocalAtmosAvailability(for: songs)
+                }
             }
         }
+        .animation(.easeOut(duration: 0.18), value: artist)
     }
 
     func albumActionBar(
@@ -178,7 +202,7 @@ extension AlbumDetailContentView {
                     guard !songs.isEmpty else { return }
                     try? await container?.playerService.play(tracks: songs, startIndex: 0)
                 }
-            }, label: String(localized: "Play", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale), isDisabled: songs.isEmpty || (mode == .full && vm?.isDownloadingAlbum == true), accentColor: heroButtonVariant.background, height: usesDesktopDetail ? nil : albumControlSide, labelColor: usesFullBleedArtwork ? heroButtonVariant.foreground : (heroButtonVariant.background.luminance > 0.5 ? .black : .white))
+            }, label: String(localized: "Play", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale), isDisabled: songs.isEmpty || (mode == .full && vm?.isDownloadingAlbum == true), accentColor: heroButtonVariant.background, height: usesDesktopDetail ? nil : albumControlSide, labelColor: heroButtonVariant.foreground)
             .frame(maxWidth: playMaxWidth)
 
             if mode == .downloadedOnly {

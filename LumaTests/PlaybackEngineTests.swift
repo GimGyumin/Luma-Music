@@ -131,6 +131,12 @@ struct PlayerServiceEngineTests {
             engineState: .playing
         ))
         #expect(PlayerService.confirmsBridgedEntryProgress(
+            previous: 4, current: 4.12, engineState: .playing, selected: true
+        ))
+        #expect(!PlayerService.confirmsBridgedEntryProgress(
+            previous: 4, current: 4.12, engineState: .playing
+        ))
+        #expect(PlayerService.confirmsBridgedEntryProgress(
             previous: 217,
             current: 0.1,
             engineState: .playing
@@ -304,7 +310,11 @@ struct AVPlayerEngineTests {
         #expect(engine.observedItemID == previousItem)
         #expect(engine.advanceToPreparedNext(expectedURL: next))
         engine.pause()
+        #expect(engine.currentItemProgress == nil)
+        #expect(engine.unacknowledgedEndID == nil)
+        #expect(!engine.prepareNext(url: first, headers: [:]))
         #expect(engine.consumeQueuedTransition())
+        #expect(engine.currentItemProgress != nil)
         #expect(engine.observedItemID != previousItem)
         #expect(!engine.hasQueuedItem)
         #expect(!engine.consumeQueuedTransition())

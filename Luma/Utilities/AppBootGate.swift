@@ -19,6 +19,7 @@ enum AppBootGate {
 
     static func markHomeReady() {
         homeReady = true
+        DiagnosticsLifecycle.finishHomeReady()
         let pending = waiters
         waiters.removeAll(keepingCapacity: false)
         for waiter in pending {

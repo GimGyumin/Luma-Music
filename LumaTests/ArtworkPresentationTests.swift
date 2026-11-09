@@ -61,7 +61,7 @@ struct ArtworkPresentationTests {
             }
             #expect(maximumJump <= 3, "Hard horizontal color step at scroll distance \(distance), x=\(x)")
         }
-        let url = URL(fileURLWithPath: "/tmp/luma-album-scroll-\(Int(distance)).png")
+        let url = LumaTestResources.temporaryFile("luma-album-scroll-\(Int(distance)).png")
         let output = try #require(CGImageDestinationCreateWithURL(url as CFURL, "public.png" as CFString, 1, nil))
         CGImageDestinationAddImage(output, image, nil)
         #expect(CGImageDestinationFinalize(output))
@@ -189,7 +189,7 @@ struct ArtworkPresentationTests {
             return Int(pixels[offset]) - Int(pixels[offset + 2])
         }
         #expect(edgeColors.max()! > 100)
-        let url = URL(fileURLWithPath: "/tmp/luma-1006-seamless-hero.png")
+        let url = LumaTestResources.temporaryFile("luma-1006-seamless-hero.png")
         let destination = try #require(CGImageDestinationCreateWithURL(url as CFURL, "public.png" as CFString, 1, nil))
         CGImageDestinationAddImage(destination, rendered, nil)
         #expect(CGImageDestinationFinalize(destination))
@@ -292,7 +292,7 @@ struct ArtworkPresentationTests {
             #expect(abs(Int(edges.min()!) - 46) <= 2)
             #expect(bytes[11] == 255 && bytes[((image.height - 12) * width + 2) * 4 + 3] == 255)
             if width == 390 {
-                let url = URL(fileURLWithPath: "/tmp/luma-1018-artist-fade.png")
+                let url = LumaTestResources.temporaryFile("luma-1018-artist-fade.png")
                 let destination = try #require(CGImageDestinationCreateWithURL(url as CFURL, "public.png" as CFString, 1, nil))
                 CGImageDestinationAddImage(destination, image, nil)
                 #expect(CGImageDestinationFinalize(destination))
@@ -354,7 +354,7 @@ struct ArtworkPresentationTests {
         // image scale/crop or an early dark mask would change these bounds/colors.
         #expect(abs(Double(first) / Double(width) - 0.4075) < 0.025)
         #expect(abs(Double(last - first) / Double(width) - 0.125) < 0.025)
-        let url = URL(fileURLWithPath: "/tmp/luma-1009-subject-hero.png")
+        let url = LumaTestResources.temporaryFile("luma-1009-subject-hero.png")
         let destination = try #require(CGImageDestinationCreateWithURL(url as CFURL, "public.png" as CFString, 1, nil))
         CGImageDestinationAddImage(destination, image, nil)
         #expect(CGImageDestinationFinalize(destination))
@@ -445,7 +445,7 @@ struct ArtworkPresentationTests {
             }
             let bottom = ((image.height - 12) * width + 2) * 4
             #expect(abs(Int(bytes[bottom]) - 46) <= 2 && bytes[bottom + 3] == 255)
-            let url = URL(fileURLWithPath: "/tmp/luma-1018-\(treatment.rawValue)-hero.png")
+            let url = LumaTestResources.temporaryFile("luma-1018-\(treatment.rawValue)-hero.png")
             let destination = try #require(CGImageDestinationCreateWithURL(url as CFURL, "public.png" as CFString, 1, nil))
             CGImageDestinationAddImage(destination, image, nil)
             #expect(CGImageDestinationFinalize(destination))
@@ -680,7 +680,7 @@ struct ArtworkPresentationTests {
                     }
                 }
                 if width == 390 {
-                    let url = URL(fileURLWithPath: "/tmp/luma-1018-\(kind.rawValue)-album.png")
+                    let url = LumaTestResources.temporaryFile("luma-1018-\(kind.rawValue)-album.png")
                     let destination = try #require(CGImageDestinationCreateWithURL(url as CFURL, "public.png" as CFString, 1, nil))
                     CGImageDestinationAddImage(destination, rendered, nil)
                     #expect(CGImageDestinationFinalize(destination))
@@ -851,7 +851,7 @@ struct ArtworkPresentationTests {
                 AudioQualityLabelView(quality: .dolbyAtmos, foreground: .white, interactive: false, style: .album)
                 AudioQualityLabelView(quality: .lossless(bitDepth: 16, sampleRate: 44100, formatLabel: "FLAC"), foreground: .white, interactive: false, style: .album)
             }.padding(20).background(Color.black)).cgImage)
-        let url = URL(fileURLWithPath: "/tmp/luma-1018-audio-marks.png")
+        let url = LumaTestResources.temporaryFile("luma-1018-audio-marks.png")
         let destination = try #require(CGImageDestinationCreateWithURL(url as CFURL, "public.png" as CFString, 1, nil))
         CGImageDestinationAddImage(destination, rendered, nil)
         #expect(CGImageDestinationFinalize(destination))

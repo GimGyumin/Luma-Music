@@ -48,6 +48,7 @@ protocol LibraryServiceProtocol: AnyObject, Sendable {
     ///
     /// Errors are silenced — scrobble failures must not interrupt playback or surface to the user.
     /// Network/auth errors are logged at debug level.
+    func submitListen(session: UUID, track: String, date: Date, account: ServerSnapshot) async
     func scrobble(songId: String, submission: Bool) async
 
     /// Recently played albums (Subsonic `getAlbumList2?type=recent`).
@@ -121,6 +122,7 @@ protocol LibraryServiceProtocol: AnyObject, Sendable {
 }
 
 extension LibraryServiceProtocol {
+    func submitListen(session: UUID, track: String, date: Date, account: ServerSnapshot) async { await scrobble(songId: track, submission: true) }
     func albumCopyright(id: String, songIDs: [String]) async -> String? { nil }
     func trimDetailCaches() async {}
     func displayAlbum(id: String) async throws -> AlbumID3 { try await album(id: id) }

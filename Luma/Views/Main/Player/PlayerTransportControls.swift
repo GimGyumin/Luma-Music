@@ -24,6 +24,9 @@ struct ScrubberView: View {
     var isExpensiveNetwork: Bool = false
     var phoneLandscape: Bool = false
     var immersivePortrait: Bool = false
+    /// Artwork-derived tint for the unfilled track. Nil keeps the neutral
+    /// white-opacity track used by the other players.
+    var backgroundTint: Color? = nil
 
     @State private var isDragging = false
     @State private var isSeeking = false
@@ -37,11 +40,9 @@ struct ScrubberView: View {
     }
 
     private var playbackQuality: AudioQualityKind? {
-        guard !playerState.isLiveStream, let track = playerState.currentTrack else { return nil }
-        return AudioQualityClassifier.displayablePlaybackQuality(
-            for: playerState.currentPlaybackTrack ?? track,
-            isExpensive: isExpensiveNetwork,
-            isTranscoding: playerState.isDeliveringTranscodedAudio
+        PlaybackQualityPresentation.quality(
+            for: playerState,
+            isExpensive: isExpensiveNetwork
         )
     }
 
@@ -78,7 +79,7 @@ struct ScrubberView: View {
                         }
                     }
                 },
-                trackColor: contentColor.opacity(0.22),
+                trackColor: backgroundTint?.opacity(0.45) ?? contentColor.opacity(0.22),
                 fillColor: contentColor.opacity(0.95),
                 height: phoneLandscape || immersivePortrait ? 18 : 24,
                 trackHeight: 7,
@@ -90,10 +91,13 @@ struct ScrubberView: View {
                 effectiveDuration: effectiveDuration,
                 overridePosition: (isDragging || isSeeking) ? displayPosition : nil,
                 color: secondaryContentColor,
-                qualityColor: immersivePortrait ? ImmersivePlayerInk.quality : contentColor,
+                qualityColor: phoneLandscape
+                    ? ImmersivePlayerInk.quality
+                    : (immersivePortrait ? ImmersivePlayerInk.quality : contentColor),
                 quality: playbackQuality,
                 showsRemainingMinus: true,
-                compactQualityChip: immersivePortrait
+                compactQualityChip: immersivePortrait,
+                plainQualityChip: phoneLandscape
             )
         }
         .onChange(of: playerState.currentTrack?.id) { _, _ in
@@ -116,6 +120,9 @@ struct ScrubberTimeLabels: View {
     var quality: AudioQualityKind? = nil
     var showsRemainingMinus: Bool = false
     var compactQualityChip: Bool = false
+    /// Landscape uses Apple Music's flat mark + title; the portrait player keeps
+    /// the tappable frosted chip.
+    var plainQualityChip: Bool = false
 
     private var hasPlayableDuration: Bool {
         playerState.currentTrack != nil && effectiveDuration > 0 && !playerState.isLiveStream
@@ -132,7 +139,13 @@ struct ScrubberTimeLabels: View {
                 .monospacedDigit()
             Spacer(minLength: 8)
             if let quality {
-                AudioQualityLabelView(quality: quality, foreground: qualityColor, usesGlass: false, compact: compactQualityChip)
+                AudioQualityLabelView(
+                    quality: quality,
+                    foreground: qualityColor,
+                    interactive: !plainQualityChip,
+                    usesGlass: false,
+                    compact: compactQualityChip
+                )
             }
             Spacer(minLength: 8)
             Text(hasPlayableDuration
@@ -257,6 +270,9 @@ struct PlaybackControlsView: View {
     /// Phone portrait Music.app rhythm: tighter row, slightly smaller glyphs,
     /// while keeping the 64/88pt hit targets.
     var phonePortraitControls: Bool = false
+    /// Landscape Now Playing: a 56pt transport row with Apple Music's larger
+    /// spacing, using the same playback-engine actions as every other surface.
+    var phoneLandscape: Bool = false
 
     private var previousNextIconSize: CGFloat {
         if compactLayout { return 32 }
@@ -294,13 +310,14 @@ struct PlaybackControlsView: View {
 
             if !playerState.isLiveStream {
                 Button {
-                    HapticFeedback.light.trigger()
+                    HapticFeedback.transport.trigger()
                     Task { try? await playerService?.skipToPrevious() }
                 } label: {
                     Image(systemName: "backward.fill")
                         .font(.system(size: previousNextIconSize, weight: .semibold, design: .default))
                         .foregroundStyle(Color.white)
-                        .frame(width: compactLayout ? 44 : 64, height: compactLayout ? 44 : 64)
+                        .frame(width: phoneLandscape ? 48 : (compactLayout ? 44 : 64),
+                               height: phoneLandscape ? 48 : (compactLayout ? 44 : 64))
                 }
                 .disabled(!isPlaybackAvailable)
                 .accessibilityLabel("Skip to previous")
@@ -308,13 +325,16 @@ struct PlaybackControlsView: View {
             }
 
             Button {
-                HapticFeedback.medium.trigger()
+                HapticFeedback.transport.trigger()
                 Task { await playerService?.togglePlayPause() }
             } label: {
                 Image(systemName: playerState.playbackState.controlAppearance.systemImage)
                     .font(.system(size: playIconSize, weight: .semibold, design: .default))
                     .foregroundStyle(Color.white)
-                    .frame(minWidth: compactLayout ? 64 : (showsShuffleRepeat ? 72 : 88), minHeight: compactLayout ? 64 : (showsShuffleRepeat ? 72 : 88))
+                    .frame(
+                        minWidth: phoneLandscape ? 56 : (compactLayout ? 64 : (showsShuffleRepeat ? 72 : 88)),
+                        minHeight: phoneLandscape ? 56 : (compactLayout ? 64 : (showsShuffleRepeat ? 72 : 88))
+                    )
                     .contentShape(Rectangle())
             }
             .disabled(playerState.currentTrack == nil)
@@ -323,13 +343,14 @@ struct PlaybackControlsView: View {
 
             if !playerState.isLiveStream {
                 Button {
-                    HapticFeedback.light.trigger()
+                    HapticFeedback.transport.trigger()
                     Task { try? await playerService?.skipToNext() }
                 } label: {
                     Image(systemName: "forward.fill")
                         .font(.system(size: previousNextIconSize, weight: .semibold, design: .default))
                         .foregroundStyle(Color.white)
-                        .frame(width: compactLayout ? 44 : 64, height: compactLayout ? 44 : 64)
+                        .frame(width: phoneLandscape ? 48 : (compactLayout ? 44 : 64),
+                               height: phoneLandscape ? 48 : (compactLayout ? 44 : 64))
                 }
                 .disabled(!isPlaybackAvailable)
                 .accessibilityLabel("Skip to next")

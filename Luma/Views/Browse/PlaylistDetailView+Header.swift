@@ -93,18 +93,13 @@ extension PlaylistDetailView {
                 .multilineTextAlignment(textAlign)
                 .frame(maxWidth: .infinity, alignment: alignment == .leading ? .leading : .center)
                 .padding(.bottom, LumaSpacing.xs)
-            if isLoadingSkeleton {
-                SkeletonBlock(width: 140, height: 18, cornerRadius: 4)
-                    .padding(.bottom, LumaSpacing.s)
-            } else if let owner = vm?.owner {
+            if let owner = vm?.owner {
                 Text(owner)
                     .font(.title3)
                     .foregroundStyle(headerSecondaryColor)
                     .padding(.bottom, LumaSpacing.s)
             }
-            if isLoadingSkeleton {
-                SkeletonBlock(width: 100, height: 14, cornerRadius: 4)
-            } else if vm != nil {
+            if vm != nil {
                 let count = resolvedSongs(vm).count
                 Text(showsMetadata ? metadataLine(count: count, updated: vm?.updatedAt)
                      : vm?.updatedAt.map { String(localized: "Updated \($0.formatted(.relative(presentation: .named)))", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale) }

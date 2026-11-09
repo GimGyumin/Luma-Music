@@ -25,10 +25,12 @@ struct SongsListView: View {
         Group {
             if let vm = viewModel {
                 content(vm)
+                    .transition(.opacity)
             } else {
                 LoadingStateView()
             }
         }
+        .lumaContentReveal(isReady: viewModel.map { !(($0.isLoading || $0.isLoadingFilterSource) && $0.allSongs.isEmpty) } ?? false)
         .lumaContentWidth()
         .navigationTitle(String(localized: "Songs", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale))
         .navigationBarTitleDisplayModeLarge()
@@ -39,11 +41,16 @@ struct SongsListView: View {
         .toolbar {
             ToolbarItem(placement: songsToolbarPlacement) {
                 SongSortMenu(sort: $songSort)
+                    .tint(.primary)
+                    .foregroundStyle(.primary)
             }
             ToolbarItem(placement: songsToolbarPlacement) {
                 SongFilterMenu(filter: $songFilter)
+                    .tint(.primary)
+                    .foregroundStyle(.primary)
             }
         }
+        .tint(.primary)
         .task(id: "\(container?.serverState.accountRevision ?? 0)|\(container?.serverState.isOnline == true)") {
             guard let svc = container?.libraryService else { return }
             if viewModel == nil || sourceAccountRevision != container?.serverState.accountRevision {
@@ -107,6 +114,7 @@ struct SongsListView: View {
             emptyState(for: vm.filter)
         } else {
             songsList(vm)
+                .transition(.opacity)
         }
     }
 
@@ -136,8 +144,9 @@ struct SongsListView: View {
     }
 
     private func songsList(_ vm: SongsListViewModel) -> some View {
-        let songs = displayedSongs(vm.allSongs)
-        let sections = displayedSections(songs, sort: songSort)
+        let filteredSongs = displayedSongs(vm.allSongs)
+        let sections = SongAlphabetSection.grouped(filteredSongs, sort: songSort, locale: AppUILanguage.locale)
+        let songs = songSort.groupsAlphabetically ? sections.flatMap(\.songs) : filteredSongs
         return ScrollViewReader { proxy in
             List {
                 Section {
@@ -184,7 +193,6 @@ struct SongsListView: View {
     }
 
     /// Row with cover art + trailing “…” menu (no duration), tappable to play from that song.
-    /// Uses `onTapGesture` — not a wrapping `Button` — so the nested Menu keeps its own taps.
     @ViewBuilder
     private func songRow(
         _ song: DisplayableSong,
@@ -198,15 +206,10 @@ struct SongsListView: View {
                 index: globalIndex + 1,
                 showCoverArt: true,
                 onAddToPlaylist: { s in songToAddToPlaylist = s },
-                showsEllipsisInsteadOfDuration: true
+                showsEllipsisInsteadOfDuration: true,
+                onPlay: { play(from: globalIndex, songs: songs) }
             )
             .contentShape(Rectangle())
-        }
-        .onTapGesture {
-            play(from: globalIndex, songs: songs)
-        }
-        .accessibilityAction {
-            play(from: globalIndex, songs: songs)
         }
         .onAppear {
             if searchText.isEmpty && globalIndex >= vm.allSongs.count - 10 {
@@ -232,7 +235,7 @@ struct SongsListView: View {
                     }
                 } label: {
                     Label("Play", systemImage: "play.fill")
-                        .foregroundStyle(Color.lumaAccent)
+                        .foregroundStyle(.primary)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 12)
                         .lumaGlassCapsule()
@@ -249,7 +252,7 @@ struct SongsListView: View {
                     }
                 } label: {
                     Label("Shuffle", systemImage: "shuffle")
-                        .foregroundStyle(Color.lumaAccent)
+                        .foregroundStyle(.primary)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 12)
                         .lumaGlassCapsule()
@@ -272,23 +275,4 @@ struct SongsListView: View {
         }
     }
 
-    private func displayedSections(_ songs: [DisplayableSong], sort: SongSort) -> [SongAlphabetSection] {
-        guard sort.groupsAlphabetically else { return [] }
-        let grouped = Dictionary(grouping: songs) { song -> String in
-            let value = sort.groupingKey(for: song).trimmingCharacters(in: .whitespacesAndNewlines)
-            guard let first = value.first else { return "#" }
-            let letter = String(first).uppercased()
-            return letter.rangeOfCharacter(from: .letters) == nil ? "#" : letter
-        }
-        var offset = 0
-        return grouped.keys.sorted { lhs, rhs in
-            if lhs == "#" { return false }
-            if rhs == "#" { return true }
-            return lhs.localizedStandardCompare(rhs) == .orderedAscending
-        }.map { letter in
-            let sectionSongs = grouped[letter] ?? []
-            defer { offset += sectionSongs.count }
-            return SongAlphabetSection(letter: letter, songs: sectionSongs, startIndex: offset)
-        }
-    }
 }

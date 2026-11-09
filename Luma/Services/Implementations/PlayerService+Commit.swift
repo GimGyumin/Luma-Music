@@ -78,6 +78,7 @@ extension PlayerService {
                                position: TimeInterval? = nil) async {
         guard contextIsCurrent(context), transport.terminalContext != context else { return }
         transport.terminalContext = context
+        telemetry.markFailed()
         Logger.player.error("[PLAYBACK] run=\(RuntimeDiagnostics.sessionID, privacy: .public) event=terminal_failure epoch=\(self.playbackEpoch, privacy: .public) engine=\(self.systemPlayback.isActive ? "AVPlayer" : "AudioStreaming", privacy: .public)")
         finalizePlaySegment()
         // Do not cancel the task that is committing its own failure until the UI is committed.

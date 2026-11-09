@@ -33,7 +33,7 @@ struct SongRow: View {
 
     @Environment(\.appContainer) private var container
     @Environment(ArtworkImageCache.self) private var artworkImageCache
-    @Environment(\.lumaPlayingAccent) private var playingAccent
+    var onPlay: (() -> Void)? = nil
     @State private var coverImage: PlatformImage?
     @State private var showPinLimitAlert = false
     @State private var pinnedSnapshot = false
@@ -42,7 +42,8 @@ struct SongRow: View {
     @State private var isHovered = false
     #endif
 
-    init(song: DisplayableSong, index: Int, showCoverArt: Bool = false, showArtist: Bool = true, isFavorite: Bool = false, titleColor: Color = .primary, secondaryColor: Color = .secondary, onDownload: (() -> Void)? = nil, onRemoveDownload: (() -> Void)? = nil, isDownloading: Bool = false, onRemoveFromPlaylist: (() -> Void)? = nil, onAddToPlaylist: ((DisplayableSong) -> Void)? = nil, showsEllipsisInsteadOfDuration: Bool = false) {
+    init(song: DisplayableSong, index: Int, showCoverArt: Bool = false, showArtist: Bool = true, isFavorite: Bool = false, titleColor: Color = .primary, secondaryColor: Color = .secondary, onDownload: (() -> Void)? = nil, onRemoveDownload: (() -> Void)? = nil, isDownloading: Bool = false, onRemoveFromPlaylist: (() -> Void)? = nil, onAddToPlaylist: ((DisplayableSong) -> Void)? = nil, showsEllipsisInsteadOfDuration: Bool = false, onPlay: (() -> Void)? = nil) {
+        self.onPlay = onPlay
         self.song = song
         self.index = index
         self.showCoverArt = showCoverArt
@@ -65,6 +66,15 @@ struct SongRow: View {
         return row
     }
 
+    private var artistText: String? {
+        guard showArtist, let value = song.artist?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !value.isEmpty else { return nil }
+        return value
+    }
+
+    private var hasAlbumSubtitle: Bool { reservesArtistSpace && artistText != nil }
+    private var rowAlignment: VerticalAlignment { hasAlbumSubtitle ? .top : .center }
+
     private var isOnline: Bool { container?.serverState.isOnline == true }
     private var isCurrentTrack: Bool { container?.playerState.currentTrack?.id == song.id }
     private var isPlaying: Bool { container?.playerState.playbackState == .playing }
@@ -73,113 +83,26 @@ struct SongRow: View {
     }
 
     var body: some View {
-        HStack(alignment: reservesArtistSpace ? .top : .center, spacing: LumaSpacing.s) {
-            if showCoverArt {
-                CoverArtCard(id: song.effectiveCoverArtId, size: 44)
-                    .overlay {
-                        // Now-playing equalizer over the thumbnail (with a scrim) for the current track —
-                        // restores the playing cue lost when rows switched to album thumbnails (showCoverArt).
-                        if isCurrentTrack {
-                            ZStack {
-                                Color.black.opacity(0.45)
-                                NowPlayingBarsIndicator(isPlaying: isPlaying)
-                            }
-                            .clipShape(RoundedRectangle(cornerRadius: LumaCornerRadius.standard))
-                        }
-                    }
-                    .overlay(alignment: .topLeading) {
-                        if isFavorite {
-                            Image(systemName: "star.fill")
-                                .font(.system(size: 8, weight: .bold))
-                                .foregroundStyle(playingAccent)
-                                .padding(3)
-                        }
-                    }
+        HStack(alignment: rowAlignment, spacing: LumaSpacing.s) {
+            if let onPlay {
+                leadingContent
+                    .contentShape(Rectangle())
+                    .onTapGesture(perform: onPlay)
+                    .accessibilityHidden(true)
+                Button(action: onPlay) { trackContent }
+                    .buttonStyle(.plain)
+                    .accessibilityValue(isCurrentTrack ? Text("Now Playing") : Text(""))
+                    .accessibilityHint(String(localized: "Play", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale))
             } else {
-                ZStack {
-                    if isCurrentTrack {
-                        NowPlayingBarsIndicator(isPlaying: isPlaying)
-                    } else {
-                        Text("\(song.trackNumber ?? index)")
-                            #if os(macOS)
-                            .font(.system(size: 13))
-                            .foregroundStyle(.secondary)
-                            #else
-                            .font(reservesArtistSpace ? .system(size: 17, weight: .regular) : .lumaCaption)
-                            .foregroundStyle(secondaryColor)
-                            #endif
-                            .monospacedDigit()
-                            .opacity(isFavorite && !reservesArtistSpace ? 0 : 1)
-                        if isFavorite && !reservesArtistSpace {
-                            Image(systemName: "star.fill")
-                                .font(.caption2)
-                                .foregroundStyle(playingAccent)
-                                .accessibilityLabel("Favorite")
-                        }
-                    }
-                }
-                .frame(width: 28, alignment: .center)
-                .overlay(alignment: .leading) {
-                    if reservesArtistSpace && isFavorite {
-                        Circle()
-                            .fill(secondaryColor)
-                            .frame(width: 5, height: 5)
-                            .offset(x: -8)
-                            .accessibilityLabel(String(localized: "Favorite", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale))
-                    }
-                }
+                leadingContent
+                trackContent
             }
-
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(alignment: .firstTextBaseline, spacing: 4) {
-                    Text(song.title)
-                        #if os(macOS)
-                        .font(.system(size: 14, weight: .regular))
-                        #else
-                        .font(reservesArtistSpace ? .system(size: 17, weight: .regular) : .lumaCellTitle)
-                        #endif
-                        .foregroundStyle(isCurrentTrack ? playingAccent : titleColor)
-                        #if os(macOS)
-                        .lineLimit(reservesArtistSpace ? nil : 1)
-                        #else
-                        .lineLimit(reservesArtistSpace ? 2 : 1)
-                        .lineSpacing(reservesArtistSpace ? 1 : 0)
-                        #endif
-                        .fixedSize(horizontal: false, vertical: true)
-
-                    if let advisory = song.contentAdvisoryLabel(locale: AppUILanguage.locale) {
-                        ContentAdvisoryBadge(label: advisory, color: secondaryColor)
-                    }
-                }
-                if !reservesArtistSpace, let classical = song.classicalSubtitle {
-                    Text(classical)
-                        #if os(macOS)
-                        .font(.system(size: 12))
-                        .foregroundStyle(.secondary)
-                        #else
-                        .font(.lumaCaption)
-                        .foregroundStyle(secondaryColor)
-                        #endif
-                        .lineLimit(1)
-                } else if showArtist, let artist = song.artist {
-                    Text(artist)
-                        #if os(macOS)
-                        .font(.system(size: reservesArtistSpace ? 13 : 12))
-                        .foregroundStyle(.secondary)
-                        #else
-                        .font(reservesArtistSpace ? .subheadline : .lumaCaption)
-                        .foregroundStyle(secondaryColor)
-                        #endif
-                        .lineLimit(1)
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
 
             HStack(spacing: LumaSpacing.s) {
                 if song.isDownloaded {
                     Image(systemName: "arrow.down.circle.fill")
                         .font(.lumaCaption)
-                        .foregroundStyle(secondaryColor.opacity(0.85))
+                        .foregroundStyle(secondaryColor)
                 } else if isDownloading {
                     ProgressView()
                         .scaleEffect(0.7)
@@ -189,10 +112,11 @@ struct SongRow: View {
                     Menu { songMenu } label: {
                         Image(systemName: "ellipsis")
                             .font(.body.weight(.semibold))
-                            .foregroundStyle(secondaryColor)
-                            .frame(width: 32, height: 24)
+                            .foregroundStyle(titleColor)
+                            .frame(width: 44, height: 44)
                             .contentShape(Rectangle())
                     }
+                    .tint(titleColor)
                     .menuStyle(.borderlessButton)
                     .fixedSize()
                     .accessibilityLabel(String(localized: "More", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale))
@@ -203,17 +127,17 @@ struct SongRow: View {
                         .foregroundStyle(.secondary)
                         #else
                         .font(.lumaCaption)
-                        .foregroundStyle(secondaryColor.opacity(0.85))
+                        .foregroundStyle(secondaryColor)
                         #endif
                         .monospacedDigit()
                 }
             }
         }
         #if os(macOS)
-        .padding(.vertical, reservesArtistSpace ? 12 : LumaSpacing.s)
+        .padding(.vertical, hasAlbumSubtitle ? 12 : LumaSpacing.s)
         .padding(.trailing, LumaSpacing.s)
         #else
-        .padding(.vertical, reservesArtistSpace ? 16 : LumaSpacing.s)
+        .padding(.vertical, hasAlbumSubtitle ? 16 : LumaSpacing.s)
         #endif
         .contentShape(Rectangle())
         #if os(macOS)
@@ -222,12 +146,22 @@ struct SongRow: View {
         .onHover { isHovered = $0 }
         #endif
         .task(id: "\(song.id):\(song.effectiveCoverArtId)") {
-            pinnedSnapshot = container?.pinService.isPinned(itemType: .song, itemId: song.id) == true
+            // Never run a synchronous SwiftData fetchCount on the main thread for
+            // every visible row. The background lookup keeps scrolling responsive.
+            pinnedSnapshot = await container?.pinService.isPinnedInBackground(
+                itemType: .song, itemId: song.id) == true
             favoriteSnapshot = isFavorite
             coverImage = await artworkImageCache.load(coverArtId: song.effectiveCoverArtId)
         }
         .musicShareDraggable(itemID: song.id, title: song.title)
-        .contextMenu { songMenu } preview: {
+        .contextMenu {
+            // Keep the row menu neutral instead of inheriting the app's blue accent.
+            // Album pages use the same control on a tinted background, where the
+            // accent-tinted labels read as a blue menu.
+            Group { songMenu }
+                .tint(.primary)
+                .foregroundStyle(.primary)
+        } preview: {
             SongContextPreview(coverImage: coverImage, song: song)
         }
         .alert("Pin Limit Reached", isPresented: $showPinLimitAlert) {
@@ -236,6 +170,116 @@ struct SongRow: View {
             Text(PinError.limitReached.errorDescription ?? "")
         }
         .appEntityIdentifier(songEntityIdentifier)
+    }
+
+    /// Keep the live indicator outside the playback button's label hierarchy.
+    @ViewBuilder
+    private var leadingContent: some View {
+        if showCoverArt {
+            CoverArtCard(id: song.effectiveCoverArtId, size: 44)
+                .overlay {
+                    // Now-playing equalizer over the thumbnail (with a scrim) for the current track —
+                    // restores the playing cue lost when rows switched to album thumbnails (showCoverArt).
+                    if isCurrentTrack {
+                        ZStack {
+                            Color.black.opacity(0.45)
+                            NowPlayingBarsIndicator(isPlaying: isPlaying,
+                        isBuffering: container?.playerState.playbackState == .buffering)
+                        }
+                        .clipShape(RoundedRectangle(cornerRadius: LumaCornerRadius.standard))
+                    }
+                }
+                .overlay(alignment: .topLeading) {
+                    if isFavorite {
+                        Image(systemName: "star.fill")
+                            .font(.system(size: 8, weight: .bold))
+                            .foregroundStyle(.white)
+                            .padding(3)
+                    }
+                }
+        } else {
+            ZStack {
+                if isCurrentTrack {
+                    NowPlayingBarsIndicator(isPlaying: isPlaying,
+                        isBuffering: container?.playerState.playbackState == .buffering)
+                } else {
+                    Text("\(song.trackNumber ?? index)")
+                        #if os(macOS)
+                        .font(.system(size: 13))
+                        .foregroundStyle(.secondary)
+                        #else
+                        .font(reservesArtistSpace ? .system(size: 17, weight: .regular) : .lumaCaption)
+                        .foregroundStyle(secondaryColor)
+                        #endif
+                        .monospacedDigit()
+                        .opacity(isFavorite && !reservesArtistSpace ? 0 : 1)
+                    if isFavorite && !reservesArtistSpace {
+                        Image(systemName: "star.fill")
+                            .font(.caption2)
+                            .foregroundStyle(secondaryColor)
+                            .accessibilityLabel("Favorite")
+                    }
+                }
+            }
+            .frame(width: 28, alignment: .center)
+            .overlay(alignment: .leading) {
+                if reservesArtistSpace && isFavorite {
+                    Circle()
+                        .fill(secondaryColor)
+                        .frame(width: 5, height: 5)
+                        .offset(x: -8)
+                        .accessibilityLabel(String(localized: "Favorite", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale))
+                }
+            }
+        }
+    }
+
+    private var trackContent: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(alignment: .firstTextBaseline, spacing: 4) {
+                Text(song.title)
+                    #if os(macOS)
+                    .font(.system(size: 14, weight: .regular))
+                    #else
+                    .font(reservesArtistSpace ? .system(size: 17, weight: .regular) : .lumaCellTitle)
+                    #endif
+                    .foregroundStyle(titleColor)
+                    #if os(macOS)
+                    .lineLimit(reservesArtistSpace ? nil : 1)
+                    #else
+                    .lineLimit(reservesArtistSpace ? 2 : 1)
+                    .lineSpacing(reservesArtistSpace ? 1 : 0)
+                    #endif
+                    .fixedSize(horizontal: false, vertical: true)
+
+                if let advisory = song.contentAdvisoryLabel(locale: AppUILanguage.locale) {
+                    ContentAdvisoryBadge(label: advisory, color: secondaryColor)
+                }
+            }
+            if !reservesArtistSpace, let classical = song.classicalSubtitle {
+                Text(classical)
+                    #if os(macOS)
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+                    #else
+                    .font(.lumaCaption)
+                    .foregroundStyle(secondaryColor)
+                    #endif
+                    .lineLimit(1)
+            } else if let artist = artistText {
+                Text(artist)
+                    #if os(macOS)
+                    .font(.system(size: reservesArtistSpace ? 13 : 12))
+                    .foregroundStyle(.secondary)
+                    #else
+                    .font(reservesArtistSpace ? .subheadline : .lumaCaption)
+                    .foregroundStyle(secondaryColor)
+                    #endif
+                    .lineLimit(1)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(Rectangle())
     }
 
     /// Onscreen-awareness identifier for this row. `nil` before iOS 27 or when

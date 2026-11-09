@@ -24,15 +24,57 @@ final class AlbumDetailViewModel {
     var coverArtId: String? = nil
     var artistId: String? = nil
     var songs: [DisplayableSong] = []
-    private var availableAtmosSongs: [DisplayableSong] = []
-    var audioQualities: [AudioQualityKind] { AudioQualityClassifier.albumQualities(in: songs + availableAtmosSongs) }
+    private var localAtmosIDs: Set<String> = []
+    @ObservationIgnored private var localAtmosCheck = 0
+
+    var audioQualities: [AudioQualityKind] { audioQualities(for: songs) }
+
+    // The album badge describes available formats independently of the playback toggle.
+    func audioQualities(for displayedSongs: [DisplayableSong]) -> [AudioQualityKind] {
+        guard let serverId = serverState.activeServer?.id else {
+            return AudioQualityClassifier.albumQualities(in: displayedSongs)
+        }
+        let canStream = serverState.isOnline
+            && streamingSettings?.allowsRemoteDolbyAtmos(isCellular: serverState.isCellularConnection) == true
+        let alternatives = displayedSongs.compactMap { song -> DisplayableSong? in
+            guard let candidate = libraryIndex?.preferredAtmosSong(for: song, serverId: serverId),
+                  canStream || localAtmosIDs.contains(candidate.id) else { return nil }
+            return candidate
+        }
+        return AudioQualityClassifier.albumQualities(in: displayedSongs + alternatives)
+    }
+    func atmosAlternativeIDs(for displayedSongs: [DisplayableSong]) -> [String] {
+        guard let serverId = serverState.activeServer?.id else { return [] }
+        return Array(Set(displayedSongs.compactMap {
+            libraryIndex?.preferredAtmosSong(for: $0, serverId: serverId)?.id
+        })).sorted()
+    }
+
+    func refreshLocalAtmosAvailability(for displayedSongs: [DisplayableSong]) async {
+        localAtmosCheck &+= 1
+        let check = localAtmosCheck
+        guard !presentationSuspended, let serverId = serverState.activeServer?.id else { return }
+        let revision = serverState.accountRevision
+        let ids = atmosAlternativeIDs(for: displayedSongs)
+        var available: Set<String> = []
+        for id in ids {
+            if await downloadService.downloadedOriginalURL(forSongId: id, serverId: serverId) != nil {
+                available.insert(id)
+            }
+            guard check == localAtmosCheck, !Task.isCancelled else { return }
+        }
+        guard check == localAtmosCheck, !Task.isCancelled, !presentationSuspended,
+              serverState.activeServer?.id == serverId, serverState.accountRevision == revision else { return }
+        localAtmosIDs = available
+    }
+
     /// Other editions of this album (remasters / anniversary / deluxe), same artist.
     var otherAlbumVersions: [AlbumID3] = []
     /// Other albums by the same artist (excludes the current album and `otherAlbumVersions`).
     var moreAlbumsByArtist: [AlbumID3] = []
     var isLoadingMoreAlbums = false
     var isOffline: Bool = false
-    var isLoading = false
+    var isLoading = true
     /// Core album metadata and tracks are ready to render. Secondary description,
     /// label and "more by" enrichment may continue after this becomes true.
     var isPrimaryContentReady = false
@@ -48,6 +90,7 @@ final class AlbumDetailViewModel {
     private let toastService: ToastService
     private let serverState: ServerState
     private let libraryIndex: LibraryIndexService?
+    private let streamingSettings: StreamingSettings?
     @ObservationIgnored private var loadGeneration = 0
     @ObservationIgnored private var needsPresentationReload = false
     @ObservationIgnored private var presentationSuspended = false
@@ -74,7 +117,8 @@ final class AlbumDetailViewModel {
         downloadService: any DownloadServiceProtocol,
         toastService: ToastService,
         serverState: ServerState,
-        libraryIndex: LibraryIndexService? = nil
+        libraryIndex: LibraryIndexService? = nil,
+        streamingSettings: StreamingSettings? = nil
     ) {
         self.albumId = albumId
         self.libraryService = libraryService
@@ -82,6 +126,7 @@ final class AlbumDetailViewModel {
         self.toastService = toastService
         self.serverState = serverState
         self.libraryIndex = libraryIndex
+        self.streamingSettings = streamingSettings
     }
 
     func load() async {
@@ -141,7 +186,6 @@ final class AlbumDetailViewModel {
             coverArtId = apiAlbum.coverArt
             artistId = apiAlbum.artistId
             songs = prepared
-            availableAtmosSongs = prepared.compactMap { libraryIndex?.preferredAtmosSong(for: $0, serverId: serverId) }
             isOffline = false
             isPrimaryContentReady = true
 
@@ -340,7 +384,6 @@ final class AlbumDetailViewModel {
         // Downloaded tracks preserve their ID3 comments even though LocalAlbumData
         // has no album-level label field. Also clear a previous credit if absent.
         trackCopyright = Self.findTrackCopyright(data.songs.map(\.comment))
-        availableAtmosSongs = []
         isPrimaryContentReady = true
         // Offline records carry no year/genre/artistId — clear stale online values so a re-load after going
         // offline (the long-lived VM re-runs load() on connectivity change) doesn't keep showing them.

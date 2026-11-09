@@ -22,12 +22,14 @@ import os
 /// > ``ServerConfiguration/resourceTimeout`` values when no custom transport is injected.
 /// > You do not need to configure timeouts manually in the common case.
 public struct URLSessionTransport: HTTPTransport, Sendable {
+    private let sameOriginOnly: Bool
     private let session: URLSession
 
     /// Creates a transport backed by the given session.
     ///
     /// - Parameter session: The `URLSession` to use. Defaults to `.shared`.
     public init(session: URLSession = .shared) {
+        self.sameOriginOnly = false
         self.session = session
     }
 
@@ -37,12 +39,13 @@ public struct URLSessionTransport: HTTPTransport, Sendable {
     /// such as `timeoutIntervalForResource`, TLS configuration, or HTTP headers.
     ///
     /// - Parameter configuration: The session configuration to use.
-    public init(configuration: URLSessionConfiguration) {
+    public init(configuration: URLSessionConfiguration, sameOriginOnly: Bool = false) {
+        self.sameOriginOnly = sameOriginOnly
         self.session = URLSession(configuration: configuration)
     }
 
     public func data(for request: URLRequest) async throws -> (Data, HTTPURLResponse) {
-        let redirectGuard = RedirectGuard(originalHost: request.url?.host)
+        let redirectGuard = RedirectGuard(originalURL: request.url, sameOriginOnly: sameOriginOnly)
         let (data, response) = try await session.data(for: request, delegate: redirectGuard)
         guard let httpResponse = response as? HTTPURLResponse else {
             throw URLError(.badServerResponse)
@@ -67,7 +70,8 @@ public struct URLSessionTransport: HTTPTransport, Sendable {
 /// error to the caller.
 private final class RedirectGuard: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
 
-    let originalHost: String?
+    let originalURL: URL?
+    let sameOriginOnly: Bool
 
     /// Populated (from the delegate thread) when a cross-domain redirect is blocked.
     ///
@@ -77,8 +81,9 @@ private final class RedirectGuard: NSObject, URLSessionTaskDelegate, @unchecked 
 
     var blockedRedirect: (from: URL, to: URL)? { blockedState.withLock { $0 } }
 
-    init(originalHost: String?) {
-        self.originalHost = originalHost
+    init(originalURL: URL?, sameOriginOnly: Bool) {
+        self.originalURL = originalURL
+        self.sameOriginOnly = sameOriginOnly
     }
 
     func urlSession(
@@ -89,7 +94,8 @@ private final class RedirectGuard: NSObject, URLSessionTaskDelegate, @unchecked 
         completionHandler: @escaping (URLRequest?) -> Void
     ) {
         let newHost = newRequest.url?.host
-        guard newHost == originalHost else {
+        let sameOrigin = newRequest.url?.scheme == originalURL?.scheme && newRequest.url?.port == originalURL?.port
+        guard newHost == originalURL?.host, !sameOriginOnly || sameOrigin else {
             // Cross-domain redirect detected — record it and refuse to follow.
             let fromURL = task.originalRequest?.url ?? newRequest.url!
             let toURL   = newRequest.url!

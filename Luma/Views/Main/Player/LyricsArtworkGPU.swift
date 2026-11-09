@@ -26,6 +26,7 @@ nonisolated final class LyricsArtworkGPU: @unchecked Sendable {
     private var composed: (any MTLTexture)?
     private var previous: (any MTLTexture)?
     private var hasRenderedFrame = false
+    private var blurredAt: SIMD2<Double>?
 
     init(device: any MTLDevice, bundle: Bundle = .main) throws {
         self.device = device
@@ -48,7 +49,7 @@ nonisolated final class LyricsArtworkGPU: @unchecked Sendable {
         scenePipeline = try pipeline("lumaLyricsScene", format: .rgba16Float)
         compositePipeline = try pipeline("lumaLyricsComposite", format: .rgba16Float)
         presentPipeline = try pipeline("lumaLyricsPresent", format: .bgra8Unorm_srgb)
-        blur = MPSImageGaussianBlur(device: device, sigma: 24)
+        blur = MPSImageGaussianBlur(device: device, sigma: 12)
         blur.edgeMode = .clamp
         prepareBlur()
     }
@@ -89,6 +90,7 @@ nonisolated final class LyricsArtworkGPU: @unchecked Sendable {
         } else {
             previous = nil
         }
+        blurredAt = nil
         artwork = texture
         colorProfile = profile
         return previous != nil
@@ -96,24 +98,34 @@ nonisolated final class LyricsArtworkGPU: @unchecked Sendable {
 
     func render(size: CGSize, elapsed: Float, transition: Float = 1,
                 flowSpeed: Double = AMLLArtworkMotion.defaultFlowSpeed,
+                pulseScale: Float = 1,
                 drawable: (any CAMetalDrawable)? = nil) -> Frame? {
         guard let artwork else { return nil }
         let dimensions = ArtworkSceneMotion.renderSize(for: size)
-        if scene?.width != dimensions.width || scene?.height != dimensions.height {
+        if composed?.width != dimensions.width || composed?.height != dimensions.height || scene == nil || blurred == nil {
+            blurredAt = nil
             hasRenderedFrame = false
-            scene = makeTexture(width: dimensions.width, height: dimensions.height)
-            blurred = makeTexture(width: dimensions.width, height: dimensions.height)
+            // Wide Gaussian diffusion removes fine detail. Sample and blur at half the
+            // linear resolution, then upsample in the existing composite pass.
+            let width = (dimensions.width + 1) / 2
+            let height = (dimensions.height + 1) / 2
+            scene = makeTexture(width: width, height: height)
+            blurred = makeTexture(width: width, height: height)
             composed = makeTexture(width: dimensions.width, height: dimensions.height)
         }
         guard let scene, let blurred, let composed, let command = queue.makeCommandBuffer() else { return nil }
         let speed = AMLLArtworkMotion.speed(flowSpeed)
-        let layers = AMLLArtworkMotion.layers(size: CGSize(width: dimensions.width, height: dimensions.height),
-                                             elapsed: Double(elapsed), flowSpeed: speed)
         var parameters = SIMD4<Float>(Float(dimensions.width) / Float(dimensions.height), elapsed * Float(speed),
-                                      previous == nil ? 1 : transition, 0)
-        guard encode(command: command, target: scene, pipeline: scenePipeline, textures: [artwork],
-                     parameters: &parameters, layers: layers) else { return nil }
-        blur.encode(commandBuffer: command, sourceTexture: scene, destinationTexture: blurred)
+                                      previous == nil ? 1 : transition, pulseScale)
+        // A stationary scene only needs the final pulse composite, including in Low Power Mode.
+        let sceneTime = SIMD2(Double(elapsed), speed)
+        if blurredAt != sceneTime {
+            let layers = AMLLArtworkMotion.layers(size: CGSize(width: dimensions.width, height: dimensions.height),
+                                                 elapsed: Double(elapsed), flowSpeed: speed)
+            guard encode(command: command, target: scene, pipeline: scenePipeline, textures: [artwork],
+                         parameters: &parameters, layers: layers) else { return nil }
+            blur.encode(commandBuffer: command, sourceTexture: scene, destinationTexture: blurred)
+        }
         guard encode(command: command, target: composed, pipeline: compositePipeline,
                      textures: [blurred, previous ?? blurred], parameters: &parameters) else { return nil }
         if let drawable {
@@ -121,6 +133,7 @@ nonisolated final class LyricsArtworkGPU: @unchecked Sendable {
                          textures: [composed], parameters: &parameters) else { return nil }
             command.present(drawable)
         }
+        blurredAt = sceneTime
         hasRenderedFrame = true
         if transition >= 1 { previous = nil }
         return Frame(texture: composed, commandBuffer: command)

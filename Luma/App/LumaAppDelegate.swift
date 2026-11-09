@@ -16,6 +16,7 @@ final class LumaAppDelegate: NSObject, UIApplicationDelegate {
         _ application: UIApplication,
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
     ) -> Bool {
+        DiagnosticsBootstrap.start()
         NotificationCenter.default.addObserver(self, selector: #selector(playerPresentationChanged(_:)),
             name: .lumaFullPlayerPresentationChanged, object: nil)
         return true

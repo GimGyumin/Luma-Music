@@ -16,7 +16,7 @@ nonisolated struct NowPlayingEntry: TimelineEntry {
     static var placeholder: NowPlayingEntry {
         NowPlayingEntry(
             date: Date(),
-            track: SharedTrackInfo(id: "preview", title: "Track Title", artist: "Artist Name", albumID: nil, coverArtFilename: nil),
+            track: SharedTrackInfo(id: "preview", title: "Track Title", artist: "Artist Name", albumID: nil, coverArtFilename: nil, serverID: nil, coverArtId: nil),
             isPlaying: true,
             coverImage: nil,
             dominantColor: Color("LumaAccent")
@@ -32,7 +32,7 @@ struct NowPlayingProvider: TimelineProvider {
     func placeholder(in context: Context) -> NowPlayingEntry { .placeholder }
 
     func getSnapshot(in context: Context, completion: @escaping (NowPlayingEntry) -> Void) {
-        completion(makeEntry())
+        completion(context.isPreview ? .placeholder : makeEntry())
     }
 
     func getTimeline(in context: Context, completion: @escaping (Timeline<NowPlayingEntry>) -> Void) {

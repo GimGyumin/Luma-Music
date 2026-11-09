@@ -12,24 +12,6 @@ import UIKit
 #endif
 
 extension AlbumDetailContentView {
-    // MARK: - Skeleton rows
-
-    @ViewBuilder
-    private var skeletonRows: some View {
-        ForEach(0..<5, id: \.self) { _ in
-            HStack(spacing: LumaSpacing.m) {
-                SkeletonBlock(width: 20, height: 20, cornerRadius: 4)
-                VStack(alignment: .leading, spacing: 6) {
-                    SkeletonBlock(width: 200, height: 16, cornerRadius: 4)
-                    SkeletonBlock(width: 140, height: 12, cornerRadius: 4)
-                }
-                Spacer()
-            }
-            .padding(.vertical, LumaSpacing.xs)
-            .padding(.horizontal, LumaSpacing.l)
-        }
-    }
-
     // MARK: - Compact (phone) body
 
     var compactAlbumBody: some View {
@@ -38,6 +20,10 @@ extension AlbumDetailContentView {
                 let songs = displaySongs()
                 albumHeader(vm: viewModel, songs: songs)
                     .frame(maxWidth: .infinity)
+                    .opacity(headerRevealed ? 1 : 0)
+                    .allowsHitTesting(headerRevealed)
+                    .accessibilityHidden(!headerRevealed)
+                    .animation(reduceMotion ? nil : .easeOut(duration: 0.28), value: headerRevealed)
                     .background {
                         GeometryReader { geo in
                             Color.clear.preference(
@@ -47,6 +33,10 @@ extension AlbumDetailContentView {
                         }
                     }
                 albumTrackContent(songs: songs)
+                    .opacity(showsTrackContent ? 1 : 0)
+                    .allowsHitTesting(showsTrackContent)
+                    .accessibilityHidden(!showsTrackContent)
+                    .animation(reduceMotion ? nil : .easeOut(duration: 0.30), value: showsTrackContent)
             }
         }
         .scrollContentBackground(.hidden)
@@ -73,10 +63,18 @@ extension AlbumDetailContentView {
         return HStack(alignment: .top, spacing: LumaSpacing.xxl) {
             desktopAlbumSidebar(vm: viewModel, songs: songs)
                 .frame(width: LumaWideLayout.detailSidebarWidth, alignment: .top)
+                .opacity(headerRevealed ? 1 : 0)
+                .allowsHitTesting(headerRevealed)
+                .accessibilityHidden(!headerRevealed)
+                .animation(reduceMotion ? nil : .easeOut(duration: 0.28), value: headerRevealed)
 
             ScrollView {
                 LazyVStack(spacing: 0) {
                     albumTrackContent(songs: songs)
+                        .opacity(showsTrackContent ? 1 : 0)
+                        .allowsHitTesting(showsTrackContent)
+                        .accessibilityHidden(!showsTrackContent)
+                        .animation(reduceMotion ? nil : .easeOut(duration: 0.30), value: showsTrackContent)
                 }
                 .padding(.trailing, LumaSpacing.l)
             }
@@ -116,87 +114,84 @@ extension AlbumDetailContentView {
 
     @ViewBuilder
     private func albumTrackContent(songs: [DisplayableSong]) -> some View {
-        Group {
-        if isLoadingSkeleton {
-            // A page-colored surface below the hero keeps incomplete tracks hidden.
-            // It shares the cached page palette and never overlays the zoom artwork.
-            VStack(spacing: 0) { skeletonRows }
-                .frame(maxWidth: .infinity)
-                .background(atmosphere.pageColor)
-                .accessibilityHidden(true)
-                .transition(.opacity)
+        if viewModel == nil || (viewModel?.isPrimaryContentReady != true && viewModel?.isLoading == true) {
+            // Keep the loading page free of track-row placeholders. The header remains
+            // visible while the primary payload arrives; an empty track area is less
+            // distracting than a faint skeleton list.
+            EmptyView()
         } else if let vm = viewModel {
             let serverId = container?.serverState.activeServer?.id ?? UUID()
-            if songs.isEmpty {
-                if mode == .downloadedOnly {
-                    EmptyStateView(
-                        systemImage: "arrow.down.circle.slash",
-                        title: String(localized: "No Downloaded Tracks", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale),
-                        subtitle: String(localized: "No tracks from this album have been downloaded.", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale)
-                    )
-                } else if let error = vm.error {
-                    EmptyStateView(
-                        systemImage: "exclamationmark.triangle",
-                        title: String(localized: "Unable to Load Album", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale),
-                        subtitle: error.displayMessage,
-                        action: .init(label: String(localized: "Retry", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale)) { Task { await vm.load() } }
-                    )
+            Group {
+                if songs.isEmpty {
+                    if mode == .downloadedOnly {
+                        EmptyStateView(
+                            systemImage: "arrow.down.circle.slash",
+                            title: String(localized: "No Downloaded Tracks", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale),
+                            subtitle: String(localized: "No tracks from this album have been downloaded.", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale)
+                        )
+                    } else if let error = vm.error {
+                        EmptyStateView(
+                            systemImage: "exclamationmark.triangle",
+                            title: String(localized: "Unable to Load Album", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale),
+                            subtitle: error.displayMessage,
+                            action: .init(label: String(localized: "Retry", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale)) { Task { await vm.load() } }
+                        )
+                    } else {
+                        EmptyStateView(
+                            systemImage: "music.note",
+                            title: String(localized: "No Tracks", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale),
+                            subtitle: String(localized: "This album doesn't have any tracks yet.", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale)
+                        )
+                    }
                 } else {
-                    EmptyStateView(
-                        systemImage: "music.note",
-                        title: String(localized: "No Tracks", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale),
-                        subtitle: String(localized: "This album doesn't have any tracks yet.", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale)
-                    )
-                }
-            } else {
-                #if os(iOS)
-                AlbumTrackDivider(color: headerTextColor.opacity(0.22))
-                    .padding(.horizontal, LumaSpacing.xl)
-                #endif
+                    #if os(iOS)
+                    AlbumTrackDivider(color: headerTextColor.opacity(0.22))
+                        .padding(.horizontal, LumaSpacing.xl)
+                    #endif
 
-                AlbumSongRows(
-                    songs: songs,
-                    albumId: albumId,
-                    serverId: serverId,
-                    albumArtist: vm.artistName,
-                    downloadingIds: vm.downloadingIds,
-                    titleColor: headerTextColor,
-                    secondaryColor: headerSecondaryColor,
-                    onTap: { index in
-                        Task {
-                            do {
-                                try await container?.playerService.play(tracks: songs, startIndex: index)
-                            } catch {
-                                Logger.player.error("[PLAYBACK] play failed: \(error, privacy: .public)")
+                    AlbumSongRows(
+                        songs: songs,
+                        albumId: albumId,
+                        serverId: serverId,
+                        albumArtist: vm.artistName,
+                        downloadingIds: vm.downloadingIds,
+                        titleColor: headerTextColor,
+                        secondaryColor: headerSecondaryColor,
+                        onTap: { index in
+                            Task {
+                                do {
+                                    try await container?.playerService.play(tracks: songs, startIndex: index)
+                                } catch {
+                                    Logger.player.error("[PLAYBACK] play failed: \(error, privacy: .public)")
+                                }
                             }
-                        }
-                    },
-                    onDownload: (mode == .downloadedOnly || vm.isOffline || vm.isDownloadingAlbum) ? nil : { songId in
-                        Task { await vm.downloadSong(id: songId) }
-                    },
-                    onRemoveDownload: { songId in
-                        Task { try? await container?.downloadService.remove(songId: songId, serverId: serverId) }
-                    },
-                    onAddToPlaylist: { song in songToAddToPlaylist = song }
-                )
+                        },
+                        onDownload: (mode == .downloadedOnly || vm.isOffline || vm.isDownloadingAlbum) ? nil : { songId in
+                            Task { await vm.downloadSong(id: songId) }
+                        },
+                        onRemoveDownload: { songId in
+                            Task { try? await container?.downloadService.remove(songId: songId, serverId: serverId) }
+                        },
+                        onAddToPlaylist: { song in songToAddToPlaylist = song }
+                    )
 
-                albumMetadataFooter(vm: vm, songs: songs)
-            }
-
-            if !songs.isEmpty, mode == .full,
-               vm.artistId != nil,
-               !vm.otherAlbumVersions.isEmpty
-                || !vm.moreAlbumsByArtist.isEmpty
-                || vm.isLoadingMoreAlbums {
-                if !vm.otherAlbumVersions.isEmpty {
-                    otherVersionsSection(vm: vm, ownsBottomInset: vm.moreAlbumsByArtist.isEmpty && !vm.isLoadingMoreAlbums)
+                    albumMetadataFooter(vm: vm, songs: songs)
                 }
-                if !vm.moreAlbumsByArtist.isEmpty || vm.isLoadingMoreAlbums {
-                    moreByArtistSection(vm: vm)
+
+                if !songs.isEmpty, mode == .full,
+                   vm.artistId != nil,
+                   !vm.otherAlbumVersions.isEmpty
+                    || !vm.moreAlbumsByArtist.isEmpty {
+                    if !vm.otherAlbumVersions.isEmpty {
+                        otherVersionsSection(vm: vm, ownsBottomInset: vm.moreAlbumsByArtist.isEmpty)
+                    }
+                    if !vm.moreAlbumsByArtist.isEmpty {
+                        moreByArtistSection(vm: vm)
+                    }
                 }
             }
         }
-        }
-        .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: isLoadingSkeleton)
     }
 }
+
+

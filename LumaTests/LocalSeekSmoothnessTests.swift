@@ -104,8 +104,7 @@ struct LocalSeekSmoothnessTests {
 
     @Test("Real local AAC seeks retain AVPlayer and playback intent", arguments: [false, true], [false, true])
     func realLocalAAC(cached: Bool, paused: Bool) async throws {
-        let fixture = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
-            .appendingPathComponent("Fixtures/SilentAAC.adts")
+        let fixture = LumaTestResources.fixture("Fixtures/SilentAAC.adts", sourceFile: #filePath)
         let local = FileManager.default.temporaryDirectory.appendingPathComponent("local-aac-\(UUID().uuidString).aac")
         try FileManager.default.copyItem(at: fixture, to: local)
         defer { try? FileManager.default.removeItem(at: local) }

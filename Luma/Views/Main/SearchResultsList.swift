@@ -94,6 +94,7 @@ struct SearchResultsList: View {
             }
         }
         .listStyle(.plain)
+        .tint(.primary)
         .scrollDismissesKeyboard(.interactively)
         .sheet(item: $songToAdd) { AddToPlaylistSheet(song: $0) }
     }
@@ -140,6 +141,8 @@ struct SearchResultsList: View {
                         .frame(width: 44, height: 44).contentShape(Rectangle())
                 }
                 .menuStyle(.borderlessButton)
+                .tint(.primary)
+                .foregroundStyle(.primary)
                 .accessibilityLabel(String(localized: "More Options", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale))
                 .accessibilityValue(song.isDownloaded || completedDownloads.contains(song.id)
                     ? String(localized: "Downloaded", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale) : song.title)
@@ -170,7 +173,6 @@ struct SearchResultsList: View {
         Task {
             do {
                 try await container?.playerService.play(tracks: songs, startIndex: index)
-                if !Task.isCancelled { NotificationCenter.default.post(name: .lumaOpenFullPlayer, object: nil) }
             }
             catch { Logger.player.error("[SEARCH] play failed: \(error, privacy: .public)") }
         }

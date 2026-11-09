@@ -35,6 +35,7 @@ nonisolated final class NetworkMonitor: Sendable {
                 serverState.isExpensive = expensive
                 serverState.isCellularConnection = cellular
                 serverState.isNetworkConstrained = constrained
+                DiagnosticsCenter.shared.updateContext(.offlineState, value: online ? .online : .offline)
                 await onChange(snapshot)
             }
         }

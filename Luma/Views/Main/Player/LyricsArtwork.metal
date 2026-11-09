@@ -36,6 +36,11 @@ float lyricsNoise(float2 p) {
                mix(lyricsHash(cell + float2(0, 1)), lyricsHash(cell + 1), f.x), f.y);
 }
 struct LyricsColorProfile { float4 average; float4 distribution; float4 colorAnchor; };
+float lyricsChroma(float3 color) {
+    float peak = max(color.r, max(color.g, color.b));
+    return (peak - min(color.r, min(color.g, color.b))) / max(peak, 0.00001);
+}
+
 constant float3 lyricsLuma = float3(0.2289746, 0.6917385, 0.0792869);
 
 fragment float4 lumaLyricsScene(LyricsVertex in [[stage_in]],
@@ -51,7 +56,7 @@ fragment float4 lumaLyricsScene(LyricsVertex in [[stage_in]],
     float2 drift = float2(time * 0.025, time * -0.018);
     float2 warp = float2(lyricsNoise(point * 2.0 + drift),
                          lyricsNoise(point * 2.0 - drift + 13.1)) - 0.5;
-    point += warp * 0.035;
+    point += warp * 0.018;
     float3 result = profile.average.rgb;
     for (uint layer = 0; layer < 4; layer++) {
         float4 transform = layers[layer];
@@ -76,10 +81,24 @@ fragment float4 lumaLyricsComposite(LyricsVertex in [[stage_in]],
                                          constant float4 &parameters [[buffer(0)]],
                                          constant LyricsColorProfile &profile [[buffer(1)]]) {
     constexpr sampler imageSampler(filter::linear, address::clamp_to_edge);
-    float3 color = blurred.sample(imageSampler, in.uv).rgb;
+    // A bounded radial displacement expands the color field. The boundary stays
+    // pinned, so album edges and the entire screen never zoom with the beat.
+    float pulse = clamp((parameters.w - 1.0) / 0.010, 0.0, 1.0);
+    float2 center = float2(0.5 + 0.12 * sin(parameters.y * 0.08), 0.5 + 0.10 * cos(parameters.y * 0.06));
+    float2 delta = in.uv - center;
+    float edge = min(min(in.uv.x, 1.0 - in.uv.x), min(in.uv.y, 1.0 - in.uv.y));
+    float pin = smoothstep(0.0, 0.18, edge);
+    float weight = 1.0 - smoothstep(0.08, 0.72, length(delta));
+    float2 uv = in.uv - delta * (parameters.w - 1.0) * weight * pin;
+    float3 color = blurred.sample(imageSampler, uv).rgb;
+    // Keep the lower field close to the cover's chromatic anchor as pale details drift through.
+    float chromaDepth = smoothstep(0.025, 0.18, profile.distribution.z);
+    float dilution = smoothstep(0.0, 0.45, lyricsChroma(profile.colorAnchor.rgb) - lyricsChroma(color));
+    float anchorWeight = max(0.85 * dilution, mix(0.16, 0.62, smoothstep(0.32, 0.98, in.uv.y)));
+    color = mix(color, profile.colorAnchor.rgb, profile.colorAnchor.w * chromaDepth * anchorWeight);
     float luma = dot(color, lyricsLuma);
     // Color adjustment follows blur, in linear P3, with gentle adaptive saturation.
-    float saturation = mix(1.16, 1.04, smoothstep(0.20, 0.80, profile.distribution.z));
+    float saturation = mix(1.31, 1.18, smoothstep(0.20, 0.80, profile.distribution.z));
     float3 chroma = (color - luma) * saturation;
     // Uniformly limit chroma rather than clipping individual channels and changing hue.
     float low = min(chroma.r, min(chroma.g, chroma.b));
@@ -97,8 +116,23 @@ fragment float4 lumaLyricsComposite(LyricsVertex in [[stage_in]],
     color *= mapped / max(luma, 0.00001);
     // All depth was tone-mapped above; no black overlay or abruptly clipped shadows.
     float vignette = smoothstep(0.25, 0.80, length(in.uv - 0.5));
-    float3 incoming = color * (1.0 - vignette * 0.04);
-    return float4(mix(previous.sample(imageSampler, in.uv).rgb, incoming, parameters.z), 1);
+    // Even nearly uniform covers have a gently moving field, with depth on the kick.
+    float field = 1.0 - smoothstep(0.04, 0.62, length(uv - center));
+    // Neutral art stays uniform at rest. Even black art reveals the expanding light on a measured kick.
+    float3 incoming = color * (0.94 + (field * 0.12 - vignette * 0.04) * chromaDepth)
+        + 0.003 * chromaDepth * field;
+    // Subtle color-preserving luminance follows the same finite onset envelope.
+    // The glow expands locally; quiet input leaves the ambient field intact.
+    float radius = length((uv - center) * float2(parameters.x, 1.0));
+    float bloom = 1.0 - smoothstep(0.12, 0.36 + 0.045 * pulse, radius);
+    incoming *= 1.0 + 0.045 * pulse * bloom * pin;
+    // Broad diffusion can lift colored shadows into gray. Restore contrast in
+    // linear light, easing into the lower portion without tinting neutral covers.
+    incoming *= 1.0 - chromaDepth * mix(0.09, 0.56, smoothstep(0.40, 1.0, in.uv.y));
+    if (parameters.z < 1.0) {
+        incoming = mix(previous.sample(imageSampler, in.uv).rgb, incoming, parameters.z);
+    }
+    return float4(incoming, 1);
 }
 
 fragment float4 lumaLyricsPresent(LyricsVertex in [[stage_in]],

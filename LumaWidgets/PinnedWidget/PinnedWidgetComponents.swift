@@ -10,26 +10,23 @@ struct PinnedTileView: View {
     let item: SharedPinnedItem
     let image: PlatformImage?
     var coverSize: CGFloat = 60
+    var titleSize: CGFloat = 11
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(spacing: 5) {
             artwork
                 .frame(width: coverSize, height: coverSize)
 
             Text(item.title)
-                .font(.system(size: 11, weight: .semibold))
+                .font(.system(size: titleSize, weight: .medium))
                 .foregroundStyle(.primary)
+                .multilineTextAlignment(.center)
                 .lineLimit(2)
-                .frame(width: coverSize, alignment: .leading)
-
-            if let subtitle = item.subtitle, !subtitle.isEmpty {
-                Text(subtitle)
-                    .font(.system(size: 10, weight: .regular))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .frame(width: coverSize, alignment: .leading)
-            }
+                .truncationMode(.tail)
+                .frame(maxWidth: .infinity, alignment: .center)
+                .fixedSize(horizontal: false, vertical: true)
         }
+        .frame(maxWidth: .infinity)
     }
 
     @ViewBuilder
@@ -43,6 +40,7 @@ struct PinnedTileView: View {
                 ZStack {
                     Color.primary.opacity(0.08)
                     Image(systemName: placeholderIcon)
+                        .font(.system(size: coverSize * 0.3, weight: .medium))
                         .foregroundStyle(.secondary)
                 }
             }
@@ -50,7 +48,7 @@ struct PinnedTileView: View {
         if item.kind == .artist {
             content.clipShape(Circle())
         } else {
-            content.clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            content.clipShape(RoundedRectangle(cornerRadius: max(8, coverSize * 0.12), style: .continuous))
         }
     }
 

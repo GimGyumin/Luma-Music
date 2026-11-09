@@ -23,8 +23,7 @@ struct AMLLPortTests {
         let timelines: [Timeline], seeks: [Seek], springs: [Spring]
     }
     private func reference() throws -> Reference {
-        let url = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
-            .appendingPathComponent("Fixtures/amll-reference.json")
+        let url = LumaTestResources.fixture("Fixtures/amll-reference.json", sourceFile: #filePath)
         return try JSONDecoder().decode(Reference.self, from: Data(contentsOf: url))
     }
 

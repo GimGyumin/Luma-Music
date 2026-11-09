@@ -334,8 +334,15 @@ actor ServerService: ServerServiceProtocol {
     }
 
     func testConnection() async throws {
-        let client = try await makeSwiftSonicClient()
-        try await client.ping()
+        let trace = DiagnosticsCenter.shared.begin(.serverConnect)
+        do {
+            let client = try await makeSwiftSonicClient()
+            try await client.ping()
+            trace.finish(.success)
+        } catch {
+            trace.finish(DiagnosticsResult.classify(error))
+            throw error
+        }
     }
 
     func testConnection(
@@ -355,14 +362,20 @@ actor ServerService: ServerServiceProtocol {
             retryPolicy: .none,
             logSubsystem: "app.luma.server"
         )
+        let connectTrace = DiagnosticsCenter.shared.begin(.serverConnect)
         do {
             try await client.ping()
+            connectTrace.finish(.success)
         } catch {
+            connectTrace.finish(DiagnosticsResult.classify(error))
             throw mapToConnectionTestError(error)
         }
+        let authTrace = DiagnosticsCenter.shared.begin(.authentication)
         do {
             _ = try await client.getUser(username: username)
+            authTrace.finish(.success)
         } catch {
+            authTrace.finish(DiagnosticsResult.classify(error))
             throw mapToConnectionTestError(error)
         }
     }

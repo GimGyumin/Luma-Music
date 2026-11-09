@@ -1,5 +1,6 @@
 import Foundation
 import AVFoundation
+import AudioStreaming
 import SwiftSonic
 import Testing
 @testable import Luma
@@ -63,18 +64,23 @@ struct PlaybackRequestCancellationTests {
         )
     }
 
-    @Test("Restored playback retries without losing its checkpoint", arguments: [false, true])
-    func restoredSelectionWithoutSourceCanRetryAtSavedPosition(failFirst: Bool) async throws {
-        let url = FileManager.default.temporaryDirectory.appendingPathComponent("restored-\(UUID()).wav")
-        defer { try? FileManager.default.removeItem(at: url) }
+    private func silentWAV(seconds: UInt32) throws -> URL {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("gapless-\(UUID()).wav")
         let format = try #require(AVAudioFormat(standardFormatWithSampleRate: 8000, channels: 1))
-        let pcm = try #require(AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 240000))
-        pcm.frameLength = 240000
+        let pcm = try #require(AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 8000 * seconds))
+        pcm.frameLength = pcm.frameCapacity
         pcm.floatChannelData?[0].update(repeating: 0, count: Int(pcm.frameLength))
         do {
             let file = try AVAudioFile(forWriting: url, settings: format.settings)
             try file.write(from: pcm)
         }
+        return url
+    }
+
+    @Test("Restored playback retries without losing its checkpoint", arguments: [false, true])
+    func restoredSelectionWithoutSourceCanRetryAtSavedPosition(failFirst: Bool) async throws {
+        let url = try silentWAV(seconds: 30)
+        defer { try? FileManager.default.removeItem(at: url) }
         let engine = FakePlaybackEngine()
         let container = try AppContainer(inMemory: true, engine: engine)
         let resolver = RestoreRetryResolver(url: url)
@@ -102,6 +108,109 @@ struct PlaybackRequestCancellationTests {
         }
         #expect(player.systemEngine.progress >= 11.8)
         #expect(container.playerState.playbackState != .paused)
+        await player.stop()
+    }
+
+    @Test func naturalGaplessQueueFinishesAtEndEvenWithoutNativeNotifications() async throws {
+        let engine = FakePlaybackEngine()
+        let container = try AppContainer(inMemory: true, engine: engine)
+        let file = try silentWAV(seconds: 5)
+        let successor = try silentWAV(seconds: 5)
+        defer {
+            try? FileManager.default.removeItem(at: file)
+            try? FileManager.default.removeItem(at: successor)
+        }
+        let resolver = RestoreRetryResolver(url: file)
+        let player = makePlayer(container: container, resolver: resolver, engine: engine)
+        let queue = ["first", "second"].map { DisplayableSong(id: $0, title: $0, duration: 5) }
+        container.playerState.queue = queue
+        container.playerState.currentIndex = 0
+        container.playerState.currentTrack = queue[0]
+        container.playerState.duration = 5
+        container.playerState.playbackState = .playing
+        container.playerState.repeatMode = .off
+        container.playerState.isAutoExtendEnabled = false
+        _ = await player.installPreparedHandoff(next: queue[1], currentURL: file, nextURL: successor)
+        let native = player.systemEngine
+        defer { native.stop() }
+        native.volume = 0
+        native.resume()
+        await player.startProgressTimer()
+        let deadline = Date().addingTimeInterval(16)
+        while container.playerState.playbackState != .paused, Date() < deadline {
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        #expect(container.playerState.currentIndex == 1)
+        #expect(container.playerState.currentTrack?.id == "second")
+        #expect(container.playerState.playbackState == .paused)
+        #expect(container.playerState.position >= 4.9)
+        #expect(resolver.calls == 0)
+        await player.stop()
+    }
+
+    @Test func delayedNativeHandoffKeepsQueueAndClockOnTheSameSong() async throws {
+        let engine = FakePlaybackEngine()
+        let container = try AppContainer(inMemory: true, engine: engine)
+        let file = try silentWAV(seconds: 5)
+        let successor = try silentWAV(seconds: 5)
+        defer {
+            try? FileManager.default.removeItem(at: file)
+            try? FileManager.default.removeItem(at: successor)
+        }
+        let resolver = RestoreRetryResolver(url: file)
+        let player = makePlayer(container: container, resolver: resolver, engine: engine)
+        let queue = [song("ending"), song("successor")]
+        container.playerState.queue = queue
+        container.playerState.currentIndex = 0
+        container.playerState.currentTrack = queue[0]
+        container.playerState.position = 179
+        container.playerState.duration = 180
+        container.playerState.playbackState = .playing
+        let generation = await player.installPreparedHandoff(next: queue[1], currentURL: file, nextURL: successor)
+        let native = player.systemEngine
+        defer { native.stop() }
+        try #require(native.advanceToPreparedNext(expectedURL: successor))
+        let deadline = Date().addingTimeInterval(3)
+        while native.state != .playing, Date() < deadline { try await Task.sleep(for: .milliseconds(20)) }
+        try #require(native.state == .playing)
+        try await Task.sleep(for: .milliseconds(1250))
+        native.pause()
+
+        let outgoing = await player.playbackContext
+        #expect(await player.progressForPresentation(context: outgoing) == nil)
+        #expect(container.playerState.position == 179)
+        await player.handleSystemPlayerItemChanged(generation: generation)
+        await player.handleSystemPlayerItemChanged(generation: generation)
+        #expect(container.playerState.currentIndex == 1)
+        #expect(container.playerState.currentTrack?.id == "successor")
+        #expect(container.playerState.position > 1)
+        #expect(abs(container.playerState.position - native.progress) < 0.1)
+        #expect(resolver.calls == 0)
+        #expect(!native.hasQueuedItem)
+        await player.stop()
+    }
+
+    @Test func endOfTrackFallbackCanReplaceItsOwnProgressTimer() async throws {
+        let engine = FakePlaybackEngine()
+        let container = try AppContainer(inMemory: true, engine: engine)
+        let file = LumaTestResources.fixture("Fixtures/SilentMP3.mp3", sourceFile: #filePath)
+        let resolver = RestoreRetryResolver(url: file)
+        let player = makePlayer(container: container, resolver: resolver, engine: engine)
+        let queue = [song("ending"), song("successor")]
+        container.playerState.queue = queue
+        container.playerState.currentIndex = 0
+        container.playerState.currentTrack = queue[0]
+        container.playerState.duration = 180
+        container.playerState.position = 180
+        container.playerState.playbackState = .playing
+
+        await player.runFinalProgressTick(at: 180)
+
+        #expect(container.playerState.currentIndex == 1)
+        #expect(container.playerState.currentTrack?.id == "successor")
+        #expect(container.playerState.playbackState.hasPlaybackIntent)
+        #expect(player.systemEngine.hasCurrentItem || engine.calls.contains(.play(file, [:])))
+        #expect(resolver.calls == 1)
         await player.stop()
     }
 
@@ -191,6 +300,25 @@ private final class HeldResumeResolver: MediaResolverProtocol {
 }
 
 private extension PlayerService {
+    func installPreparedHandoff(next: DisplayableSong, currentURL: URL, nextURL: URL) -> UInt64 {
+        systemPlayback.isActive = true
+        // Deliver the current-item notification manually after the successor's clock moves.
+        systemEngine.eventHandler = nil
+        currentSource = .downloaded(currentURL)
+        gaplessBridge.arm(next: next, source: .downloaded(nextURL), epoch: playbackEpoch)
+        systemEngine.start(url: currentURL, headers: [:], generation: systemPlayback.generation, paused: true)
+        #expect(systemEngine.prepareNext(url: nextURL, headers: [:]))
+        return systemPlayback.generation
+    }
+
+    func runFinalProgressTick(at position: Double) async {
+        endOfTrackStallProgress = position
+        endOfTrackStallStartedAt = Date().addingTimeInterval(-2)
+        let tick = Task { await checkEndOfTrackFallback(progress: position) }
+        progressTask = tick
+        await tick.value
+    }
+
     func primeColdResume() {
         currentSource = .downloaded(URL(fileURLWithPath: "/tmp/cold-resume.wav"))
         systemPlayback.isActive = true

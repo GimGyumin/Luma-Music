@@ -8,6 +8,7 @@ import SwiftSonic
 import Combine
 import OSLog
 import QuartzCore
+import NaturalLanguage
 
 extension LyricsViewModel {
     /// Seeds the lyric list used by the UI. Never leave `translatedLyrics` empty while loaded.
@@ -30,8 +31,11 @@ extension LyricsViewModel {
         let ttmlData = rawTTMLData
         documentBuildGeneration &+= 1
         let generation = documentBuildGeneration
+        let parseTrace = DiagnosticsCenter.shared.begin(.lyricsParse)
+        var parseResult = DiagnosticsResult.failure
+        defer { parseTrace.finish(Task.isCancelled ? .cancelled : parseResult) }
         let preferredLanguages = [LyricsTranslationSettings.shared.targetLanguage] + Locale.preferredLanguages
-        let buildTask = Task.detached(priority: .userInitiated) { () -> (document: LyricDocument?, rows: [LyricDisplayRow], fallback: [String?]) in
+        let buildTask = Task.detached(priority: .userInitiated) { () -> (document: LyricDocument?, rows: [LyricDisplayRow], fallback: [String?], englishOnly: Bool) in
             var document = LyricDocumentBuilder.build(preferringTTML: ttmlData, structured: structured)
             document?.selectTranslation(preferredLanguages: preferredLanguages)
             document?.preferredPronunciationLanguages = preferredLanguages
@@ -49,7 +53,12 @@ extension LyricsViewModel {
                 cached[row.text] = value ?? ""
                 return value
             }
-            return (document, rows, fallback)
+            let texts = rows.map(\.text)
+            let sample = texts.lazy.filter { !$0.isEmpty }.prefix(12).joined(separator: "\n")
+            let metadata = LyricsLanguage.normalizedLanguageCode(document?.language ?? structured.lang)
+            let englishOnly = !sample.isEmpty && !LyricsLanguage.needsTranslation(lines: texts, targetCode: "en")
+                && (metadata == "en" || NLLanguageRecognizer.dominantLanguage(for: sample) == .english)
+            return (document, rows, fallback, englishOnly)
         }
         let parsed = await withTaskCancellationHandler {
             await buildTask.value
@@ -58,7 +67,9 @@ extension LyricsViewModel {
         }
 
         guard generation == documentBuildGeneration, !Task.isCancelled else { return }
+        parseResult = .success
         lyricDocument = parsed.document
+        hasEnglishOnlyLyrics = parsed.englishOnly
         displayRows = parsed.rows
         let documentLines = parsed.document?.allLines ?? []
         pronunciationRows = documentLines.map { line in
@@ -170,6 +181,9 @@ extension LyricsViewModel {
     // MARK: Helpers
 
     func applyCurrentLanguage() async {
+        let syncTrace = DiagnosticsCenter.shared.begin(.lyricsSyncReady)
+        var syncReady = false
+        defer { syncTrace.finish(syncReady ? .success : .cancelled) }
 
         guard let list = lyricsList
         else {
@@ -248,13 +262,17 @@ extension LyricsViewModel {
             let hasExistingTranslations = translatedLyrics.contains(where: { !$0.translatedText.isEmpty && $0.translatedText != $0.originalText })
             await seedOriginalLyrics(from: structured, hideTranslations: false)
             guard generation == languageGeneration, !Task.isCancelled else { return }
+            if hasTimedPlayback {
+                syncReady = true
+                syncTrace.finish(.success)
+            }
             // Restore visibility when translations were previously shown.
             if wasTranslationVisible && hasExistingTranslations {
                 areTranslationsVisible = true
             }
 
             let settings = LyricsTranslationSettings.shared
-            guard settings.isTranslationEnabled else {
+            guard settings.isTranslationEnabled, !hidesEnglishTranslation else {
                 reconcileTracking()
                 return
             }

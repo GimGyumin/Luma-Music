@@ -152,7 +152,7 @@ struct SettingsActionRow: View {
         Button(role: isDestructive ? .destructive : nil, action: action) {
             HStack(spacing: LumaSpacing.s) {
                 SettingsRowTitle(title, subtitle: subtitle)
-                    .foregroundStyle(isDestructive ? Color.red : Color.blue)
+                    .foregroundStyle(isDestructive ? Color.red : LumaColors.controlAccent)
                 Spacer(minLength: LumaSpacing.s)
                 if isBusy {
                     ProgressView().controlSize(.small)
@@ -219,7 +219,7 @@ struct SettingsChoiceList<Item: SettingsChoiceItem>: View {
                             Spacer(minLength: LumaSpacing.s)
                             Image(systemName: "checkmark")
                                 .font(.lumaSettingsHeader)
-                                .foregroundStyle(.blue)
+                                .foregroundStyle(LumaColors.controlAccent)
                                 .opacity(selection == item ? 1 : 0)
                                 .accessibilityHidden(true)
                         }
@@ -288,7 +288,7 @@ struct SettingsSubpageStyle: ViewModifier {
             // One restrained icon treatment everywhere: no per-row rainbow.
             .environment(\.settingsSubduedIcons, true)
             .font(.lumaBody)
-            .tint(.blue)
+            .tint(LumaColors.controlAccent)
             .toggleStyle(SettingsToggleStyle())
             .headerProminence(.standard)
             #if os(iOS)

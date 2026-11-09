@@ -159,6 +159,19 @@ struct ArtworkSceneTests {
         try writePreview(result, name: "luma-lyrics-neutral-\(level).png")
     }
 
+    @Test func warmCoverRetainsHueAndDepthBelowLyrics() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let gpu = try LyricsArtworkGPU(device: device)
+        let color = SIMD4<UInt8>(175, 125, 74, 255)
+        let profile = ArtworkSceneColorProfile.analyze(rgba: [color.x, color.y, color.z, 255], width: 1, height: 1)
+        gpu.replaceArtwork(try artwork(device: device, colors: [color]), profile: profile, crossfade: false)
+        let result = try pixels(gpu: gpu, time: 0)
+        let top = (32 * 192 + 96) * 4
+        let bottom = (368 * 192 + 96) * 4
+        #expect(result[bottom] > result[bottom + 1] && result[bottom + 1] > result[bottom + 2])
+        #expect(result[bottom] > 0.01 && result[bottom] < result[top] * 0.30)
+    }
+
     @MainActor
     @Test("Player and lyrics share one cached color-managed texture")
     func textureReuse() async throws {
@@ -193,7 +206,7 @@ struct ArtworkSceneTests {
     @MainActor
     @Test("Optional real album preview uses the production color-managed preparation")
     func realAlbumPreview() throws {
-        let url = URL(fileURLWithPath: "/tmp/luma-xscape-cover.jpg")
+        let url = LumaTestResources.temporaryFile("luma-xscape-cover.jpg")
         guard FileManager.default.fileExists(atPath: url.path) else {
             print("Real Xscape artwork unavailable; synthetic cover checks still run.")
             return
@@ -213,6 +226,21 @@ struct ArtworkSceneTests {
             #expect(output.allSatisfy { $0.isFinite && $0 >= 0 && $0 <= 1 })
             try writePreview(output, name: "luma-xscape-scene-\(Int(time)).png")
         }
+    }
+
+    @MainActor
+    @Test func bassPulseChangesCompositeWithStoppedFlow() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let gpu = try LyricsArtworkGPU(device: device)
+        let texture = try artwork(device: device, colors: [SIMD4(240, 60, 30, 255), SIMD4(20, 60, 185, 255)])
+        gpu.replaceArtwork(texture, crossfade: false)
+        let rest = try pixels(gpu: gpu, time: 3)
+        let scale = PlaybackBassEnvelope.scale(bass: 0.9, reaction: 0.30)
+        let pulse = try pixels(gpu: gpu, time: 3, pulseScale: scale)
+        #expect(scale > 1 && scale <= 1.01)
+        #expect(distance(rest, pulse) > 0.00001 && distance(rest, pulse) < 0.005)
+        #expect(Array(rest.prefix(192 * 4)) == Array(pulse.prefix(192 * 4)))
+        #expect(try pixels(gpu: gpu, time: 3) == rest)
     }
 
     private func artwork(device: any MTLDevice, colors: [SIMD4<UInt8>]) throws -> any MTLTexture {
@@ -237,8 +265,9 @@ struct ArtworkSceneTests {
     }
 
     private func pixels(gpu: LyricsArtworkGPU, time: Float, fade: Float = 1,
-                        size: CGSize = CGSize(width: 192, height: 384), flowSpeed: Double = 1) throws -> [Float] {
-        let frame = try #require(gpu.render(size: size, elapsed: time, transition: fade, flowSpeed: flowSpeed))
+                        size: CGSize = CGSize(width: 192, height: 384), flowSpeed: Double = 1,
+                        pulseScale: Float = 1) throws -> [Float] {
+        let frame = try #require(gpu.render(size: size, elapsed: time, transition: fade, flowSpeed: flowSpeed, pulseScale: pulseScale))
         let row = frame.texture.width * 8
         let buffer = try #require(gpu.device.makeBuffer(length: row * frame.texture.height, options: .storageModeShared))
         let blit = try #require(frame.commandBuffer.makeBlitCommandEncoder())

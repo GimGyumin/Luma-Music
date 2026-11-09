@@ -13,6 +13,9 @@ final class MediaIdentityService {
     private let modelContainer: ModelContainer
     private static let maximumAliasDepth = 64
     private var lookupRevision: UInt64 = 0
+    /// Changes whenever an identity/alias is observed. UI caches that resolve
+    /// favorite/download identities can include this in their invalidation key.
+    var identityRevision: UInt64 { lookupRevision }
     nonisolated private let backgroundLookup: IdentityLookupWorker
 
     init(modelContainer: ModelContainer) {

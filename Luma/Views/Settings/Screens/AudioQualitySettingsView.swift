@@ -15,12 +15,10 @@ struct AudioQualitySettingsView: View {
                     SettingsRowTitle("Lossless Audio")
                 }
             } footer: {
-                VStack(alignment: .leading, spacing: LumaSpacing.l) {
-                    SettingsSectionFooter("Lossless preserves all the detail in the original audio. Streaming and downloading lossless files uses more data and storage.")
-                    NavigationLink("About Lossless Audio") { LosslessAudioInformationView() }
-                        .font(.lumaFootnote)
-                        .textCase(nil)
-                }
+                ContextualGuideNote(
+                    guide: .losslessAudio,
+                    message: String(localized: "Lossless keeps the server's original audio. Hi-Res depends on the source file, connection, and output device; Bluetooth may reduce it.", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale)
+                )
             }
             Section {
                 SettingsNavigationRow("Wi-Fi Streaming", value: settings.formatForCurrentNetwork(isLimited: false).title) {
@@ -91,21 +89,3 @@ struct AudioQualitySelectionView: View {
     }
 }
 
-private struct LosslessAudioInformationView: View {
-    var body: some View {
-        Form {
-            Section {
-                Text("Lossless preserves all the detail in the original audio. Streaming and downloading lossless files uses more data and storage.")
-            }
-            Section {
-                Text("Luma plays the original file from your server. Lossless and high-resolution availability depend on that file; choosing Lossless does not turn a lossy recording into lossless audio.")
-            }
-            Section {
-                Text("The connected audio device can limit the output quality. Bluetooth playback may compress the audio even when the source file is lossless.")
-            }
-        }
-        .formStyle(.grouped)
-        .modifier(SettingsSubpageStyle())
-        .navigationTitle(Text("About Lossless Audio"))
-    }
-}

@@ -63,6 +63,19 @@ nonisolated enum SharedStorage {
 
     static var isAppGroupAvailable: Bool { resolvedSuite() != nil }
 
+    /// Write App Group prefs and wait until the utility-queue write has completed.
+    /// Use before `WidgetCenter.reloadTimelines`; otherwise the widget can read the
+    /// previous snapshot while the async write is still in flight.
+    static func writeAndWait(_ body: (UserDefaults) -> Void) {
+        if DispatchQueue.getSpecific(key: ioQueueKey) != nil {
+            body(defaults)
+            return
+        }
+        ioQueue.sync {
+            body(defaults)
+        }
+    }
+
     /// Write App Group prefs on a utility queue (never blocks the main actor on cfprefsd).
     static func write(_ body: @escaping (UserDefaults) -> Void) {
         ioQueue.async {
@@ -101,6 +114,7 @@ nonisolated enum SharedStorageKey: String {
     case pinnedItems
     case dominantColors
     case nowPlayingState
+    case personalMixes
 }
 
 /// Stable cross-process DTO for a recently played track.
@@ -112,6 +126,18 @@ nonisolated struct SharedTrackInfo: Codable, Hashable, Sendable {
     let albumID: String?
     /// Filename relative to SharedStorage.coverArtCacheDirectory, nil if not cached yet.
     let coverArtFilename: String?
+    /// Account that produced this item. Optional for rows written by older builds.
+    let serverID: String?
+    /// Raw server cover-art id. Optional for backwards compatibility with older shared rows.
+    let coverArtId: String?
+}
+
+/// Stable cross-process DTO for a personalized mix card.
+/// Never rename fields — UserDefaults persists JSON between app and widget processes.
+nonisolated struct SharedMixInfo: Codable, Hashable, Sendable, Identifiable {
+    let kind: String
+    let trackCount: Int
+    var id: String { kind }
 }
 
 /// Stable cross-process DTO for a pinned item.

@@ -6,6 +6,19 @@ import Testing
 @Suite("Phone landscape player")
 @MainActor
 struct PhoneLandscapePlayerTests {
+    @Test func safeAreaInsetsKeepBothColumnsInsideTheUsableViewport() {
+        let metrics = PhoneLandscapePlayerMetrics(
+            size: CGSize(width: 874, height: 402),
+            safeAreaInsets: EdgeInsets(top: 0, leading: 59, bottom: 21, trailing: 59)
+        )
+        #expect(metrics.artworkFrame.minX >= 59)
+        #expect(metrics.artworkFrame.minY >= 0)
+        #expect(metrics.artworkFrame.maxY <= 402 - 21)
+        #expect(metrics.controlsFrame.minX > metrics.artworkFrame.maxX)
+        #expect(metrics.controlsFrame.maxY <= 402 - 21)
+        #expect(metrics.controlsFrame.maxX <= 874 - 59)
+    }
+
     @Test func artworkAndControlsStaySeparateAcrossPhoneViewports() throws {
         // Full-screen sizes. The reference margins keep the columns clear of
         // landscape camera cutouts and leave room for 44pt tap targets.

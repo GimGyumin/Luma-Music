@@ -28,6 +28,11 @@ public enum LumaColors {
     
     /// Text/icon color on top of accentBackground.
     public static let accentForeground = Color("LumaAccentForeground")
+
+    /// Neutral system-control accent for generic menus, checkmarks, disclosure actions and
+    /// toolbar buttons. Brand blue stays opt-in through `accent`/`lumaAccent`; destructive
+    /// roles keep the system red.
+    public static var controlAccent: Color { .primary }
     
     // MARK: — Backgrounds
     public static let backgroundPrimary = Color("LumaBackgroundPrimary")

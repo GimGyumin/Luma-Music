@@ -30,7 +30,7 @@ final class ServerState {
     var servers: [ServerSnapshot] = []
     @ObservationIgnored private(set) var accountRevision: UInt64 = 0
     var activeServer: ServerSnapshot? {
-        didSet { if oldValue != activeServer { accountRevision &+= 1 } }
+        didSet { if oldValue != activeServer { _ = activeServer?.localReplayID; accountRevision &+= 1 } }
     }
     var isConnected: Bool = false
     /// False when the **active server** cannot be reached: a ping timed out, the host refused the

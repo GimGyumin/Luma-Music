@@ -290,3 +290,49 @@ struct SongsListViewModelTests {
         #expect(stub.requestedOffsets == [0])
     }
 }
+
+@Suite("Song sections keep display and playback positions aligned")
+struct SongSectionPlaybackTests {
+    private var songs: [DisplayableSong] {
+        [
+            DisplayableSong(id: "a", title: "Apple", artist: "Alpha", duration: 180),
+            DisplayableSong(id: "ga", title: "가을", artist: "가수", duration: 180),
+            DisplayableSong(id: "na", title: "나무", artist: "나무", duration: 180),
+            DisplayableSong(id: "number", title: "123", duration: 180)
+        ]
+    }
+
+    @Test func koreanRowsAndPlaybackUseTheSamePositions() {
+        let sections = SongAlphabetSection.grouped(songs, sort: .title, locale: Locale(identifier: "ko_KR"))
+        let queue = sections.flatMap(\.songs)
+        #expect(queue.map(\.id) == ["ga", "na", "a", "number"])
+        for section in sections {
+            for (index, song) in section.songs.enumerated() {
+                #expect(queue[section.startIndex + index].id == song.id)
+            }
+        }
+    }
+
+    @Test func englishAndArtistSortsKeepIndicesAligned() {
+        for locale in [Locale(identifier: "en_US"), Locale(identifier: "ko_KR")] {
+            for sort in [SongSort.title, .artist] {
+                let sections = SongAlphabetSection.grouped(songs, sort: sort, locale: locale)
+                let queue = sections.flatMap(\.songs)
+                #expect(sections.last?.letter == "#")
+                for section in sections {
+                    for (index, song) in section.songs.enumerated() {
+                        #expect(queue[section.startIndex + index].id == song.id)
+                    }
+                }
+            }
+        }
+    }
+
+    @Test func filteringRebuildsPositionsFromZero() {
+        let matches = songs.filter { $0.id == "a" || $0.id == "na" }
+        let sections = SongAlphabetSection.grouped(matches, sort: .title, locale: Locale(identifier: "ko_KR"))
+        #expect(sections.flatMap(\.songs).map(\.id) == ["na", "a"])
+        #expect(sections.map(\.startIndex) == [0, 1])
+        #expect(SongAlphabetSection.grouped([], sort: .title, locale: .current).isEmpty)
+    }
+}

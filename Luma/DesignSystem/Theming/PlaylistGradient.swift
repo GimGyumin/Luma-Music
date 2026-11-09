@@ -178,11 +178,7 @@ struct AnimatedGradientHeroView: View {
         .clipped()
         .onAppear { isVisible = true }
         .onDisappear { isVisible = false }
-        .onGeometryChange(for: Bool.self) { proxy in
-            let frame = proxy.frame(in: .global)
-            // ScrollView keeps heroes mounted when scrolled away — pause TimelineView off-screen.
-            return frame.height > 8 && frame.maxY > 0 && frame.minY < 3500
-        } action: { onScreen in
+        .onScrollVisibilityChange(threshold: 0.01) { onScreen in
             isOnScreen = onScreen
         }
     }

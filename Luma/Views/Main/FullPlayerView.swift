@@ -81,6 +81,9 @@ struct FullPlayerView: View {
     var onClose: (() -> Void)? = nil
     var openWithLyrics: Bool = false
     var openWithQueue: Bool = false
+    /// Siri can request the translation or pronunciation layer; normal internal
+    /// navigation leaves this at `.lyrics`.
+    var openWithLyricsMode: LumaLyricsViewMode = .lyrics
 
     @State private var fallbackViewModel = FullPlayerViewModel()
     private var vm: FullPlayerViewModel { container?.fullPlayerViewModel ?? fallbackViewModel }
@@ -89,12 +92,20 @@ struct FullPlayerView: View {
     @State private var resolvedArtworkID: String?
     @State private var resolvedArtworkImage: PlatformImage?
     @State private var resolvedArtworkTrackID: String?
-    @State private var surface: PlayerSurface = .player
+    /// Device automation can open the player directly on a surface. Normal launches
+    /// never set this variable; `NativeSearchLifecycle` uses the same pattern for URLs.
+    @State private var surface: PlayerSurface = FullPlayerView.initialSurface
+    private static var initialSurface: PlayerSurface {
+        ProcessInfo.processInfo.environment["LUMA_TEST_PLAYER_SURFACE"] == "lyrics" ? .lyrics : .player
+    }
     private var showLyrics: Bool { surface == .lyrics }
     @State private var lyricsViewModel: LyricsViewModel?
+    @State private var appliedLyricsMode = false
+    @State private var pendingLyricsMode: LumaLyricsViewMode?
     @State private var lyricsVisibilityOwner = UUID()
     @State private var atmosphereReady = false
     @State private var isRotating = false
+    @State private var openTrace: PerformanceTrace?
     @State private var isLandscapeViewport = false
     @State private var lyricsChromeAutoHideTask: Task<Void, Never>?
     @State private var atmosphereTask: Task<Void, Never>?
@@ -208,6 +219,16 @@ struct FullPlayerView: View {
                 // (notably play/pause artwork scaling) retain their own transactions.
                 .animation(nil, value: isRotating)
                 .appEntityIdentifier(nowPlayingEntityIdentifier(playerState))
+                .onReceive(NotificationCenter.default.publisher(for: .lumaOpenFullPlayerLyrics)) { note in
+                    withAnimation(LumaAnimation.surface) { surface = .lyrics }
+                    guard let raw = note.userInfo?["mode"] as? String,
+                          let mode = LumaLyricsViewMode(rawValue: raw) else { return }
+                    if let lyricsVM = lyricsViewModel {
+                        Task { await applyLyricsMode(mode, to: lyricsVM) }
+                    } else {
+                        pendingLyricsMode = mode
+                    }
+                }
                 .task(id: themeKey) {
                     guard scenePhase == .active else { return }
                     for attempt in 0..<3 {
@@ -243,9 +264,23 @@ struct FullPlayerView: View {
                     newVM.setScenePhase(scenePhase)
                     newVM.setVisible(showLyrics, owner: lyricsVisibilityOwner)
                     if showLyrics { showLyricsChromeTemporarily() }
+                    // Lyrics are optional for the first frame and were competing with
+                    // the decoder/network on cold restore. If the user explicitly
+                    // opened lyrics, load immediately; otherwise let first audio win.
+                    if !showLyrics {
+                        await PlaybackStartupGate.waitForFirstAudio(playerState)
+                    }
+                    guard !Task.isCancelled else { return }
                     await newVM.load()
                     guard !Task.isCancelled, lyricsViewModel === newVM,
                           playerState.currentTrack?.id == track.id else { return }
+                    if let pendingLyricsMode {
+                        self.pendingLyricsMode = nil
+                        await applyLyricsMode(pendingLyricsMode, to: newVM)
+                    } else if openWithLyrics, !appliedLyricsMode {
+                        appliedLyricsMode = true
+                        await applyLyricsMode(openWithLyricsMode, to: newVM)
+                    }
                     if newVM.shouldAutoDismissLyrics {
                         withAnimation(LumaAnimation.surface) { surface = .player }
                     } else if showLyrics {
@@ -301,7 +336,16 @@ struct FullPlayerView: View {
                     }
                 }
                 .onAppear {
+                    MemoryFootprintProbe.report("player_open")
                     Logger.ui.info("[PLAYER-VIEW] run=\(RuntimeDiagnostics.sessionID, privacy: .public) event=appear animated_artwork=\(animatedArtwork, privacy: .public) budget=\(LumaPerformance.budget.summary, privacy: .public)")
+                    if openTrace == nil {
+                        let trace = DiagnosticsCenter.shared.begin(.playerOpen)
+                        openTrace = trace
+                        Task { @MainActor in
+                            await Task.yield()
+                            trace.finish(Task.isCancelled ? .cancelled : .success)
+                        }
+                    }
                     if openWithQueue, !playerState.isLiveStream {
                         surface = .queue
                     } else if openWithLyrics {
@@ -322,7 +366,15 @@ struct FullPlayerView: View {
                     if showLyrics { showLyricsChromeTemporarily() }
                 }
                 .onDisappear {
+                    MemoryFootprintProbe.report("player_close")
                     Logger.ui.info("[PLAYER-VIEW] run=\(RuntimeDiagnostics.sessionID, privacy: .public) event=disappear")
+                    openTrace?.finish(.cancelled)
+                    openTrace = nil
+                    let closeTrace = DiagnosticsCenter.shared.begin(.playerClose)
+                    Task { @MainActor in
+                        await Task.yield()
+                        closeTrace.finish(Task.isCancelled ? .cancelled : .success)
+                    }
                     atmosphereTask?.cancel()
                     atmosphereTask = nil
                     atmosphereReady = false
@@ -332,6 +384,11 @@ struct FullPlayerView: View {
                     #if os(iOS)
                     MusicHapticsController.shared.setPlaying(false)
                     #endif
+                }
+                .task {
+                    guard MemoryFootprintProbe.isEnabled else { return }
+                    try? await Task.sleep(for: .seconds(5))
+                    MemoryFootprintProbe.report("player_5s")
                 }
         }
     }
@@ -344,6 +401,12 @@ struct FullPlayerView: View {
             for: song,
             serverId: container?.serverState.activeServer?.id
         )
+    }
+
+    private func closePlayerPanel() {
+        withAnimation(reduceMotion ? nil : LumaAnimation.chrome) {
+            surface = .player
+        }
     }
 
     @ViewBuilder
@@ -389,8 +452,9 @@ struct FullPlayerView: View {
                 AppleMusicLyricsBackground(
                     coverImage: playerCoverImage(for: coverArtId), fallbackColor: dominant,
                     isPlaying: playerState.playbackState == .playing,
-                    animated: animatedArtwork && atmosphereReady && !showingQueue && !isRotating,
-                    isPresented: !showsImmersivePlayer
+                    animated: animatedArtwork && showLyrics,
+                    isPresented: !showsImmersivePlayer,
+                    audioReaction: 0.30
                 )
             }
             .ignoresSafeArea()
@@ -546,6 +610,14 @@ struct FullPlayerView: View {
     }
 
     #if os(iOS)
+    /// Lightened artwork atmosphere used by the portrait player's translucent
+    /// seek/volume tracks. Keeping the tint close to white preserves legibility
+    /// while letting the cover colour show through the unfilled track.
+    private var portraitControlTint: Color {
+        let base = vm.atmosphereMid == .black ? vm.atmosphereBottom : vm.atmosphereMid
+        return base.blended(with: .white, amount: 0.55)
+    }
+
     /// Player, lyrics and queue share this entire hierarchy. Only upper content
     /// visibility changes; the seek/transport/volume/output views stay mounted.
     private func portraitPlayer(_ state: PlayerState, coverArtId: String, backgroundColor: Color) -> some View {
@@ -571,7 +643,8 @@ struct FullPlayerView: View {
                     if !state.isLiveStream {
                         ScrubberView(playerState: state, playerService: container?.playerService,
                             contentColor: ImmersivePlayerInk.primary, secondaryContentColor: ImmersivePlayerInk.timing,
-                            isExpensiveNetwork: container?.serverState.isExpensive ?? false, immersivePortrait: true)
+                            isExpensiveNetwork: container?.serverState.isExpensive ?? false, immersivePortrait: true,
+                            backgroundTint: portraitControlTint)
                             .disabled(!state.isPlaybackAvailable || !state.isSeekable)
                             .opacity(state.isPlaybackAvailable && state.isSeekable ? 1 : 0.4)
                     }
@@ -581,7 +654,8 @@ struct FullPlayerView: View {
                     isPlaybackAvailable: state.isPlaybackAvailable, contentColor: ImmersivePlayerInk.primary,
                     secondaryContentColor: ImmersivePlayerInk.controls, spreadsTransport: true, phonePortraitControls: true)
                     .opacity(hideChrome ? 0 : 1).allowsHitTesting(!hideChrome).accessibilityHidden(hideChrome)
-                VolumeSection(contentColor: ImmersivePlayerInk.controls, secondaryContentColor: ImmersivePlayerInk.controls)
+                VolumeSection(contentColor: ImmersivePlayerInk.controls, secondaryContentColor: ImmersivePlayerInk.controls,
+                    backgroundTint: portraitControlTint)
                     .opacity(hideChrome ? 0 : 1).allowsHitTesting(!hideChrome).accessibilityHidden(hideChrome)
                 BottomToolbar(surface: $surface, isLiveStream: state.isLiveStream,
                     lyricsEnabled: lyricsViewModel?.isLyricsButtonEnabled ?? false,
@@ -623,11 +697,10 @@ struct FullPlayerView: View {
                 .allowsHitTesting(surface == .player)
                 .accessibilityHidden(surface != .player)
             }
-            if let lyricsVM = lyricsViewModel {
+            if showLyrics, let lyricsVM = lyricsViewModel {
                 VStack(spacing: LumaSpacing.s) {
                     portraitPanelHeader(state, coverArtId: coverArtId)
                     LyricsView(viewModel: lyricsVM, bottomChromeInset: LumaSpacing.s,
-                        fadesTopEdge: true, fadesBottomEdge: !hideChrome,
                         onInteraction: showLyricsChromeTemporarily, consumesLineTapToRevealChrome: hideChrome,
                         presentationIsVisible: showLyrics)
                         .id(lyricsVM.songId)
@@ -643,24 +716,23 @@ struct FullPlayerView: View {
                             }
                         }
                 }
-                .opacity(showLyrics ? 1 : 0)
-                .allowsHitTesting(showLyrics)
-                .accessibilityHidden(!showLyrics)
+                .transition(.opacity)
             }
-            VStack(spacing: 0) {
-                portraitPanelHeader(state, coverArtId: coverArtId)
-                queuePills(state)
-                    .padding(.horizontal, LumaSpacing.xxxl)
-                    .padding(.top, 12)
-                InlineQueueList(playerState: state, contentColor: ImmersivePlayerInk.primary,
-                    secondaryContentColor: ImmersivePlayerInk.artist, loadArtwork: isQueueVisible(state),
-                    compactPhoneLayout: true)
-                    .padding(.top, 3)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            if surface == .queue {
+                VStack(spacing: 0) {
+                    portraitPanelHeader(state, coverArtId: coverArtId)
+                    queuePills(state)
+                        .padding(.horizontal, LumaSpacing.xxxl)
+                        .padding(.top, 12)
+                    InlineQueueList(playerState: state, contentColor: ImmersivePlayerInk.primary,
+                        secondaryContentColor: ImmersivePlayerInk.artist, loadArtwork: isQueueVisible(state),
+                        compactPhoneLayout: true)
+                        .environment(\.playbackVisualsPresented, isQueueVisible(state))
+                        .padding(.top, 3)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+                .transition(.opacity)
             }
-            .opacity(surface == .queue ? 1 : 0)
-            .allowsHitTesting(surface == .queue)
-            .accessibilityHidden(surface != .queue)
         }
         // The square artwork slot must not cut off its animated drop shadow.
         .clipShape(Rectangle().inset(by: !immersiveArtwork && surface == .player ? -LumaSpacing.xxxl : 0))
@@ -672,9 +744,13 @@ struct FullPlayerView: View {
 
     private func portraitPanelHeader(_ state: PlayerState, coverArtId: String) -> some View {
         HStack(spacing: LumaSpacing.m) {
-            CoverArtCard(id: coverArtId, size: ImmersivePlayerMetrics.panelHeaderSide, tier: .thumb,
-                         initialImage: playerCoverImage(for: coverArtId))
-                .frame(width: ImmersivePlayerMetrics.panelHeaderSide, height: ImmersivePlayerMetrics.panelHeaderSide)
+            Button(action: closePlayerPanel) {
+                CoverArtCard(id: coverArtId, size: ImmersivePlayerMetrics.panelHeaderSide, tier: .thumb,
+                             initialImage: playerCoverImage(for: coverArtId))
+                    .frame(width: ImmersivePlayerMetrics.panelHeaderSide, height: ImmersivePlayerMetrics.panelHeaderSide)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(Text("Now Playing"))
             TrackInfoSection(playerState: state, container: container,
                 contentColor: ImmersivePlayerInk.primary, secondaryContentColor: ImmersivePlayerInk.artist,
                 glassTint: vm.glassTint, layout: .lyricsHeader, showsTranslateBelowMenu: false,
@@ -710,18 +786,28 @@ struct FullPlayerView: View {
 
     /// Keep the artwork in the same slot while the right column switches surfaces.
     private func phoneLandscapeSurface(_ state: PlayerState, coverArtId: String, showingQueue: Bool) -> some View {
-        let hideChrome = showLyrics && lyricsViewModel?.prefersHiddenChrome == true
+        // Landscape keeps the compact lyrics/AirPlay/queue toolbar reachable even
+        // while the lyrics surface is expanded. Auto-hiding it here made the two
+        // reference modes impossible to switch without guessing at an invisible tap.
+        let hideChrome = false
         let isPlaying = state.playbackState.hasPlaybackIntent
         return PhoneLandscapePlayerColumns {
             CoverArtView(id: coverArtId, size: ArtworkTier.hero.decodePixels, tier: .hero,
                          initialImage: playerCoverImage(for: coverArtId))
                 .aspectRatio(1, contentMode: .fit)
                 .clipShape(RoundedRectangle(cornerRadius: LumaCornerRadius.large, style: .continuous))
+                .shadow(color: .black.opacity(0.28), radius: 22, y: 10)
                 .modifier(PlayerArtworkPlaybackModifier(isPlaying: isPlaying, reduceMotion: reduceMotion))
                 .trackSkipSwipe(playerState: state)
-                .onTapGesture { toggleArtworkPlayback(state) }
+                .onTapGesture {
+                    if surface == .player { toggleArtworkPlayback(state) }
+                    else { closePlayerPanel() }
+                }
                 .accessibilityAddTraits(.isButton)
-                .accessibilityAction { toggleArtworkPlayback(state) }
+                .accessibilityAction {
+                    if surface == .player { toggleArtworkPlayback(state) }
+                    else { closePlayerPanel() }
+                }
         } controls: {
             VStack(spacing: 8) {
                 TrackInfoSection(
@@ -846,7 +932,16 @@ struct FullPlayerView: View {
                     .scaleEffect(isPlaying ? 1.0 : 0.92)
                     .animation(.spring(response: 0.5, dampingFraction: 0.7), value: isPlaying)
                     .trackSkipSwipe(playerState: playerState)
-                    .onTapGesture { toggleArtworkPlayback(playerState) }
+                    .onTapGesture {
+                        if sidePanelOpen { closePlayerPanel() }
+                        else { toggleArtworkPlayback(playerState) }
+                    }
+                    .accessibilityAddTraits(.isButton)
+                    .accessibilityLabel(sidePanelOpen ? Text("Now Playing") : Text("Album Artwork"))
+                    .accessibilityAction {
+                        if sidePanelOpen { closePlayerPanel() }
+                        else { toggleArtworkPlayback(playerState) }
+                    }
 
                 Spacer(minLength: LumaSpacing.m)
 
@@ -930,8 +1025,6 @@ struct FullPlayerView: View {
                     // Lyrics continue behind the toolbar; only the active-row anchor
                     // reserves the overlaid controls, without shrinking the viewport.
                     bottomChromeInset: usesPhoneLandscape && !lyricsVM.prefersHiddenChrome ? 104 : 0,
-                    fadesTopEdge: true,
-                    fadesBottomEdge: !lyricsVM.prefersHiddenChrome,
                     onInteraction: showLyricsChromeTemporarily,
                     consumesLineTapToRevealChrome: lyricsVM.prefersHiddenChrome,
                     presentationIsVisible: showLyrics)
@@ -947,6 +1040,27 @@ struct FullPlayerView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(.trailing, usesPhoneLandscape ? 0 : LumaSpacing.l)
+    }
+
+    /// Applies a Siri-requested lyric layer after the existing lyrics pipeline
+    /// has loaded. Translation generation stays inside LyricsViewModel.
+    private func applyLyricsMode(_ mode: LumaLyricsViewMode, to lyricsVM: LyricsViewModel) async {
+        switch mode {
+        case .lyrics:
+            lyricsVM.areTranslationsVisible = false
+            lyricsVM.arePronunciationsVisible = false
+        case .translation:
+            LyricsTranslationSettings.shared.isTranslationEnabled = true
+            if lyricsVM.hasStoredTranslation {
+                lyricsVM.revealTranslation()
+            } else {
+                await lyricsVM.translateCurrentLyrics()
+            }
+            lyricsVM.areTranslationsVisible = true
+        case .pronunciation:
+            lyricsVM.arePronunciationsVisible = true
+        }
+        lyricsVM.scrollRestoreToken += 1
     }
 
     private func shouldShowLyricsTranslate(_ lyricsVM: LyricsViewModel) -> Bool {
@@ -1027,7 +1141,7 @@ struct FullPlayerView: View {
             }
         }
         lyricsChromeAutoHideTask = Task { @MainActor in
-            try? await Task.sleep(for: .seconds(4.5))
+            try? await Task.sleep(for: .seconds(5))
             guard !Task.isCancelled, surface == .lyrics else { return }
             guard scenePhase == .active else { return }
             withAnimation(reduceMotion ? nil : LumaAnimation.chrome) {
@@ -1081,9 +1195,12 @@ struct FullPlayerView: View {
     ) -> some View {
         VStack(spacing: 0) {
             HStack(spacing: LumaSpacing.m) {
-                Color.clear
-                    .frame(width: 64, height: 64)
-                    .matchedGeometryEffect(id: "queueCover", in: morphNS, isSource: surface == .lyrics)
+                Button(action: closePlayerPanel) {
+                    Color.clear.frame(width: 64, height: 64).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(Text("Now Playing"))
+                .matchedGeometryEffect(id: "queueCover", in: morphNS, isSource: surface == .lyrics)
 
                 TrackInfoSection(
                     playerState: playerState,
@@ -1107,7 +1224,6 @@ struct FullPlayerView: View {
             LyricsView(
                 viewModel: lyricsVM,
                 bottomChromeInset: hideChrome ? 20 : 8,
-                fadesBottomEdge: !hideChrome,
                 onInteraction: showLyricsChromeTemporarily,
                 consumesLineTapToRevealChrome: hideChrome,
                 presentationIsVisible: showLyrics
@@ -1137,9 +1253,12 @@ struct FullPlayerView: View {
     private func flowingQueueContent(_ playerState: PlayerState) -> some View {
         VStack(spacing: 0) {
             HStack(spacing: LumaSpacing.m) {
-                Color.clear
-                    .frame(width: 64, height: 64)
-                    .matchedGeometryEffect(id: "queueCover", in: morphNS, isSource: surface == .queue)
+                Button(action: closePlayerPanel) {
+                    Color.clear.frame(width: 64, height: 64).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(Text("Now Playing"))
+                .matchedGeometryEffect(id: "queueCover", in: morphNS, isSource: surface == .queue)
 
                 TrackInfoSection(
                     playerState: playerState,
@@ -1197,6 +1316,7 @@ struct FullPlayerView: View {
                 secondaryContentColor: vm.secondaryContentColor,
                 loadArtwork: isQueueVisible(playerState)
             )
+            .environment(\.playbackVisualsPresented, isQueueVisible(playerState))
             .environment(\.colorScheme, vm.isLightBackground ? .light : .dark)
             .frame(maxWidth: .infinity, minHeight: 120, maxHeight: .infinity)
 
@@ -1252,8 +1372,10 @@ struct FullPlayerView: View {
     }
 
     private func queuePill(systemImage: String, isActive: Bool, label: String, action: @escaping () -> Void) -> some View {
+        // Phone landscape follows Apple Music's neutral white capsules; the wider
+        // iPad/macOS layout keeps the accent-tinted pills.
         PlayerQueueModeButton(systemImage: systemImage, isActive: isActive, label: label,
-            compact: !usesWidePlayerLayout, contentColor: vm.contentColor,
+            compact: !usesWidePlayerLayout || usesPhoneLandscape, contentColor: vm.contentColor,
             secondaryContentColor: vm.secondaryContentColor, action: action)
     }
 
@@ -1346,14 +1468,17 @@ struct FullPlayerView: View {
     }
 
     private var topBar: some View {
-        PlayerDismissHandle(contentColor: usesImmersivePortraitLayout ? ImmersivePlayerInk.primary : vm.contentColor,
-                            action: closePlayer)
-            .frame(maxWidth: .infinity, minHeight: 44, alignment: .top)
-            .contentShape(Rectangle())
+        PlayerDismissHandle(
+            contentColor: (usesImmersivePortraitLayout || usesPhoneLandscape) ? ImmersivePlayerInk.primary : vm.contentColor,
+            action: closePlayer
+        )
+        .frame(maxWidth: .infinity, minHeight: 44, alignment: .top)
+        .contentShape(Rectangle())
     }
 
     private func toggleArtworkPlayback(_ state: PlayerState) {
         guard isLandscapeViewport, state.isPlaybackAvailable else { return }
+        HapticFeedback.transport.trigger()
         Task { await container?.playerService.togglePlayPause() }
     }
 

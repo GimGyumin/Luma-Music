@@ -6,6 +6,7 @@
 import SwiftUI
 import SwiftSonic
 import SwiftData
+import AppIntents
 import OSLog
 #if canImport(UIKit)
 import UIKit
@@ -31,6 +32,8 @@ enum AlbumDetailMode: Sendable {
 /// time navigation starts; using it here keeps the toolbar and root mini-player from
 /// briefly retaining the previous page's light/dark appearance.
 struct AlbumDetailView: View {
+    @Environment(\.appContainer) private var container
+
     private enum Source {
         case album(AlbumID3)
         case identifier(id: String, name: String)
@@ -109,6 +112,18 @@ struct AlbumDetailView: View {
                 )
             }
         }
+        .appEntityIdentifier(onscreenEntityIdentifier)
+    }
+
+    /// Lets Siri AI resolve “this album” while the album page is on screen.
+    private var onscreenEntityIdentifier: EntityIdentifier? {
+        guard #available(iOS 27.0, macOS 27.0, *) else { return nil }
+        return OnscreenEntityAnnotation.albumIdentifier(
+            id: resolvedAlbumID,
+            title: resolvedAlbumName,
+            artist: resolvedAlbum?.artist,
+            serverId: container?.serverState.activeServer?.id
+        )
     }
 
     private var resolvedAlbum: AlbumID3? {
@@ -133,9 +148,7 @@ struct AlbumDetailView: View {
     private func immediateThemeColor(key: String) -> Color {
         if let override = colorExtractor.colorOverride(for: key) { return override }
         if let cached = artworkImageCache.preparedPalette(for: key)?.background { return cached }
-        if let cached = ColorCache.palette(for: key)?.background { return cached }
         if suppliedDominantColor != .clear { return suppliedDominantColor }
-        if let cached = colorExtractor.cachedColor(for: key) { return cached }
         // Library preparation owns decoding, color clustering and edge analysis.
         // Both the first frame and the page task remain cache-only lookups.
         return .clear
@@ -144,8 +157,12 @@ struct AlbumDetailView: View {
 
 struct AlbumDetailContentView: View {
     @Environment(\.accessibilityReduceMotion) var reduceMotion
+    @Environment(TabBarChromeState.self) private var tabBarChrome
     let albumId: String
     let initialName: String
+    /// Present when the source card already knows the artist. Showing it on the
+    /// first zoom frame keeps the header from growing when album metadata lands.
+    let initialArtist: String?
     let coverArtId: String?
     private let initialDominantColor: Color
     private let initialCoverImage: PlatformImage?
@@ -154,11 +171,10 @@ struct AlbumDetailContentView: View {
     init(album: AlbumID3, coverArtId: String? = nil, initialDominantColor: Color = .clear, initialCoverImage: PlatformImage? = nil, initialArtworkAnalysis: ArtworkEdgeAnalysis? = nil, initialArtworkPreference: AlbumArtworkPreference = .automatic, mode: AlbumDetailMode = .full) {
         albumId = album.id
         initialName = album.name
+        initialArtist = album.artist
         let resolvedCoverArtId = coverArtId ?? album.coverArt
-        let cachedColor = ColorCache.palette(for: resolvedCoverArtId ?? album.id)?.background ?? .clear
-        let resolvedInitialColor = initialDominantColor == .clear ? cachedColor : initialDominantColor
         self.coverArtId = resolvedCoverArtId
-        self.initialDominantColor = resolvedInitialColor
+        self.initialDominantColor = initialDominantColor
         self.initialCoverImage = initialCoverImage
         let itemId = album.id
         let type = FavoriteType.album.rawValue
@@ -168,7 +184,7 @@ struct AlbumDetailContentView: View {
         })
         _downloadedAlbumTracks = Query(filter: #Predicate<DownloadedTrack> { $0.albumId == aid })
         self.mode = mode
-        _dominantColor = State(initialValue: resolvedInitialColor)
+        _dominantColor = State(initialValue: initialDominantColor)
         _artworkAnalysis = State(initialValue: initialArtworkAnalysis)
         _artworkPreference = State(initialValue: initialArtworkPreference)
     }
@@ -176,10 +192,9 @@ struct AlbumDetailContentView: View {
     init(albumId: String, albumName: String, coverArtId: String? = nil, initialDominantColor: Color = .clear, initialCoverImage: PlatformImage? = nil, initialArtworkAnalysis: ArtworkEdgeAnalysis? = nil, initialArtworkPreference: AlbumArtworkPreference = .automatic, mode: AlbumDetailMode = .full) {
         self.albumId = albumId
         self.initialName = albumName
+        self.initialArtist = nil
         self.coverArtId = coverArtId
-        let cachedColor = ColorCache.palette(for: coverArtId ?? albumId)?.background ?? .clear
-        let resolvedInitialColor = initialDominantColor == .clear ? cachedColor : initialDominantColor
-        self.initialDominantColor = resolvedInitialColor
+        self.initialDominantColor = initialDominantColor
         self.initialCoverImage = initialCoverImage
         let itemId = albumId
         let type = FavoriteType.album.rawValue
@@ -189,19 +204,21 @@ struct AlbumDetailContentView: View {
         })
         _downloadedAlbumTracks = Query(filter: #Predicate<DownloadedTrack> { $0.albumId == aid })
         self.mode = mode
-        _dominantColor = State(initialValue: resolvedInitialColor)
+        _dominantColor = State(initialValue: initialDominantColor)
         _artworkAnalysis = State(initialValue: initialArtworkAnalysis)
         _artworkPreference = State(initialValue: initialArtworkPreference)
     }
 
     @Environment(\.appContainer) var container
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.albumNavigationAttempt) private var albumNavigationAttempt
     @Environment(DominantColorExtractor.self) var colorExtractor
     @Environment(ArtworkImageCache.self) var artworkImageCache
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.colorSchemeContrast) private var colorSchemeContrast
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State var viewModel: AlbumDetailViewModel?
+    @State private var openTrace: PerformanceTrace?
     @State var dominantColor: Color = .clear
     /// Seed for the first frame only; the real value comes from the container's width on the first
     /// layout pass below. Deliberately *not* derived from `UIScreen.main`: on iPad (and in Split
@@ -212,7 +229,13 @@ struct AlbumDetailContentView: View {
     @State var artworkPreference: AlbumArtworkPreference = .automatic
     @AppStorage("coverArtUploadVersion") var coverArtUploadVersion = 0
     @State var artworkRevision = 0
+    @State var paletteRequestID: String?
+    var paletteIdentity: String { "\(albumCoverId):\(coverArtUploadVersion):\(artworkRevision):\(container?.serverState.accountRevision ?? 0)" }
     @State var artworkTopInset: CGFloat = 59
+    @State var headerRevealed = false
+    @State private var toolbarRevealed = false
+    @State private var revealTask: Task<Void, Never>?
+    @AppStorage("luma.visuals.albumFollowsAppearance") private var albumFollowsAppearance = false
     @AppStorage("luma.visuals.immersiveAlbums") var immersiveAlbums = true
 
     var artworkStyle: AlbumArtworkStyle {
@@ -273,10 +296,6 @@ struct AlbumDetailContentView: View {
     var isOnline: Bool { container?.serverState.isOnline == true }
     /// Cover id the album theme is keyed on.
     var albumCoverId: String { viewModel?.coverArtId ?? coverArtId ?? albumId }
-    var isLoadingSkeleton: Bool {
-        viewModel == nil
-            || (viewModel?.isLoading == true && viewModel?.isPrimaryContentReady != true)
-    }
     private var usesWhiteAlbumInk: Bool {
         atmosphere.isThemed && !atmosphere.isLight
     }
@@ -287,32 +306,23 @@ struct AlbumDetailContentView: View {
     private var albumStatusBarColorScheme: ColorScheme? {
         if usesFullBleedArtwork, navChromeProgress == 0,
            let artworkAnalysis, artworkAnalysis.packedTopBackground != nil {
-            return artworkAnalysis.prefersDarkStatusBar ? .light : .dark
+            return LumaColors.prefersLightControl(on: artworkAnalysis.topBackground) ? .dark : .light
         }
         return albumChromeColorScheme
     }
-    private var albumNavigationBarColorScheme: ColorScheme? {
-        // Floating controls keep dark glass and white glyphs even over white art.
-        // Status-bar glyphs independently follow the cached top-edge luminance.
-        if usesFullBleedArtwork, navChromeProgress == 0 {
-            return .dark
+    var albumNavigationBarColorScheme: ColorScheme? {
+        albumStatusBarColorScheme
+    }
+    var navigationInk: Color {
+        switch albumNavigationBarColorScheme {
+        case .light: .black
+        case .dark: .white
+        default: .primary
         }
-        return albumStatusBarColorScheme
     }
-    var headerTextColor: Color {
-        return atmosphere.isThemed ? (usesWhiteAlbumInk ? .white : .black) : .primary
-    }
-    var headerSecondaryColor: Color {
-        if usesFullBleedArtwork { return atmosphere.text2 }
-        return atmosphere.isThemed
-            ? (usesWhiteAlbumInk ? Color.white.opacity(0.80) : Color.black.opacity(0.72))
-            : .secondary
-    }
-    var albumMetadataInk: Color {
-        artworkStyle == .faded
-            ? LumaColors.albumMetadataInk(on: atmosphere.pageColor, increasedContrast: colorSchemeContrast == .increased)
-            : headerSecondaryColor
-    }
+    var headerTextColor: Color { atmosphere.contentColor }
+    var headerSecondaryColor: Color { atmosphere.text2 }
+    var albumMetadataInk: Color { headerSecondaryColor }
     /// Title + artist name render as pure white/black ink over the floating cover, like
     /// Apple Music's high-contrast presentation — independent of the cover tint.
     var heroTitleInk: Color {
@@ -325,34 +335,30 @@ struct AlbumDetailContentView: View {
     }
     /// Play CTA: black/white fill; label uses cover color when contrast allows.
     var heroButtonVariant: (background: Color, foreground: Color) {
-        if usesFullBleedArtwork {
-            return LumaColors.heroButtonVariant(on: atmosphere.pageColor,
-                labelTint: artworkStyle == .faded ? atmosphere.pageColor : nil)
-        }
-        if atmosphere.isThemed, usesWhiteAlbumInk {
-            return (
-                background: .white,
-                foreground: CoverColorRefiner.playerAtmosphere(from: dominantColor).pageColor
-            )
-        }
-        return LumaColors.heroButtonVariant(on: dominantColor, labelTint: nil)
+        LumaColors.heroButtonVariant(on: atmosphere.isThemed ? atmosphere.pageColor : systemBackgroundColor,
+                                    labelTint: artworkStyle == .faded ? atmosphere.pageColor : nil)
     }
     var atmosphere: AlbumAtmosphere {
         AlbumAtmosphere.from(
             dominantColor: contentBackgroundColor,
             colorScheme: colorScheme,
-            increaseContrast: colorSchemeContrast == .increased
+            increaseContrast: colorSchemeContrast == .increased,
+            respectSystemAppearance: albumFollowsAppearance
         )
     }
     var theme: PlaylistTheme { atmosphere.heroTheme }
     var relatedShelfBaseColor: Color { atmosphere.isThemed ? atmosphere.pageColor : systemBackgroundColor }
+    /// Unthemed pages use the system background; derive the shelf lightness from the
+    /// current appearance instead of treating that white/black surface as dark.
+    var relatedShelfIsLight: Bool {
+        atmosphere.isThemed ? atmosphere.isLight : colorScheme == .light
+    }
     /// Bottom shelves (“Other versions” / “More by”) own the mini-player inset fill.
     private var showsMoreByShelf: Bool {
         guard mode == .full, let vm = viewModel, !displaySongs().isEmpty else { return false }
         guard vm.artistId != nil else { return false }
         return !vm.otherAlbumVersions.isEmpty
             || !vm.moreAlbumsByArtist.isEmpty
-            || vm.isLoadingMoreAlbums
     }
     private var systemBackgroundColor: Color {
         #if canImport(UIKit)
@@ -406,17 +412,42 @@ struct AlbumDetailContentView: View {
         }
     }
 
-    var body: some View {
-        Group {
-            if usesDesktopDetail {
-                desktopAlbumBody
-            } else {
-                compactAlbumBody
+    private var isPrimaryContentReady: Bool {
+        guard let viewModel else { return false }
+        // An error still owns a real page (retry / offline copy); reveal it
+        // instead of leaving the opaque loading cover forever.
+        return viewModel.isPrimaryContentReady || (!viewModel.isLoading && viewModel.error != nil)
+    }
+
+    var showsTrackContent: Bool {
+        headerRevealed && isPrimaryContentReady
+    }
+
+    /// `unthemed` album atmosphere uses `.clear`; a clear loading cover would
+    /// reveal the previous screen through the new page. Always paint an opaque
+    /// page color, falling back to the system background until the palette lands.
+    private var pageCoverColor: Color {
+        atmosphere.isThemed ? atmosphere.pageColor : systemBackgroundColor
+    }
+
+    private var albumPage: some View {
+        // Keep one root view for the lifetime of the page. The content is mounted
+        // behind an opaque page-color cover until the primary payload is ready;
+        // the ScrollView/LazyVStack identity never changes, so navigation and
+        // pop snapshots stay stable. This avoids the old "part of the header
+        // appears, then the rest loads in" behavior.
+        ZStack {
+            pageCoverColor.ignoresSafeArea()
+
+            Group {
+                if usesDesktopDetail {
+                    desktopAlbumBody
+                } else {
+                    compactAlbumBody
+                }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        // Artwork and palette work must never cover the entire page. The header remains
-        // visible immediately; track placeholders own only the space still being loaded.
         .refreshable { await viewModel?.load() }
         // More by reserves its own bottom inset; otherwise use the shared margin.
         .modifier(AlbumMiniPlayerMargin(enabled: !showsMoreByShelf))
@@ -463,7 +494,11 @@ struct AlbumDetailContentView: View {
                 } else {
                     AlbumAtmosphereBackground(atmosphere: atmosphere)
                 }
-                AlbumRelatedShelfContinuation(anchor: anchor, baseColor: relatedShelfBaseColor)
+                AlbumRelatedShelfContinuation(
+                    anchor: anchor,
+                    baseColor: relatedShelfBaseColor,
+                    isLight: relatedShelfIsLight
+                )
             }
         }
         .background {
@@ -485,9 +520,13 @@ struct AlbumDetailContentView: View {
         .chromeAppearance(albumChromeColorScheme)
         .navigationTitle("")
         .navigationBarTitleDisplayModeInline()
+    }
+
+    private var albumChrome: some View {
+        albumPage
         #if os(iOS)
         .navigationBarBackButtonHidden(false)
-        .toolbarColorScheme(albumChromeColorScheme, for: .navigationBar)
+        .toolbarColorScheme(albumNavigationBarColorScheme, for: .navigationBar)
         #else
         .navigationBarBackButtonHidden(true)
         #endif
@@ -511,12 +550,17 @@ struct AlbumDetailContentView: View {
                         itemID: albumId,
                         shareOptions: ShareSettings.shared.makeAlbumOptions(albumName: albumDisplayName),
                         fallbackText: albumShareText,
-                        style: .circle(foreground: headerTextColor, size: 44)
+                        style: .circle(foreground: navigationInk, size: 44)
                     )
                     .buttonStyle(.plain)
 
                     albumMoreMenu
                 }
+                .environment(\.colorScheme, albumNavigationBarColorScheme ?? colorScheme)
+                .opacity(toolbarRevealed ? 1 : 0)
+                .allowsHitTesting(toolbarRevealed)
+                .accessibilityHidden(!toolbarRevealed)
+                .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: toolbarRevealed)
             }
         }
         .alert("Pin Limit Reached", isPresented: $showPinLimitAlert) {
@@ -527,9 +571,10 @@ struct AlbumDetailContentView: View {
         #if os(iOS)
         .background {
             AlbumPresentationLifecycle(
-                pageID: albumId,
+                pageID: "\(albumId)#\(albumNavigationAttempt)",
                 onDeparture: { viewModel?.suspendPendingLoad() },
-                onReturn: { await viewModel?.resumePendingLoadIfNeeded() }
+                onReturn: { await viewModel?.resumePendingLoadIfNeeded() },
+                chrome: self.tabBarChrome
             )
             .frame(width: 0, height: 0)
             .allowsHitTesting(false)
@@ -547,6 +592,10 @@ struct AlbumDetailContentView: View {
             navigationBarColorScheme: albumNavigationBarColorScheme
         )
         #endif
+    }
+
+    var body: some View {
+        albumChrome
         // Keyed on connectivity so the list re-loads from the right source when
         // NWPathMonitor flips isOnline — same pattern as AlbumDetailMacOS and
         // PlaylistDetailView. Guarded by the connectivity state actually loaded, so an id change that
@@ -560,12 +609,14 @@ struct AlbumDetailContentView: View {
                     downloadService: c.downloadService,
                     toastService: c.toastService,
                     serverState: c.serverState,
-                    libraryIndex: c.libraryIndexService
+                    libraryIndex: c.libraryIndexService,
+                    streamingSettings: c.streamingSettings
                 )
+                Logger.ui.debug("[ALBUM-STATE] viewModel created attempt=\(albumNavigationAttempt, privacy: .public) album=\(albumId, privacy: .public)")
             }
             let isOnline = c.serverState.isOnline
             Logger.ui.debug(
-                "[ALBUM-PAGE] task start instance=\(pageInstanceID, privacy: .public) album=\(albumId, privacy: .public) online=\(isOnline, privacy: .public) loaded=\(String(describing: loadedForOnlineState), privacy: .public)"
+                "[ALBUM-PAGE] task start instance=\(pageInstanceID, privacy: .public) attempt=\(albumNavigationAttempt, privacy: .public) album=\(albumId, privacy: .public) online=\(isOnline, privacy: .public) loaded=\(String(describing: loadedForOnlineState), privacy: .public)"
             )
             // SwiftUI restarts .task when a pushed page is uncovered. If optional album-info
             // work was cancelled after tracks appeared, preserve the completed primary load.
@@ -586,15 +637,87 @@ struct AlbumDetailContentView: View {
                 artworkRevision &+= 1
             }
         }
-        .task(id: "\(albumCoverId):\(coverArtUploadVersion):\(artworkRevision):\(container?.serverState.accountRevision ?? 0)") {
+        .task(id: paletteIdentity) {
             let requestedCoverID = albumCoverId
             await resolveDominantColor(coverArtId: requestedCoverID)
         }
-        .onAppear {
-            Logger.ui.debug("[NAV] album appear instance=\(pageInstanceID, privacy: .public) album=\(albumId, privacy: .public)")
+        .onChange(of: viewModel?.isPrimaryContentReady) { _, ready in
+            Logger.ui.debug("[ALBUM-STATE] primary-ready=\(ready == true, privacy: .public) attempt=\(albumNavigationAttempt, privacy: .public) album=\(albumId, privacy: .public) loading=\(viewModel?.isLoading == true, privacy: .public)")
+            guard ready == true, let trace = openTrace else { return }
+            trace.finish(.success)
+            openTrace = nil
+        }
+        .onChange(of: usesDesktopDetail) { _, desktop in
+            Logger.ui.debug("[ALBUM-STATE] root=\(desktop ? "desktop" : "compact", privacy: .public) attempt=\(albumNavigationAttempt, privacy: .public) album=\(albumId, privacy: .public)")
+        }
+        .onChange(of: artworkRevision) { _, revision in
+            Logger.ui.debug("[ALBUM-ART] revision=\(revision, privacy: .public) attempt=\(albumNavigationAttempt, privacy: .public) album=\(albumId, privacy: .public) cover=\(albumCoverId, privacy: .public)")
+        }
+        .onAppear(perform: handleAppear)
+        .onChange(of: isPrimaryContentReady) { _, ready in
+            if ready { startStagedRevealIfNeeded() }
         }
         .onDisappear {
-            Logger.ui.debug("[NAV] album disappear instance=\(pageInstanceID, privacy: .public) album=\(albumId, privacy: .public)")
+            Logger.ui.debug("[NAV] album disappear instance=\(pageInstanceID, privacy: .public) attempt=\(albumNavigationAttempt, privacy: .public) album=\(albumId, privacy: .public)")
+            revealTask?.cancel()
+            revealTask = nil
+            openTrace?.finish(.cancelled)
+            openTrace = nil
+            let closeTrace = DiagnosticsCenter.shared.begin(.albumClose)
+            Task { @MainActor in
+                await Task.yield()
+                closeTrace.finish(Task.isCancelled ? .cancelled : .success)
+            }
+        }
+    }
+
+    private func handleAppear() {
+        Logger.ui.debug("[NAV] album appear instance=\(pageInstanceID, privacy: .public) attempt=\(albumNavigationAttempt, privacy: .public) album=\(albumId, privacy: .public)")
+        startStagedRevealIfNeeded()
+        guard openTrace == nil else { return }
+        let trace = DiagnosticsCenter.shared.begin(.albumOpen)
+        openTrace = trace
+        if viewModel?.isPrimaryContentReady == true {
+            trace.finish(.success)
+            openTrace = nil
+        }
+    }
+
+    /// The page is covered by its representative color until the primary payload
+    /// is actually ready. Once ready, hero/tracks reveal together (with the track
+    /// rows overlapping the hero fade) and the share/more cluster lands last.
+    /// This is readiness-based, not a fixed timer: an uncached album never shows
+    /// a half-built header while waiting on the network.
+    private func startStagedRevealIfNeeded() {
+        guard isPrimaryContentReady else { return }
+        guard revealTask == nil, !headerRevealed else {
+            if !toolbarRevealed {
+                revealTask = Task { @MainActor in
+                    if !reduceMotion {
+                        do { try await Task.sleep(for: .milliseconds(180)) } catch { return }
+                    }
+                    toolbarRevealed = true
+                }
+            }
+            return
+        }
+        revealTask = Task { @MainActor in
+            if !reduceMotion {
+                withAnimation(.easeOut(duration: 0.24)) {
+                    headerRevealed = true
+                }
+                do { try await Task.sleep(for: .milliseconds(180)) } catch { return }
+            } else {
+                headerRevealed = true
+            }
+            guard !Task.isCancelled else { return }
+            if reduceMotion {
+                toolbarRevealed = true
+            } else {
+                withAnimation(.easeOut(duration: 0.16)) {
+                    toolbarRevealed = true
+                }
+            }
         }
     }
 

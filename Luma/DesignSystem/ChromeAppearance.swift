@@ -49,13 +49,27 @@ extension View {
 
 /// Observe chrome below the navigation owner. A pop restores the previous scheme;
 /// that update must not re-evaluate every NavigationStack destination mid-transition.
+///
+/// The style is pushed straight into the UIKit tab bar instead of using a root
+/// `.toolbarColorScheme(_, for: .tabBar)`. The SwiftUI modifier participates in the
+/// TabView's body evaluation, so publishing a new artwork scheme while a zoom
+/// transition is settling can invalidate the transition snapshot and make the tab
+/// bar flicker or reappear late. The bridge below is deliberately outside that path.
 struct TabBarChromeAppearance: ViewModifier {
     @Environment(ChromeAppearance.self) private var appearance
     @Environment(\.colorScheme) private var colorScheme
 
     func body(content: Content) -> some View {
         #if os(iOS)
-        content.toolbarColorScheme(appearance.overrideColorScheme ?? colorScheme, for: .tabBar)
+        content.background {
+            TabBarChromeBridge(
+                desiredScheme: appearance.overrideColorScheme,
+                systemScheme: colorScheme
+            )
+            .frame(width: 0, height: 0)
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+        }
         #else
         content
         #endif

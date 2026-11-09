@@ -136,13 +136,15 @@ struct LyricGlyphPresentationTests {
         #expect(LyricPresentationClock.time(sampleMs: 250, sampledAt: 8, now: 8, advancing: true) == 250)
     }
 
-    @Test func distantSeekJumpsWhileNearbyHandoffsAnimate() {
-        #expect(LyricScrollTiming.duration(previous: 2, target: 30, seeking: true, reduceMotion: false) == nil)
-        #expect(LyricScrollTiming.duration(previous: 30, target: 2, seeking: true, reduceMotion: false) == nil)
-        #expect(LyricScrollTiming.duration(previous: nil, target: 30, seeking: false, reduceMotion: false) == nil)
-        #expect(LyricScrollTiming.duration(previous: 2, target: 3, seeking: false, reduceMotion: false) == 0.46)
-        #expect(LyricScrollTiming.duration(previous: 2, target: 3, seeking: true, reduceMotion: false) == nil)
-        #expect(LyricScrollTiming.duration(previous: 2, target: 3, seeking: false, reduceMotion: true) == nil)
+    @Test func seeksAndPlaybackHandoffsKeepTheirMotion() {
+        #expect(LyricScrollTiming.style(previous: 2, target: 30, seeking: true, reduceMotion: false) == .glide)
+        #expect(LyricScrollTiming.style(previous: 30, target: 2, seeking: true, reduceMotion: false) == .glide)
+        #expect(LyricScrollTiming.style(previous: 2, target: 30, seeking: false, reduceMotion: false) == .glide)
+        #expect(LyricScrollTiming.style(previous: 2, target: 3, seeking: false, reduceMotion: false) == .spring)
+        #expect(LyricScrollTiming.style(previous: 2, target: 2, seeking: true, reduceMotion: false) == .glide)
+        #expect(LyricScrollTiming.style(previous: nil, target: 5, seeking: true, reduceMotion: false) == .glide)
+        #expect(LyricScrollTiming.style(previous: nil, target: 5, seeking: false, reduceMotion: false) == .stationary)
+        #expect(LyricScrollTiming.style(previous: 2, target: 3, seeking: true, reduceMotion: true) == .stationary)
     }
 
     @Test(arguments: [["Li", "berian ", "Girl"], ["cannot", " ", "lie"], ["know", " ", "why"], ["Love ", "is", " ", "strong"]])

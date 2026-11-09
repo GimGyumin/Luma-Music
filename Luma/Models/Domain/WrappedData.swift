@@ -57,6 +57,12 @@ nonisolated enum WrappedPeriod: Sendable, Hashable, Codable {
         }
     }
 
+    static var serverCalendar: Calendar {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = .gmt
+        return calendar
+    }
+
     static func currentMonth(calendar: Calendar = .current) -> WrappedPeriod {
         let now = Date()
         let year = calendar.component(.year, from: now)
@@ -152,4 +158,7 @@ nonisolated struct WrappedData: Sendable, Codable {
 
     let firstTrackOfPeriod: TopTrackEntry?
     let lastTrackOfPeriod: TopTrackEntry?
+    var serverSyncedAt: Date? = nil
+    var dailyPlays: [Date: Int]? = nil
+    var unlinkedLocalListens: Int? = nil
 }

@@ -180,6 +180,41 @@ struct UnifiedLocalAudioTests {
         #expect(engine.state == .playing)
     }
 
+    @Test func adtsAACPayloadIsStoredWithAACExtension() async throws {
+        let model = try ModelContainer.luma(inMemory: true)
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let cache = CacheService(modelContainer: model, cacheDirectory: root)
+        let server = UUID()
+        // Navidrome's AAC transcode is a raw ADTS elementary stream. It must not be
+        // written as .m4a, or AVFoundation selects the MP4 parser and fails to open it.
+        let adts = Data([0xFF, 0xF1, 0x50, 0x80, 0x00, 0x1F, 0xFC])
+        let url = try await cache.store(data: adts, forSongId: "adts", serverId: server, mimeType: "audio/aac")
+        #expect(url.pathExtension == "aac")
+        #expect(await cache.cachedURL(forSongId: "adts", serverId: server) == url)
+    }
+
+    @Test func legacyAACEntryWithM4AExtensionIsRejectedAndEvicted() async throws {
+        let model = try ModelContainer.luma(inMemory: true)
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let cache = CacheService(modelContainer: model, cacheDirectory: root)
+        let server = UUID()
+        let adts = Data([0xFF, 0xF1, 0x50, 0x80, 0x00, 0x1F, 0xFC])
+        let legacyURL = try await cache.store(data: adts, forSongId: "legacy", serverId: server,
+                                              mimeType: "audio/mp4")
+        #expect(legacyURL.pathExtension == "m4a")
+
+        // Simulate an entry written by the old MIME mapping: audio/aac payload saved as .m4a.
+        let context = ModelContext(model)
+        let entry = try #require(try context.fetch(FetchDescriptor<CachedTrack>()).first)
+        entry.mimeType = "audio/aac"
+        try context.save()
+
+        #expect(await cache.cachedURL(forSongId: "legacy", serverId: server) == nil)
+        #expect(!FileManager.default.fileExists(atPath: legacyURL.path))
+    }
+
     @Test func failedFileIsEvictedAfterItsRemoteIDChangesWithoutTouchingAnotherAccount() async throws {
         let model = try ModelContainer.luma(inMemory: true)
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)

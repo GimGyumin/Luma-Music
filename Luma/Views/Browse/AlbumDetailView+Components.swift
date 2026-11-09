@@ -22,19 +22,27 @@ struct AlbumRelatedShelfBoundsKey: PreferenceKey {
 
 struct AlbumRelatedShelfFill: View {
     let baseColor: Color
-    var body: some View { baseColor.overlay(Color.black.opacity(0.25)) }
+    var isLight: Bool = false
+
+    var body: some View {
+        // Apple Music keeps the “More by” panel within a few percent of the page
+        // tone. A fixed 25% black wash turns a white sleeve into mid-grey, so the
+        // separation is now weighted by the page's actual lightness.
+        baseColor.overlay(Color.black.opacity(isLight ? 0.045 : 0.20))
+    }
 }
 
 struct AlbumRelatedShelfContinuation: View {
     let anchor: Anchor<CGRect>?
     let baseColor: Color
+    var isLight: Bool = false
 
     var body: some View {
         GeometryReader { geometry in
             if let anchor {
                 let bounds = geometry[anchor]
                 let top = min(geometry.size.height, max(0, bounds.minY))
-                AlbumRelatedShelfFill(baseColor: baseColor)
+                AlbumRelatedShelfFill(baseColor: baseColor, isLight: isLight)
                     .frame(width: bounds.width, height: max(0, geometry.size.height - top))
                     .offset(x: bounds.minX, y: top)
             }
@@ -92,10 +100,6 @@ struct AlbumSongRows: View {
     @Query private var downloadedTracks: [DownloadedTrack]
     @Query private var allFavorites: [FavoriteRecord]
 
-    private var favoriteSongIds: Set<String> {
-        Set(allFavorites.map(\.id))
-    }
-
     let albumArtist: String?
 
     init(songs: [DisplayableSong], albumId: String, serverId: UUID, albumArtist: String? = nil, downloadingIds: Set<String> = [], titleColor: Color = .primary, secondaryColor: Color = .secondary, onTap: @escaping (Int) -> Void, onDownload: ((String) -> Void)? = nil, onRemoveDownload: ((String) -> Void)? = nil, onAddToPlaylist: ((DisplayableSong) -> Void)? = nil) {
@@ -110,15 +114,19 @@ struct AlbumSongRows: View {
         self.onAddToPlaylist = onAddToPlaylist
         let aid = albumId
         let sid = serverId
+        let type = FavoriteType.song.rawValue
         _downloadedTracks = Query(
             filter: #Predicate<DownloadedTrack> { track in
                 track.albumId == aid && track.serverId == sid
             }
         )
-    }
-
-    private var downloadedSongIds: Set<String> {
-        Set(downloadedTracks.map(\.songId))
+        // Scope the observation to this album's server and song favorites once,
+        // instead of fetching every favorite of every media type for each row.
+        _allFavorites = Query(
+            filter: #Predicate<FavoriteRecord> { favorite in
+                favorite.serverId == sid && favorite.itemType == type
+            }
+        )
     }
 
     private var showsDiscHeaders: Bool {
@@ -130,14 +138,21 @@ struct AlbumSongRows: View {
     }
 
     var body: some View {
+        // Build these indexes once per list render. The previous implementation
+        // rebuilt them for every row (O(rows × records)) and compared favorite
+        // rows against the obsolete "song:<id>" key, so the star never matched.
+        let downloadedSongIDs = Set(downloadedTracks.map(\.songId))
+        let favoriteSongIDs = FavoriteRecord.songIDSet(from: allFavorites)
+        let discHeadersVisible = showsDiscHeaders
+
         ForEach(Array(songs.enumerated()), id: \.element.id) { index, song in
-            let liveDownloaded = downloadedSongIds.contains(song.id)
+            let liveDownloaded = downloadedSongIDs.contains(song.id)
             let liveSong = song.withDownloaded(liveDownloaded)
             let isDownloading = downloadingIds.contains(song.id)
             let downloadAction: (() -> Void)? = (liveDownloaded || isDownloading) ? nil : onDownload.map { action in { action(song.id) } }
             let removeAction: (() -> Void)? = liveDownloaded ? onRemoveDownload.map { action in { action(song.id) } } : nil
             let disc = song.discNumber ?? 1
-            let showDiscHeader = showsDiscHeaders && (index == 0 || (songs[index - 1].discNumber ?? 1) != disc)
+            let showDiscHeader = discHeadersVisible && (index == 0 || (songs[index - 1].discNumber ?? 1) != disc)
 
             #if os(macOS)
             if showDiscHeader {
@@ -150,13 +165,11 @@ struct AlbumSongRows: View {
                     .padding(.bottom, LumaSpacing.xs)
             }
             Group {
-                SongRow(song: liveSong, index: song.trackNumber ?? (index + 1), showCoverArt: false, showArtist: liveSong.showsArtist(inAlbumBy: albumArtist), isFavorite: favoriteSongIds.contains("song:\(song.id)"), titleColor: titleColor, secondaryColor: secondaryColor, onDownload: downloadAction, onRemoveDownload: removeAction, isDownloading: isDownloading, onAddToPlaylist: onAddToPlaylist)
+                SongRow(song: liveSong, index: song.trackNumber ?? (index + 1), showCoverArt: false, showArtist: liveSong.showsArtist(inAlbumBy: albumArtist), isFavorite: favoriteSongIDs.contains(song.id), titleColor: titleColor, secondaryColor: secondaryColor, onDownload: downloadAction, onRemoveDownload: removeAction, isDownloading: isDownloading, onAddToPlaylist: onAddToPlaylist, onPlay: { onTap(index) })
                     .reservingArtistSpace()
                     .padding(.horizontal, LumaSpacing.l)
                     .contentShape(Rectangle())
             }
-            .onTapGesture { onTap(index) }
-            .accessibilityAction { onTap(index) }
             .listRowBackground(Color.clear)
             .listRowSeparator(.hidden)
             .overlay(alignment: .bottom) {
@@ -177,13 +190,11 @@ struct AlbumSongRows: View {
                         .padding(.bottom, LumaSpacing.xs)
                 }
                 Group {
-                    SongRow(song: liveSong, index: song.trackNumber ?? (index + 1), showCoverArt: false, showArtist: liveSong.showsArtist(inAlbumBy: albumArtist), isFavorite: favoriteSongIds.contains("song:\(song.id)"), titleColor: titleColor, secondaryColor: secondaryColor, onDownload: downloadAction, onRemoveDownload: removeAction, isDownloading: isDownloading, onAddToPlaylist: onAddToPlaylist)
+                    SongRow(song: liveSong, index: song.trackNumber ?? (index + 1), showCoverArt: false, showArtist: liveSong.showsArtist(inAlbumBy: albumArtist), isFavorite: favoriteSongIDs.contains(song.id), titleColor: titleColor, secondaryColor: secondaryColor, onDownload: downloadAction, onRemoveDownload: removeAction, isDownloading: isDownloading, onAddToPlaylist: onAddToPlaylist, onPlay: { onTap(index) })
                         .reservingArtistSpace()
                         .padding(.horizontal, LumaSpacing.xl)
                         .contentShape(Rectangle())
                 }
-                .onTapGesture { onTap(index) }
-                .accessibilityAction { onTap(index) }
                 AlbumTrackDivider(color: titleColor.opacity(0.22))
                     .padding(.leading, LumaSpacing.xl + 28 + LumaSpacing.s)
                     .padding(.trailing, LumaSpacing.xl)

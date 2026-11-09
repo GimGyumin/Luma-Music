@@ -12,9 +12,12 @@ struct ImmersivePlayerMetrics {
     let topInset: CGFloat
     var bottomInset: CGFloat = 0
     var artworkTop: CGFloat { topInset + LumaSpacing.s }
-    var infoTop: CGFloat { min(size.height * 0.568, scrubberTop - 56) }
+    /// Matches Music's tighter art-to-title gap in the portrait player: the
+    /// title sits over the lower blur of the artwork instead of below a large
+    /// empty band. The rest of the control stack keeps its measured rows.
+    var infoTop: CGFloat { min(size.height * 0.56, scrubberTop - 56) }
     var scrubberTop: CGFloat { min(size.height * 0.650, transportCenter - 92) }
-    var transportCenter: CGFloat { min(size.height * 0.762, volumeCenter - 70) }
+    var transportCenter: CGFloat { min(size.height * 0.754, volumeCenter - 70) }
     var volumeCenter: CGFloat { min(size.height * 0.865, footerCenter - 46) }
     var footerCenter: CGFloat { min(size.height * 0.925, size.height - bottomInset - 32) }
     var contentWidth: CGFloat { max(0, size.width - 2 * LumaSpacing.xxxl) }
@@ -63,7 +66,8 @@ struct ImmersivePlayerControlsLayout: Layout {
         let artwork = metrics.standardArtworkFrame
         let panelTop = showsStandardArtwork ? artwork.minY : topInset + ImmersivePlayerMetrics.panelTopGap
         let panelBottom = showsStandardArtwork ? artwork.maxY
-            : (expandedPanel ? bounds.height - bottomInset - LumaSpacing.s : metrics.scrubberTop - panelBottomSpacing)
+            : (expandedPanel ? max(panelTop, bounds.height - bottomInset - LumaSpacing.s)
+                : metrics.scrubberTop - panelBottomSpacing)
         let slots: [(CGFloat, CGFloat, CGFloat, UnitPoint)] = [
             (metrics.infoTop, metrics.infoWidth, 48, .top),
             (metrics.scrubberTop, metrics.contentWidth, 40, .top),
@@ -135,12 +139,16 @@ struct PlayerDismissHandle: View {
 struct PlayerArtworkPlaybackModifier: ViewModifier {
     let isPlaying: Bool
     let reduceMotion: Bool
+    /// The standard portrait card sits directly above the track title. Its
+    /// bottom shadow edge was visible as a faint horizontal line across that gap;
+    /// the artwork border already provides enough separation.
+    var showsShadow: Bool = true
     // 378px / 518px in the supplied paused/playing references.
     static let pausedScale: CGFloat = 0.73
 
     func body(content: Content) -> some View {
         content
-            .shadow(color: .black.opacity(isPlaying ? 0.32 : 0.16),
+            .shadow(color: showsShadow ? .black.opacity(isPlaying ? 0.32 : 0.16) : .clear,
                     radius: isPlaying ? 24 : 12, y: isPlaying ? 12 : 6)
             .scaleEffect(isPlaying ? 1 : Self.pausedScale)
             .animation(reduceMotion ? nil : .spring(response: 0.5, dampingFraction: 0.86), value: isPlaying)
@@ -160,7 +168,11 @@ struct StandardPlayerArtworkSlot<Artwork: View>: View {
                                   geometry.size.height))
             artwork(side)
                 .frame(width: side, height: side)
-                .modifier(PlayerArtworkPlaybackModifier(isPlaying: isPlaying, reduceMotion: reduceMotion))
+                .modifier(PlayerArtworkPlaybackModifier(
+                    isPlaying: isPlaying,
+                    reduceMotion: reduceMotion,
+                    showsShadow: false
+                ))
                 .frame(width: geometry.size.width, height: geometry.size.height, alignment: .top)
         }
     }

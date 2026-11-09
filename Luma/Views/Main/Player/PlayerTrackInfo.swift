@@ -16,19 +16,43 @@ import AVFoundation
 
 // MARK: - Top-bar favorite
 
+/// Identity aliases are needed to recognize legacy/current favorite IDs, but the lookup
+/// reads SwiftData and can repair aliases. Keep it out of `body`: resolve once in a
+/// `.task(id:)`, then compare against the already-observed favorite rows.
 @MainActor
-private func currentSongIsFavorite(
+private func favoriteCandidatesKey(
     playerState: PlayerState,
     container: AppContainer?,
     records: [FavoriteRecord]
-) -> Bool {
-    guard let container,
+) -> String {
+    let server = container?.serverState.activeServer?.id.uuidString ?? "none"
+    let account = container?.serverState.accountRevision ?? 0
+    let song = playerState.currentTrack?.id ?? "none"
+    let identity = container?.mediaIdentityService.identityRevision ?? 0
+    return "\(server)|\(account)|\(song)|\(identity)|\(records.count)"
+}
+
+@MainActor
+private func loadFavoriteCandidateIDs(
+    playerState: PlayerState,
+    container: AppContainer?
+) async -> Set<String> {
+    guard !Task.isCancelled,
+          let container,
           let serverId = container.serverState.activeServer?.id,
-          let songId = playerState.currentTrack?.id else { return false }
-    let candidates = Set(container.mediaIdentityService.candidateRemoteIDs(
+          let songId = playerState.currentTrack?.id else { return [] }
+    let ids = await container.mediaIdentityService.candidateRemoteIDsInBackground(
         for: songId, serverId: serverId, entityType: .song
-    ))
-    return records.contains { candidates.contains($0.itemId) }
+    )
+    guard !Task.isCancelled,
+          playerState.currentTrack?.id == songId,
+          container.serverState.activeServer?.id == serverId else { return [] }
+    return Set(ids)
+}
+
+@MainActor
+private func containsFavorite(candidateIDs: Set<String>, in records: [FavoriteRecord]) -> Bool {
+    records.contains { candidateIDs.contains($0.itemId) }
 }
 
 struct FullPlayerFavoriteStarButton: View {
@@ -37,6 +61,7 @@ struct FullPlayerFavoriteStarButton: View {
     let contentColor: Color
 
     @Query private var favoriteMatches: [FavoriteRecord]
+    @State private var favoriteCandidateIDs: Set<String> = []
 
     init(playerState: PlayerState, container: AppContainer?, contentColor: Color) {
         self.playerState = playerState
@@ -50,7 +75,10 @@ struct FullPlayerFavoriteStarButton: View {
     }
 
     private var isFavorite: Bool {
-        currentSongIsFavorite(playerState: playerState, container: container, records: favoriteMatches)
+        let candidates = favoriteCandidateIDs.isEmpty
+            ? Set([playerState.currentTrack?.id].compactMap { $0 })
+            : favoriteCandidateIDs
+        return containsFavorite(candidateIDs: candidates, in: favoriteMatches)
     }
 
     var body: some View {
@@ -86,6 +114,11 @@ struct FullPlayerFavoriteStarButton: View {
                 : String(localized: "Add to Favorites", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale)
         )
         .accessibilityAddTraits(isFavorite ? .isSelected : [])
+        .task(id: favoriteCandidatesKey(playerState: playerState, container: container, records: favoriteMatches)) {
+            let candidates = await loadFavoriteCandidateIDs(playerState: playerState, container: container)
+            guard !Task.isCancelled else { return }
+            favoriteCandidateIDs = candidates
+        }
     }
 }
 
@@ -171,6 +204,7 @@ struct TrackInfoSection: View {
 
     @Query private var favoriteMatches: [FavoriteRecord]
     @Query private var downloadedMatches: [DownloadedTrack]
+    @State private var favoriteCandidateIDs: Set<String> = []
     private let downloadTargetID: String
     private let downloadRequiresOriginal: Bool
     @Environment(ArtworkImageCache.self) private var artworkImageCache
@@ -224,7 +258,10 @@ struct TrackInfoSection: View {
     }
 
     private var isFavorite: Bool {
-        currentSongIsFavorite(playerState: playerState, container: container, records: favoriteMatches)
+        let candidates = favoriteCandidateIDs.isEmpty
+            ? Set([playerState.currentTrack?.id].compactMap { $0 })
+            : favoriteCandidateIDs
+        return containsFavorite(candidateIDs: candidates, in: favoriteMatches)
     }
     private var isDownloaded: Bool {
         downloadedMatches.contains { !downloadRequiresOriginal || $0.isOriginalAudio == true }
@@ -258,11 +295,12 @@ struct TrackInfoSection: View {
                 lyricsCoverThumbnail
             }
 
-            VStack(alignment: .leading, spacing: layout == .immersivePortrait ? 0 : (isLyricsHeader ? 2 : LumaSpacing.xs)) {
+            VStack(alignment: .leading, spacing: layout == .immersivePortrait ? 0
+                    : (isLyricsHeader ? 2 : (layout == .phoneLandscape ? 2 : LumaSpacing.xs))) {
                 MarqueeText(
                     text: titleText,
                     font: layout == .immersivePortrait ? .lumaImmersivePlayerTitle
-                        : layout == .phoneLandscape ? .system(size: 20, weight: .semibold)
+                        : layout == .phoneLandscape ? .system(size: 22, weight: .bold)
                         : (isLyricsHeader ? .system(size: 18, weight: .semibold) : .title2.weight(.semibold)),
                     color: contentColor
                 )
@@ -353,122 +391,125 @@ struct TrackInfoSection: View {
                     }
 
                     Menu {
-                        if !playerState.isLiveStream {
-                            ControlGroup {
-                                if isDownloading {
-                                    Button {} label: {
-                                        Label(String(localized: "Downloading…", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale), systemImage: "arrow.down.circle")
+                        Group {
+                            if !playerState.isLiveStream {
+                                ControlGroup {
+                                    if isDownloading {
+                                        Button {} label: {
+                                            Label(String(localized: "Downloading…", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale), systemImage: "arrow.down.circle")
+                                        }
+                                        .disabled(true)
+                                    } else if isDownloaded {
+                                        Button(role: .destructive) {
+                                            removeDownload()
+                                        } label: {
+                                            Label(String(localized: "Remove Download", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale), systemImage: "arrow.down.circle.fill")
+                                        }
+                                    } else {
+                                        Button {
+                                            downloadCurrentTrack()
+                                        } label: {
+                                            Label(String(localized: "Download", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale), systemImage: "arrow.down.circle")
+                                        }
+                                        .disabled(!isOnline || playerState.currentTrack == nil)
                                     }
-                                    .disabled(true)
-                                } else if isDownloaded {
-                                    Button(role: .destructive) {
-                                        removeDownload()
-                                    } label: {
-                                        Label(String(localized: "Remove Download", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale), systemImage: "arrow.down.circle.fill")
-                                    }
-                                } else {
+
                                     Button {
-                                        downloadCurrentTrack()
+                                        toggleFavorite()
                                     } label: {
-                                        Label(String(localized: "Download", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale), systemImage: "arrow.down.circle")
+                                        Label(
+                                            isFavorite
+                                                ? String(localized: "Remove from Favorites", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale)
+                                                : String(localized: "Add to Favorites", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale),
+                                            systemImage: isFavorite ? "star.slash" : "star"
+                                        )
                                     }
-                                    .disabled(!isOnline || playerState.currentTrack == nil)
+                                    .disabled(container?.serverState.activeServer == nil || playerState.currentTrack == nil)
+
+                                    if let track = playerState.currentTrack {
+                                        LumaShareButton(
+                                            itemID: track.id,
+                                            itemDescription: track.title,
+                                            fallbackText: trackShareText
+                                        )
+                                    }
+                                }
+
+                                if let track = playerState.currentTrack,
+                                   !AtmosVariantCatalogue.isAtmos(track) {
+                                    Button {
+                                        atmosSelectionSong = track
+                                    } label: {
+                                        Label(
+                                            String(localized: "Dolby Atmos Version…", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale),
+                                            systemImage: "waveform"
+                                        )
+                                    }
                                 }
 
                                 Button {
-                                    toggleFavorite()
+                                    songToAddToPlaylist = playerState.currentTrack
                                 } label: {
-                                    Label(
-                                        isFavorite
-                                            ? String(localized: "Remove from Favorites", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale)
-                                            : String(localized: "Add to Favorites", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale),
-                                        systemImage: isFavorite ? "star.slash" : "star"
-                                    )
+                                    Label(String(localized: "Add to Playlist…", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale), systemImage: "text.badge.plus")
                                 }
                                 .disabled(container?.serverState.activeServer == nil || playerState.currentTrack == nil)
 
-                                if let track = playerState.currentTrack {
-                                    LumaShareButton(
-                                        itemID: track.id,
-                                        itemDescription: track.title,
-                                        fallbackText: trackShareText
-                                    )
-                                }
-                            }
+                                Divider()
 
-                            if let track = playerState.currentTrack,
-                               !AtmosVariantCatalogue.isAtmos(track) {
                                 Button {
-                                    atmosSelectionSong = track
+                                    Task { await triggerSmartShuffle() }
                                 } label: {
-                                    Label(
-                                        String(localized: "Dolby Atmos Version…", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale),
-                                        systemImage: "waveform"
+                                    Label(String(localized: "Create Station", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale), systemImage: "dot.radiowaves.left.and.right")
+                                }
+
+                                Divider()
+
+                                Button {
+                                    goToAlbum()
+                                } label: {
+                                    GoToDestinationMenuLabel(
+                                        title: String(localized: "Go to Album", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale),
+                                        subtitle: playerState.currentTrack?.albumName,
+                                        systemImage: "square.stack"
                                     )
                                 }
-                            }
+                                .disabled(playerState.currentTrack?.albumId == nil)
 
-                            Button {
-                                songToAddToPlaylist = playerState.currentTrack
-                            } label: {
-                                Label(String(localized: "Add to Playlist…", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale), systemImage: "text.badge.plus")
-                            }
-                            .disabled(container?.serverState.activeServer == nil || playerState.currentTrack == nil)
-
-                            Divider()
-
-                            Button {
-                                Task { await triggerSmartShuffle() }
-                            } label: {
-                                Label(String(localized: "Create Station", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale), systemImage: "dot.radiowaves.left.and.right")
-                            }
-
-                            Divider()
-
-                            Button {
-                                goToAlbum()
-                            } label: {
-                                GoToDestinationMenuLabel(
-                                    title: String(localized: "Go to Album", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale),
-                                    subtitle: playerState.currentTrack?.albumName,
-                                    systemImage: "square.stack"
-                                )
-                            }
-                            .disabled(playerState.currentTrack?.albumId == nil)
-
-                            Button {
-                                goToArtist()
-                            } label: {
-                                GoToDestinationMenuLabel(
-                                    title: String(localized: "Go to Artist", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale),
-                                    subtitle: playerState.currentTrack?.artist,
-                                    systemImage: "music.mic"
-                                )
-                            }
-                            .disabled(playerState.currentTrack?.artist == nil)
-
-                            Button {
-                                showSongInfo = true
-                            } label: {
-                                Label(String(localized: "View Credits", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale), systemImage: "info.circle")
-                            }
-                            .disabled(playerState.currentTrack == nil)
-
-                            if showLyrics, let lyricsShareText {
-                                ShareLink(item: lyricsShareText) {
-                                    Label(
-                                        String(localized: "Share Lyrics", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale),
-                                        systemImage: "quote.bubble"
+                                Button {
+                                    goToArtist()
+                                } label: {
+                                    GoToDestinationMenuLabel(
+                                        title: String(localized: "Go to Artist", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale),
+                                        subtitle: playerState.currentTrack?.artist,
+                                        systemImage: "music.mic"
                                     )
                                 }
-                            }
-                        } else {
-                            Button {
-                                Task { await triggerSmartShuffle() }
-                            } label: {
-                                Label(String(localized: "Smart Shuffle", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale), systemImage: "dot.radiowaves.left.and.right")
+                                .disabled(playerState.currentTrack?.artist == nil)
+
+                                Button {
+                                    showSongInfo = true
+                                } label: {
+                                    Label(String(localized: "View Credits", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale), systemImage: "info.circle")
+                                }
+                                .disabled(playerState.currentTrack == nil)
+
+                                if showLyrics, let lyricsShareText {
+                                    ShareLink(item: lyricsShareText) {
+                                        Label(
+                                            String(localized: "Share Lyrics", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale),
+                                            systemImage: "quote.bubble"
+                                        )
+                                    }
+                                }
+                            } else {
+                                Button {
+                                    Task { await triggerSmartShuffle() }
+                                } label: {
+                                    Label(String(localized: "Smart Shuffle", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale), systemImage: "dot.radiowaves.left.and.right")
+                                }
                             }
                         }
+                        .tint(.primary)
                     } label: {
                         Image(systemName: "ellipsis")
                             .font(.system(size: layout == .immersivePortrait || isLyricsHeader ? ImmersivePlayerMetrics.menuGlyph : 17, weight: .bold))
@@ -476,6 +517,7 @@ struct TrackInfoSection: View {
                             .frame(width: actionButtonSize, height: actionButtonSize)
                             .contentShape(Rectangle())
                     }
+                    .tint(contentColor)
                     .menuOrder(.fixed)
                     .buttonStyle(.plain)
                     .accessibilityLabel("More options")
@@ -511,6 +553,11 @@ struct TrackInfoSection: View {
                   let serverId = container?.serverState.activeServer?.id,
                   let downloadService = container?.downloadService else { return }
             isDownloading = await downloadService.isDownloading(songId: track.id, serverId: serverId)
+        }
+        .task(id: favoriteCandidatesKey(playerState: playerState, container: container, records: favoriteMatches)) {
+            let candidates = await loadFavoriteCandidateIDs(playerState: playerState, container: container)
+            guard !Task.isCancelled else { return }
+            favoriteCandidateIDs = candidates
         }
     }
 

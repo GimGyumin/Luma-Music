@@ -12,6 +12,7 @@ actor LibraryService: LibraryServiceProtocol {
     private let serverService: any ServerServiceProtocol
     private let modelContainer: ModelContainer
     private let downloadService: any DownloadServiceProtocol
+    private let replay: ReplayHistorySync?
     private let statsService: StatsService
     private let libraryIndex: LibraryIndexService?
     private var cachedClient: SwiftSonicClient?
@@ -62,11 +63,13 @@ actor LibraryService: LibraryServiceProtocol {
         modelContainer: ModelContainer,
         downloadService: any DownloadServiceProtocol,
         statsService: StatsService,
+        replay: ReplayHistorySync? = nil,
         libraryIndex: LibraryIndexService? = nil
     ) {
         self.serverService = serverService
         self.modelContainer = modelContainer
         self.downloadService = downloadService
+        self.replay = replay
         self.statsService = statsService
         self.libraryIndex = libraryIndex
     }
@@ -121,6 +124,10 @@ actor LibraryService: LibraryServiceProtocol {
             await libraryIndex.registerAlbumVersions(versions, serverId: token.identity.serverID)
             try await requireCurrent(token)
         }
+        // A server may store stereo and Atmos files under the very same album ID.
+        // Keep the stereo row and retain both physical files in the playback catalogue.
+        let displayedIDs = Set(AtmosVariantCatalogue.presentedSongs(entries.map { DisplayableSong(from: $0) }).map(\.id))
+        entries.removeAll { !displayedIDs.contains($0.id) }
         if entries.map(\.id) == (base.song ?? []).map(\.id) { return base }
         return AtmosAlbumPolicy.combining(base, songs: entries)
     }
@@ -541,6 +548,12 @@ actor LibraryService: LibraryServiceProtocol {
     }
 
     // MARK: - Discover
+
+    func submitListen(session: UUID, track: String, date: Date, account: ServerSnapshot) async {
+        guard let replay else { await scrobble(songId: track, submission: true); return }
+        do { try await replay.submit(session: session, track: track, date: date, account: account) }
+        catch { Logger.library.debug("Confirmed scrobble submission deferred or unacknowledged") }
+    }
 
     func scrobble(songId: String, submission: Bool) async {
         do {

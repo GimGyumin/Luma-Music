@@ -143,6 +143,8 @@ actor PlayerService: PlayerServiceProtocol {
     var needsArtworkPreloadRecheck = false
     /// Source of the currently playing track; kept for repeat-one replay.
     var currentSource: MediaSource?
+    /// Serializes cache-lease handoff when play/stop commands interleave at an await.
+    var cacheLeaseGeneration: UInt64 = 0
     /// Invalidates a suspended resume when a newer transport command arrives.
     nonisolated let authority = PlaybackAuthority()
     var transport = PlaybackTransportModel()
@@ -159,6 +161,8 @@ actor PlayerService: PlayerServiceProtocol {
     var streamTimeOffset: TimeInterval = 0
     var engineFailureTask: Task<Void, Never>?
     var liveStreamStallTask: Task<Void, Never>?
+    /// Fixed-name traces owned by this actor. No audio render callback touches it.
+    var telemetry = PlaybackTelemetry()
 
     /// AVPlayer path for Dolby Atmos / E-AC-3 / multichannel so Spatial Audio can engage.
     nonisolated let systemEngine = AVPlayerPlaybackEngine()
@@ -167,6 +171,9 @@ actor PlayerService: PlayerServiceProtocol {
     var audioObjectsResetTask: Task<Void, Never>?
     var audioSessionConfigured = false
     #if os(iOS)
+    /// Last sample rate requested from the hardware. Repeated requests are skipped so
+    /// track transitions do not renegotiate the route unnecessarily.
+    var preferredAudioSessionSampleRate: Double?
     var mediaServicesResetObserver: NSObjectProtocol?
     var interruptionObserver: NSObjectProtocol?
     var routeChangeObserver: NSObjectProtocol?
@@ -246,7 +253,7 @@ actor PlayerService: PlayerServiceProtocol {
     /// Ordered history writes survive track changes; audio never waits for their persistence.
     var historyWriteTask: Task<Void, Never>?
     var periodicPlaybackReportTask: Task<Void, Never>?
-    var gaplessMetadataTask: Task<Void, Never>?
+    var trackMetadataTask: Task<Void, Never>?
     let cacheSession: URLSession
     let transferCoordinator: MediaTransferCoordinator
     /// Task that prefetches the next queued track into cache ahead of the crossfade window.
@@ -267,6 +274,16 @@ actor PlayerService: PlayerServiceProtocol {
     nonisolated static let autoExtendUserDefaultsKey = "luma.player.autoExtendEnabled"
     nonisolated static let automaticDownloadUserDefaultsKey = "luma.download.automaticAfterStreaming"
     nonisolated static let automaticDownloadOverCellularUserDefaultsKey = "luma.download.automaticOverCellular"
+    /// Automatic streaming cache follows the Automatic Downloads preference. Turning
+    /// automatic downloads off leaves already-cached or downloaded files playable,
+    /// but stops new background file transfers.
+    nonisolated static var isAutomaticCacheEnabled: Bool {
+        UserDefaults.standard.object(forKey: automaticDownloadUserDefaultsKey) as? Bool ?? false
+    }
+    /// Temporary device audit tracing; normal launches never set this variable.
+    nonisolated static var playbackTraceEnabled: Bool {
+        ProcessInfo.processInfo.environment["LUMA_PLAYBACK_TRACE"] == "1"
+    }
     private nonisolated static let listeningHistoryUserDefaultsKey = "luma.history.enabled"
     nonisolated static var isListeningHistoryEnabled: Bool {
         UserDefaults.standard.object(forKey: listeningHistoryUserDefaultsKey) as? Bool ?? true
@@ -278,6 +295,9 @@ actor PlayerService: PlayerServiceProtocol {
 
     /// Wall-clock time when the current track first started.
     var trackPlayStartDate: Date?
+    /// Request-level timing for the 8s/lossless audit; not used by transport decisions.
+    var playbackRequestStartedAt: Date?
+    var engineInstalledAt: Date?
     /// Seconds of actual (non-paused) playback accumulated for the current track.
     var accumulatedPlayedSeconds: TimeInterval = 0
     /// Wall-clock start of the current play segment; nil when paused or stopped.
@@ -374,6 +394,9 @@ actor PlayerService: PlayerServiceProtocol {
         cacheConfig.timeoutIntervalForResource = 300
         cacheConfig.urlCache = nil
         cacheConfig.requestCachePolicy = .reloadIgnoringLocalCacheData
+        // Playback owns the foreground connection. The optional cache copy must yield
+        // bandwidth to the stream instead of competing with it mid-track.
+        cacheConfig.networkServiceType = .background
         self.cacheSession = URLSession(configuration: cacheConfig)
 
         let prefetchConfig = URLSessionConfiguration.default
@@ -427,7 +450,7 @@ actor PlayerService: PlayerServiceProtocol {
         prefetchTask?.cancel()
         autoExtendFetchTask?.cancel()
         gaplessPreparationTask?.cancel()
-        gaplessMetadataTask?.cancel()
+        trackMetadataTask?.cancel()
         fadeInTask?.cancel()
         fadeOutTask?.cancel()
         playingNowTask?.cancel()

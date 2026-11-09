@@ -134,12 +134,15 @@ extension PlayerService {
         gaplessBridge.arm(next: next, source: nextSource, epoch: epoch)
         if systemPlayback.isActive {
             guard systemEngine.prepareNext(url: nextSource.url, headers: nextSource.customHeaders) else {
+                telemetry.finishGapless(.failure, failed: true)
+                DiagnosticsCenter.shared.report(.gapless)
                 cancelGaplessBridge()
                 return
             }
         } else {
             engine.queue(url: nextSource.url, headers: nextSource.customHeaders)
         }
+        telemetry.beginGapless()
         Logger.player.info("[GAPLESS] pre-queued '\(next.title, privacy: .public)' for seamless transition")
     }
 
@@ -170,9 +173,7 @@ extension PlayerService {
               !isHandlingEndOfTrack, !isTrackTransitionPending else { return false }
         isHandlingEndOfTrack = true
         defer { isHandlingEndOfTrack = false }
-        guard systemEngine.advanceToPreparedNext(expectedURL: source.url),
-              systemEngine.consumeQueuedTransition() else { return false }
-        gaplessBridge.wasSelected = true
+        guard systemEngine.advanceToPreparedNext(expectedURL: source.url) else { return false }
         stopSystemPlayerProgressWatchdog()
         let advanced = await finalizeGaplessBridge(epoch: epoch, completedNaturally: false)
         if systemPlayback.isActive { startSystemPlayerProgressWatchdog(generation: systemPlayback.generation) }
@@ -215,7 +216,7 @@ extension PlayerService {
         guard contextIsCurrent(context), !hasPendingSelection, eofSnapshot.2.hasPlaybackIntent,
               !isTrackTransitionPending else { return }
         let eofPosition = max(engineProgress(), eofSnapshot.1, finishedProgress ?? 0, lastObservedEngineProgress)
-        if currentSource?.isLocal == false, currentSource?.isLiveStream == false,
+        if !gaplessBridge.wasSelected, currentSource?.isLocal == false, currentSource?.isLiveStream == false,
            Self.isPrematureTranscodeEnd(duration: eofSnapshot.0, offset: streamTimeOffset, position: eofPosition) {
             // A truncated original/encoder response is a transport failure, never a completed listen
             // or a repeat-one request. Retry at the retained position once, then expose failure.
@@ -224,7 +225,7 @@ extension PlayerService {
         }
         let parsedDuration = engineDuration()
         let expectedCachedDuration = parsedDuration.isFinite && parsedDuration > 0 ? parsedDuration : eofSnapshot.0
-        if engineConfirmed, case .cached = currentSource,
+        if engineConfirmed, !gaplessBridge.wasSelected, case .cached = currentSource,
            expectedCachedDuration > 10,
            eofPosition < expectedCachedDuration - max(5, expectedCachedDuration * 0.1) {
             // A cached body without Content-Length can truncate while its record still
@@ -239,6 +240,7 @@ extension PlayerService {
             return
         }
         let trackIdAtEntry = await MainActor.run { state.currentTrack?.id }
+        guard contextIsCurrent(context), !isHandlingEndOfTrack else { return }
         isHandlingEndOfTrack = true
         defer { isHandlingEndOfTrack = false }
         let trackIdNow = await MainActor.run { state.currentTrack?.id }
@@ -299,7 +301,10 @@ extension PlayerService {
                 startEnginePlayback(
                     url: source.url,
                     headers: source.customHeaders,
-                    useSystemPlayer: useSystem
+                    useSystemPlayer: useSystem,
+                    preferredSampleRate: song.flatMap {
+                        AudioQualityClassifier.nativePlaybackSampleRate(for: $0, source: source)
+                    }
                 )
             }
         } else {
@@ -339,7 +344,7 @@ extension PlayerService {
             if Self.confirmsBridgedEntryProgress(
                 previous: previous,
                 current: progress,
-                engineState: state
+                engineState: state, selected: gaplessBridge.wasSelected
             ) {
                 return true
             }
@@ -408,19 +413,22 @@ extension PlayerService {
     nonisolated static func confirmsBridgedEntryProgress(
         previous: Double,
         current: Double,
-        engineState: AudioPlayerState
+        engineState: AudioPlayerState, selected: Bool = false
     ) -> Bool {
         guard engineState == .playing, previous.isFinite, current.isFinite else { return false }
         if previous > Self.bridgedEntryProgressResetThreshold, current + 1 < previous {
             return true
         }
-        return current < Self.bridgedEntryProgressResetThreshold && current > previous + 0.02
+        return (selected || current < Self.bridgedEntryProgressResetThreshold) && current > previous + 0.02
     }
 
     /// Completes a seamless gapless transition. Returns `true` when a bridge was armed and the
     /// engine already advanced to its pre-buffered next entry, in which case app state is advanced
     /// in place — the engine must NOT be restarted.
     func finalizeGaplessBridge(epoch: UInt64, completedNaturally: Bool = true) async -> Bool {
+        var gaplessResult: DiagnosticsResult = .cancelled
+        var gaplessFailed = false
+        defer { telemetry.finishGapless(gaplessResult, failed: gaplessFailed) }
         let context = playbackContext
         guard transport.permitsAudio, !completedNaturally || !hasPendingSelection else { return false }
         guard let next = gaplessBridge.next, let nextSource = gaplessBridge.source else {
@@ -439,12 +447,26 @@ extension PlayerService {
         let expectedNextIndex = currentIndex + 1
         guard queue.indices.contains(expectedNextIndex), queue[expectedNextIndex].id == next.id else {
             Logger.player.warning("[GAPLESS] bridge stale — queue changed after arming; falling back to normal advance")
+            gaplessResult = .failure
+            gaplessFailed = true
+            telemetry.finishGapless(.failure, failed: true)
+            DiagnosticsCenter.shared.report(.gapless)
             cancelGaplessBridge()
             return false
         }
         wasTrackCompletedNaturally = completedNaturally
         await recordCurrentTrackPlayback(trigger: completedNaturally ? "track_completed" : "user_skipped")
         guard contextIsCurrent(context), transport.permitsAudio else { return true }
+        let (config, previousPosition) = await MainActor.run { (replayGainSettings.config, state.position) }
+        guard contextIsCurrent(context), transport.permitsAudio else { return true }
+        // A pause may supersede the awaits above. Leave the native acknowledgment
+        // available to resume until we can install the new source in this actor turn.
+        guard !systemPlayback.isActive || systemEngine.consumeQueuedTransition() else {
+            gaplessResult = .failure
+            gaplessFailed = true
+            DiagnosticsCenter.shared.report(.gapless)
+            return false
+        }
         wasTrackCompletedNaturally = false
         resetTrackAccumulator(isPlaying: false)
         playbackEpoch &+= 1
@@ -463,17 +485,12 @@ extension PlayerService {
         nextTrackISRCPrefetchTask = nil
 
         nowPlayingEpoch &+= 1
-        let config = await MainActor.run { replayGainSettings.config }
-        guard contextIsCurrent(bridgedContext), transport.permitsAudio else { return true }
-        await applyReplayGain(track: nextSource.playbackSong ?? next, config: config, context: bridgedContext)
-        guard contextIsCurrent(bridgedContext), transport.permitsAudio else { return true }
-
         let previousJellyfinContext = currentSource?.jellyfinPlaybackContext
-        let previousPosition = await MainActor.run { state.position }
-        guard contextIsCurrent(bridgedContext), transport.permitsAudio else { return true }
         if let url = seekBufferURL { try? FileManager.default.removeItem(at: url) }
         seekBufferURL = nil
-        currentSource = nextSource
+        await replaceCurrentSource(nextSource)
+        Task { @MainActor in PlaybackBeatMeter.shared.resetForNewItem() }
+        Logger.player.debug("[VISUALIZER] playback_engine=\(self.systemPlayback.isActive ? "AVPlayer" : "AudioStreaming", privacy: .public) source_type=\(nextSource.visualizationSourceType, privacy: .public) transition=gapless")
         streamTimeOffset = 0
         systemPlayback.resetTrackRecovery()
         cancelPendingCacheDownload()
@@ -490,6 +507,7 @@ extension PlayerService {
         seekNeedsCommit = false
         let bridgedSeekable = engineIsSeekable()
         let isAudible = systemPlayback.isActive ? systemEngine.state == .playing : engine.state == .playing
+        let position = engineProgress()
         if isAudible { currentPlaySegmentStart = Date() }
 
         guard await commitPresentation(bridgedContext, { state in
@@ -497,7 +515,7 @@ extension PlayerService {
             state.currentPlaybackTrack = nextSource.playbackSong
             state.currentIndex = nextIndex
             state.duration = duration
-            state.position = 0
+            state.position = position
             state.pendingSeekPosition = nil
             state.isSeekable = bridgedSeekable
             state.playbackState = isAudible ? .playing : .loading
@@ -507,6 +525,9 @@ extension PlayerService {
         }) else { return true }
         guard contextIsCurrent(bridgedContext), transport.permitsAudio else { return true }
 
+        await applyReplayGain(track: nextSource.playbackSong ?? next, config: config, context: bridgedContext)
+        guard contextIsCurrent(bridgedContext), transport.permitsAudio else { return true }
+
         let bridgedQueueCount = await MainActor.run { state.queue.count }
         guard contextIsCurrent(bridgedContext), transport.permitsAudio else { return true }
         await nowPlayingService?.publishTrackChange(NowPlayingSnapshot(
@@ -514,7 +535,7 @@ extension PlayerService {
             artist: next.artist,
             album: next.albumName,
             duration: duration,
-            position: 0,
+            position: position,
             playbackRate: isAudible ? 1.0 : 0.0,
             artworkURL: nil,
             artworkHeaders: [:],
@@ -537,12 +558,13 @@ extension PlayerService {
         nextGaplessPreparationAttempt = .distantPast
         // Release the handover/EOF guard now. Artwork, session persistence and recommendations
         // must not prevent the progress loop from prebuffering the following track.
-        gaplessMetadataTask = Task { [weak self] in
+        trackMetadataTask = Task { [weak self] in
             await self?.finishBridgedMetadata(next: next, source: nextSource, epoch: bridgedEpoch,
                                             nextIndex: nextIndex, queueCount: bridgedQueueCount,
                                             previousContext: previousJellyfinContext, previousPosition: previousPosition)
         }
         Logger.player.info("[GAPLESS] bridged to '\(next.title, privacy: .public)'")
+        gaplessResult = .success
         return true
     }
 

@@ -43,6 +43,10 @@ struct CoverArtView: View {
     /// used to avoid firing artwork tasks for rows mounted but not yet visible (e.g. the inline queue at
     /// opacity 0). Defaults to true so every other call site is unchanged.
     var loadingEnabled: Bool = true
+    /// Fill the proposed frame even when it is not square. Used by the
+    /// full-bleed landscape sleeve, where the square cover is cropped to the
+    /// viewport height instead of being letterboxed into a centered square.
+    var fillsFrame: Bool = false
 
     var body: some View {
         // No artworkCache read here — see guard comment above.
@@ -56,7 +60,8 @@ struct CoverArtView: View {
             placeholderSystemImage: placeholderSystemImage,
             initialImage: initialImage,
             contentMode: contentMode,
-            loadingEnabled: loadingEnabled
+            loadingEnabled: loadingEnabled,
+            fillsFrame: fillsFrame
         )
     }
 }
@@ -71,6 +76,7 @@ private struct CoverArtViewContent: View {
     let placeholderSystemImage: String
     let contentMode: ContentMode
     let loadingEnabled: Bool
+    let fillsFrame: Bool
 
     @Environment(\.appContainer) private var container
     @Environment(ArtworkImageCache.self) private var artworkCache: ArtworkImageCache?
@@ -84,7 +90,7 @@ private struct CoverArtViewContent: View {
     /// hides the old image while its replacement is resolved.
     @State private var displayedId: String?
 
-    init(id: String, size: Int?, tier: ArtworkTier?, cornerRadius: CGFloat, placeholderSystemImage: String, initialImage: PlatformImage?, contentMode: ContentMode = .fill, loadingEnabled: Bool = true) {
+    init(id: String, size: Int?, tier: ArtworkTier?, cornerRadius: CGFloat, placeholderSystemImage: String, initialImage: PlatformImage?, contentMode: ContentMode = .fill, loadingEnabled: Bool = true, fillsFrame: Bool = false) {
         self.id = id
         self.size = size
         self.tier = tier
@@ -92,6 +98,7 @@ private struct CoverArtViewContent: View {
         self.placeholderSystemImage = placeholderSystemImage
         self.contentMode = contentMode
         self.loadingEnabled = loadingEnabled
+        self.fillsFrame = fillsFrame
         _cachedImage = State(initialValue: initialImage)
         // A caller-provided image is its best guess for THIS id, so mark it displayed for `id`:
         // it is upgraded by the load step online, but kept (not cleared) when offline.
@@ -112,6 +119,8 @@ private struct CoverArtViewContent: View {
                 placeholder
             }
         }
+        .frame(maxWidth: fillsFrame ? .infinity : nil,
+               maxHeight: fillsFrame ? .infinity : nil)
         .clipped()
         .contentShape(Rectangle())
         // Keyed on (loadingEnabled, id) so deferring/undeferring re-runs the load: a deferred row shows its

@@ -254,14 +254,15 @@ nonisolated enum ArtworkColorTransformer {
     ///
     /// Analysis runs once upstream (`RawArtworkColorAnalysis`); this transform is a cheap
     /// projection, never a re-analysis.
-    static func page(from analysis: RawArtworkColorAnalysis, increasedContrast: Bool = false) -> AppearanceColorPalette {
-        let base = analysis.backgroundCandidate
+    static func page(from analysis: RawArtworkColorAnalysis, increasedContrast: Bool = false,
+                     systemLight: Bool? = nil) -> AppearanceColorPalette {
+        let base = albumBase(analysis.backgroundCandidate, systemLight: systemLight, increasedContrast: increasedContrast)
         let isLight = base != .clear
             && (ArtworkColorMath.srgb(base).map { ArtworkColorMath.relativeLuminance($0.0, $0.1, $0.2) } ?? 0) >= sqrt(0.0525) - 0.05
 
         // Foreground is neutral black/white, NOT the artwork hue — matching the 26.4
         // simplification to contrast-driven text. Hue identity lives only in the background.
-        let texts = ArtworkColorMath.semanticText(
+        let texts = ArtworkColorMath.albumText(
             on: base,
             isLight: isLight,
             increasedContrast: increasedContrast
@@ -282,8 +283,29 @@ nonisolated enum ArtworkColorTransformer {
         )
     }
 
-    // MARK: Page — Light
+    /// Move along a line in linear sRGB to the nearest permitted luminance.
+    /// This retains chromaticity when dimming and naturally softens very dark covers when lifted.
+    private static func albumBase(_ seed: Color, systemLight: Bool?, increasedContrast: Bool) -> Color {
+        guard (systemLight != nil || increasedContrast), let rgb = ArtworkColorMath.srgb(seed) else { return seed }
+        let luminance = ArtworkColorMath.relativeLuminance(rgb.0, rgb.1, rgb.2)
+        let lightInk = systemLight.map { !$0 } ?? (luminance < sqrt(0.0525) - 0.05)
+        let target: Double
+        if lightInk {
+            target = min(luminance, systemLight == nil ? 0.098 : 0.075)
+        } else {
+            target = max(luminance, systemLight == nil ? 0.302 : 0.46)
+        }
+        guard target != luminance else { return seed }
+        func adjusted(_ channel: Double) -> Double {
+            let linear = channel <= 0.04045 ? channel / 12.92 : pow((channel + 0.055) / 1.055, 2.4)
+            let value = target < luminance ? linear * target / luminance
+                : linear + (1 - linear) * (target - luminance) / (1 - luminance)
+            return ArtworkColorMath.encoded(value)
+        }
+        return Color(.sRGB, red: adjusted(rgb.0), green: adjusted(rgb.1), blue: adjusted(rgb.2))
+    }
 
+    // MARK: Page — Light
     static func lightPage(from analysis: RawArtworkColorAnalysis, increasedContrast: Bool = false) -> AppearanceColorPalette {
         var hsb = ArtworkColorMath.hsb(analysis.backgroundCandidate) ?? (0, 0, 0)
         let rawSat = hsb.s
@@ -563,6 +585,10 @@ nonisolated enum ArtworkColorMath {
         return 0.2126 * linear(r) + 0.7152 * linear(g) + 0.0722 * linear(b)
     }
 
+    static func encoded(_ linear: Double) -> Double {
+        linear <= 0.0031308 ? 12.92 * linear : 1.055 * pow(linear, 1 / 2.4) - 0.055
+    }
+
     static func contrastRatio(_ a: Double, _ b: Double) -> Double {
         let hi = max(a, b), lo = min(a, b)
         return (hi + 0.05) / (lo + 0.05)
@@ -630,6 +656,24 @@ nonisolated enum ArtworkColorMath {
             }
             let fg = isLight ? max(0.0, 1.0 - offset) : min(1.0, offset)
             return Color(red: fg, green: fg, blue: fg)
+        }
+
+        return (
+            foreground(forTarget: targets[0]),
+            foreground(forTarget: targets[1]),
+            foreground(forTarget: targets[2]),
+            foreground(forTarget: targets[3])
+        )
+    }
+
+    static func albumText(on background: Color, isLight: Bool, increasedContrast: Bool = false) -> (Color, Color, Color, Color) {
+        let bg = srgb(background) ?? (isLight ? (1, 1, 1) : (0, 0, 0))
+        let bgL = relativeLuminance(bg.0, bg.1, bg.2)
+        let targets = increasedContrast ? [21.0, 10.0, 7.0, 4.5] : [7.0, 4.6, 3.0, 1.8]
+        func foreground(forTarget target: Double) -> Color {
+            let luminance = isLight ? (bgL + 0.05) / target - 0.05 : (bgL + 0.05) * target - 0.05
+            let gray = encoded(min(1, max(0, luminance)))
+            return Color(.sRGB, red: gray, green: gray, blue: gray)
         }
 
         return (

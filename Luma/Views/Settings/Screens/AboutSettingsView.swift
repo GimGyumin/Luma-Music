@@ -13,7 +13,7 @@ struct AboutSettingsView: View {
     }
 
     private var buildIdentifier: String {
-        Bundle.main.infoDictionary?["LumaBuildIdentifier"] as? String ?? "26A1001rc1"
+        Bundle.main.infoDictionary?["LumaBuildIdentifier"] as? String ?? "26A1001e"
     }
 
     private var copyright: String {
@@ -44,6 +44,7 @@ struct AboutSettingsView: View {
             Section {
                 SettingsValueRow("Copyright", value: copyright)
                 SettingsValueRow("License", value: "MPL-2.0 · AGPL-3.0 components")
+                FeatureGuideLink(guide: .privacy, title: "개인정보 보호에 관하여")
 
                 DisclosureGroup {
                     NavigationLink {

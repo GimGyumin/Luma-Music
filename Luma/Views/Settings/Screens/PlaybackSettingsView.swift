@@ -11,7 +11,7 @@ struct PlaybackSettingsView: View {
     @ObservedObject private var appleMusic = AppleMusicSettings.shared
 
     #if os(iOS)
-    @State private var musicHapticsActive = false
+    @ObservedObject private var musicHaptics = MusicHapticsController.shared
     #endif
 
     private var crossfade: CrossfadeSettings? { container?.crossfadeSettings }
@@ -32,15 +32,8 @@ struct PlaybackSettingsView: View {
         .navigationBarTitleDisplayMode(.inline)
         #endif
         #if os(iOS)
-        .task {
-            MusicHapticsController.shared.refresh()
-            musicHapticsActive = MusicHapticsController.shared.isSystemActive
-            // Poll lightly — system Music Haptics may change while this screen is open.
-            while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(2))
-                MusicHapticsController.shared.refresh()
-                musicHapticsActive = MusicHapticsController.shared.isSystemActive
-            }
+        .onChange(of: appleMusic.musicHapticsEnabled, initial: true) { _, _ in
+            musicHaptics.refresh()
         }
         #endif
     }
@@ -65,7 +58,10 @@ struct PlaybackSettingsView: View {
         } header: {
             SettingsSectionHeader("Song Transitions")
         } footer: {
-            SettingsSectionFooter("Gapless playback removes silence between consecutive tracks. Crossfade fades out one track and fades in the next.")
+            ContextualGuideNote(
+                guide: .gapless,
+                message: String(localized: "Gapless removes silence between consecutive tracks. Crossfade overlaps the end of one track with the next; the two are not used together.", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale)
+            )
         }
     }
 
@@ -88,7 +84,7 @@ struct PlaybackSettingsView: View {
 
             SettingsValueRow(
                 "System Music Haptics",
-                value: musicHapticsActive
+                value: appleMusic.musicHapticsEnabled && musicHaptics.isSystemActive
                     ? String(localized: "On", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale)
                     : String(localized: "Off", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale)
             )

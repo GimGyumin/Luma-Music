@@ -25,10 +25,15 @@ final class LibraryIndexService {
     private var albums: [IndexedAlbum] = []
     private var playlists: [IndexedPlaylist] = []
     private var songs: [DisplayableSong] = []
+    func replaySongs(for id: UUID) -> [String: DisplayableSong] {
+        hasUsableIndex && loadedServerID == id ? variants.songsByID : [:]
+    }
+
     private var variants = AtmosVariantCatalogue()
     private var detailVariants: [String: AtmosVariantCatalogue] = [:]
     private var detailServerID: UUID?
     @ObservationIgnored private let defaults: UserDefaults
+    private var atmosSelectionRevision = 0
 
     func presentedAlbums(_ values: [AlbumID3]) -> [AlbumID3] {
         if loadedServerID == serverID(), lastIndexedAt != nil { return variants.presented(values) }
@@ -62,6 +67,7 @@ final class LibraryIndexService {
 
     func preferredAtmosSong(for song: DisplayableSong, serverId: UUID) -> DisplayableSong? {
         guard serverId == serverID() else { return nil }
+        _ = atmosSelectionRevision
         let overrides = defaults.dictionary(forKey: Self.manualKey(serverId)) as? [String: String] ?? [:]
         if let id = overrides[song.id] {
             let candidate = (loadedServerID == serverId ? variants.songsByID[id] : nil)
@@ -121,9 +127,13 @@ final class LibraryIndexService {
         var overrides = defaults.dictionary(forKey: key) as? [String: String] ?? [:]
         overrides[song.id] = id
         defaults.set(overrides, forKey: key)
+        atmosSelectionRevision &+= 1
     }
 
-    func clearAtmosSelections(serverId: UUID) { defaults.removeObject(forKey: Self.manualKey(serverId)) }
+    func clearAtmosSelections(serverId: UUID) {
+        defaults.removeObject(forKey: Self.manualKey(serverId))
+        atmosSelectionRevision &+= 1
+    }
     private static func manualKey(_ serverId: UUID) -> String { "luma.atmos.matches.\(serverId.uuidString)" }
     /// Missing track artwork reuses the album; explicit alternate artwork stays distinct.
     var songArtworkSnapshot: [String: String] {
@@ -604,6 +614,12 @@ final class LibraryIndexService {
 
     private func runRebuild(using library: any LibraryServiceProtocol, token: UInt64, revision: UInt64, refreshExisting: Bool) async {
         guard token == generation, revision == accountRevision(), !Task.isCancelled else { return }
+        let syncTrace = DiagnosticsCenter.shared.begin(.librarySync)
+        defer {
+            let result: DiagnosticsResult = Task.isCancelled ? .cancelled
+                : (lastError == nil && lastIndexedAt != nil ? .success : .failure)
+            syncTrace.finish(result)
+        }
         let id = serverID()
         if loadedServerID != id || (installedRevision != nil && installedRevision != revision) {
             variants = AtmosVariantCatalogue()

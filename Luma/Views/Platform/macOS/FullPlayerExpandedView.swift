@@ -56,11 +56,9 @@ struct FullPlayerExpandedView: View {
     private var isOnline: Bool { container?.serverState.isOnline == true }
 
     private var playbackQuality: AudioQualityKind? {
-        guard let playerState, !playerState.isLiveStream, let track = currentTrack else { return nil }
-        return AudioQualityClassifier.displayablePlaybackQuality(
-            for: playerState.currentPlaybackTrack ?? track,
-            isExpensive: container?.serverState.isExpensive == true,
-            isTranscoding: playerState.isDeliveringTranscodedAudio
+        PlaybackQualityPresentation.quality(
+            for: playerState,
+            isExpensive: container?.serverState.isExpensive == true
         )
     }
 
@@ -637,6 +635,7 @@ struct FullPlayerExpandedView: View {
             .disabled(noTrack)
 
             Button {
+                HapticFeedback.transport.trigger()
                 Task { try? await container?.playerService.skipToPrevious() }
             } label: {
                 Image(systemName: "backward.fill")
@@ -648,6 +647,7 @@ struct FullPlayerExpandedView: View {
             expandedPlayPauseButton
 
             Button {
+                HapticFeedback.transport.trigger()
                 Task { try? await container?.playerService.skipToNext() }
             } label: {
                 Image(systemName: "forward.fill")
@@ -682,6 +682,7 @@ struct FullPlayerExpandedView: View {
                 .frame(width: 52, height: 52)
         } else {
             Button {
+                HapticFeedback.transport.trigger()
                 Task {
                     if isPlaying {
                         await container?.playerService.pause()
@@ -996,7 +997,8 @@ private struct ExpandedQueueRow: View {
             Spacer()
 
             if isCurrent {
-                NowPlayingBarsIndicator(isPlaying: isPlaying)
+                NowPlayingBarsIndicator(isPlaying: isPlaying,
+                        isBuffering: container?.playerState.playbackState == .buffering)
             } else {
                 ReorderIndicator()
             }

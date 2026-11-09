@@ -22,9 +22,7 @@ struct LyricTimeTests {
 @Suite("AppleLyricTTMLParser")
 struct AppleLyricTTMLParserTests {
     @Test func parsesSnippet_agentsRolesLeadingSilenceAndXBG() throws {
-        let url = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent()
-            .appendingPathComponent("Fixtures/HeartbreakerSnippet.ttml")
+        let url = LumaTestResources.fixture("Fixtures/HeartbreakerSnippet.ttml", sourceFile: #filePath)
         let data = try Data(contentsOf: url)
         let doc = try AppleLyricTTMLParser.parse(data: data)
 

@@ -199,7 +199,7 @@ struct MiniPlayerAccessoryView: View {
             .accessibilityValue(playerState.isShuffled ? String(localized: "On", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale) : String(localized: "Off", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale))
 
             Button {
-                HapticFeedback.light.trigger()
+                HapticFeedback.transport.trigger()
                 Task { try? await container?.playerService.skipToPrevious() }
             } label: {
                 Image(systemName: "backward.fill")
@@ -212,7 +212,7 @@ struct MiniPlayerAccessoryView: View {
             .accessibilityLabel(String(localized: "Skip to previous", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale))
 
             Button {
-                HapticFeedback.medium.trigger()
+                HapticFeedback.transport.trigger()
                 Task { await container?.playerService.togglePlayPause() }
             } label: {
                 Image(systemName: playbackAppearance.systemImage)
@@ -226,7 +226,7 @@ struct MiniPlayerAccessoryView: View {
             .accessibilityLabel(playbackAppearance == .play ? String(localized: "Play", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale) : String(localized: "Pause", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale))
 
             Button {
-                HapticFeedback.light.trigger()
+                HapticFeedback.transport.trigger()
                 Task { try? await container?.playerService.skipToNext() }
             } label: {
                 Image(systemName: "forward.fill")
@@ -485,7 +485,7 @@ struct MiniPlayerAccessoryView: View {
                     playPauseButton(playbackAppearance: playbackAppearance, compact: false)
                     if isAvailable && !isLiveStream {
                         Button {
-                            HapticFeedback.light.trigger()
+                            HapticFeedback.transport.trigger()
                             Task { try? await container?.playerService.skipToNext() }
                         } label: {
                             Image(systemName: "forward.fill")
@@ -548,7 +548,7 @@ struct MiniPlayerAccessoryView: View {
 
     private func playPauseButton(playbackAppearance: PlaybackControlAppearance, compact: Bool) -> some View {
         Button {
-            HapticFeedback.medium.trigger()
+            HapticFeedback.transport.trigger()
             Task { await container?.playerService.togglePlayPause() }
         } label: {
             Image(systemName: playbackAppearance.systemImage)

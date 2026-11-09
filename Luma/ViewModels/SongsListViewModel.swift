@@ -11,9 +11,31 @@ import SwiftSonic
 nonisolated struct SongAlphabetSection: Identifiable, Sendable {
     let letter: String
     let songs: [DisplayableSong]
-    /// Index of this section's first song within the flattened `allSongs` order (for playback).
+    /// Index of this section's first song within the flattened section order (for playback).
     let startIndex: Int
     var id: String { letter }
+    /// A shared section snapshot keeps rendered rows and playback indices in the same locale order.
+    static func grouped(_ songs: [DisplayableSong], sort: SongSort, locale: Locale) -> [Self] {
+        guard sort.groupsAlphabetically else { return [] }
+        let grouped = Dictionary(grouping: songs) { song -> String in
+            let value = sort.groupingKey(for: song).trimmingCharacters(in: .whitespacesAndNewlines)
+            guard let first = value.first, first.isLetter else { return "#" }
+            return String(first).uppercased()
+        }
+        let letters = grouped.keys.sorted { lhs, rhs in
+            if lhs == "#" { return false }
+            if rhs == "#" { return true }
+            return lhs.compare(rhs, options: [.caseInsensitive, .diacriticInsensitive, .numeric],
+                locale: locale) == .orderedAscending
+        }
+        var offset = 0
+        return letters.map { letter in
+            let sectionSongs = grouped[letter] ?? []
+            defer { offset += sectionSongs.count }
+            return Self(letter: letter, songs: sectionSongs, startIndex: offset)
+        }
+    }
+
 }
 
 /// Drives the Library → Songs screen: pages the whole server library, and can swap that source for the
@@ -58,6 +80,8 @@ final class SongsListViewModel {
     private var addedDates: [String: Date] = [:]
     private var rawSongs: [Song] = []
     private var localTracks: [DownloadedTrack] = []
+    private var cachedSongs: [DisplayableSong] = []
+    private var cachedDates: [String: Date] = [:]
     private var downloadedSongIds: Set<String> = []
 
     init(
@@ -215,14 +239,21 @@ final class SongsListViewModel {
     /// The Downloads source: local tracks carry a `downloadedAt` timestamp that stands in for "date added".
     private func applyLocalTrackSource() {
         addedDates = Dictionary(localTracks.map { ($0.songId, $0.downloadedAt) }, uniquingKeysWith: { first, _ in first })
-        source = localTracks.map { DisplayableSong(from: $0) }
+        addedDates.merge(cachedDates) { first, _ in first }
+        let downloaded = localTracks.map { DisplayableSong(from: $0) }
+        let downloadedIDs = Set(downloaded.map(\.id))
+        // Cached tracks are playable from local storage too, so they belong in
+        // the Downloads source. A permanent download of the same song wins.
+        source = downloaded + cachedSongs.filter { !downloadedIDs.contains($0.id) }
     }
 
-    /// Reads the active server's downloaded tracks (metadata only) so the Downloads filter and the
-    /// per-row downloaded badge need no network round-trip.
+    /// Reads the active server's downloaded and cached tracks (metadata only) so the Downloads
+    /// filter and the per-row downloaded badge need no network round-trip.
     private func refreshLocalTracks() async {
         guard let modelContainer, let serverId = serverState?.activeServer?.id else {
             localTracks = []
+            cachedSongs = []
+            cachedDates = [:]
             downloadedSongIds = []
             return
         }
@@ -237,6 +268,20 @@ final class SongsListViewModel {
                 || !usable.isDisjoint(with: track.legacyRemoteIDs ?? [])
         }
         downloadedSongIds = usable ?? Set(localTracks.map(\.songId))
+
+        let cachedDescriptor = FetchDescriptor<CachedTrack>(
+            predicate: #Predicate<CachedTrack> { $0.serverId == sid }
+        )
+        let cached = (try? context.fetch(cachedDescriptor)) ?? []
+        var downloadedIDs = downloadedSongIds
+        downloadedIDs.formUnion(localTracks.map(\.songId))
+        cachedSongs = cached
+            .filter { !downloadedIDs.contains($0.songId) }
+            .map { DisplayableSong(from: $0) }
+        cachedDates = Dictionary(
+            cached.map { ($0.songId, $0.lastAccessedAt ?? $0.cachedAt) },
+            uniquingKeysWith: { first, _ in first }
+        )
     }
 
     // MARK: - Grouping
@@ -250,20 +295,8 @@ final class SongsListViewModel {
             return
         }
 
-        var byLetter: [String: [DisplayableSong]] = [:]
-        for song in ordered {
-            byLetter[alphabetFirstLetter(of: sort.groupingKey(for: song)), default: []].append(song)
-        }
-
-        var result: [SongAlphabetSection] = []
-        var running = 0
-        for letter in byLetter.keys.sorted(by: Self.letterOrder) {
-            let group = byLetter[letter] ?? []
-            result.append(SongAlphabetSection(letter: letter, songs: group, startIndex: running))
-            running += group.count
-        }
-        sections = result
-        allSongs = result.flatMap(\.songs)
+        sections = SongAlphabetSection.grouped(ordered, sort: sort, locale: AppUILanguage.locale)
+        allSongs = sections.flatMap(\.songs)
     }
 
     /// Applies the active sort to the source songs. The alphabetical sorts also order the array, so
@@ -285,13 +318,6 @@ final class SongsListViewModel {
         case .dateAdded:
             return songs.sorted { (addedDates[$0.id] ?? .distantPast) > (addedDates[$1.id] ?? .distantPast) }
         }
-    }
-
-    /// Letters A–Z first (alphabetical), then `#` last — matches `AlphabetJumpBar`'s order.
-    private static func letterOrder(_ lhs: String, _ rhs: String) -> Bool {
-        if lhs == "#" { return false }
-        if rhs == "#" { return true }
-        return lhs.compare(rhs, options: [.caseInsensitive, .diacriticInsensitive]) == .orderedAscending
     }
 
     /// `Song.created` is optional — servers that omit it simply sort last under "Date Added".

@@ -44,6 +44,7 @@ extension PlayerService {
         cancelGaplessBridge()
         nextGaplessPreparationAttempt = Date().addingTimeInterval(10)
         underrunCountForCurrentTrack += 1
+        telemetry.noteUnderrun()
         guard underrunCountForCurrentTrack >= 2, !didAdaptQualityForCurrentTrack else { return }
 
         let (isLiveStream, configured, ceiling, limited) = await MainActor.run {
@@ -78,6 +79,10 @@ extension PlayerService {
     }
 
     func handleAudioStateChanged(_ newState: AudioPlayerState, expectedContext: PlaybackContext? = nil) async {
+        if Self.playbackTraceEnabled {
+            let snapshot = await MainActor.run { (state.playbackState, state.position) }
+            print("[PB-TRACE] audio callback new=\(newState) ui=\(snapshot.0) uiPos=\(String(format: "%.2f", snapshot.1)) engine=\(engine.progress)")
+        }
         guard expectedContext == nil || expectedContext == playbackContext else { return }
         // AudioStreaming can deliver queued callbacks after a switch to AVPlayer.
         // Those callbacks must never consume the system player's pending restore.
@@ -86,6 +91,10 @@ extension PlayerService {
         let context = playbackContext
         switch newState {
         case .bufferring:
+            // The stream is underrunning. Release optional full-file transfers so they
+            // cannot keep competing with the request that must refill the reservoir.
+            cancelPendingCacheDownload()
+            cancelPendingPrefetch()
             await publishEngineWaiting()
         case .playing:
             if let requested = systemPlayback.transitionRequestedAt {
@@ -160,6 +169,12 @@ extension PlayerService {
         let failure = PlaybackFailure.classify(error)
         recordPlaybackDiagnostic(event: "error", source: "AudioStreaming", error: failure)
         guard failure.kind != .cancelled else { pending?.cancel(); return }
+        switch failure.kind {
+        case .decoding: DiagnosticsCenter.shared.report(.audioBuffer)
+        case .session: DiagnosticsCenter.shared.report(.audioState)
+        case .unsupported: DiagnosticsCenter.shared.report(.audioRenderer)
+        default: break
+        }
         let liveStation = await MainActor.run { state.isLiveStream ? state.currentRadio?.name : nil }
         guard context == playbackContext else { pending?.cancel(); return }
         if let liveStation {

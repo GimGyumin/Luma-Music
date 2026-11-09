@@ -11,6 +11,14 @@ import AppKit
 #endif
 
 enum ExternalLinkOpener {
+    /// Opens a URL only when it points at the official GitHub project. Used by Help/Feedback
+    /// so malformed remote content can never hand an arbitrary link to the browser.
+    @MainActor
+    static func openTrusted(_ url: URL?) {
+        guard let url, LumaURLs.isTrustedGitHubURL(url) else { return }
+        open(url)
+    }
+
     /// Opens a URL in SFSafariViewController on iOS, or the system browser on macOS.
     @MainActor
     static func open(_ url: URL) {

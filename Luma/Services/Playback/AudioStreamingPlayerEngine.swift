@@ -5,6 +5,7 @@
 
 import AVFoundation
 import AudioStreaming
+import QuartzCore
 
 /// `PlaybackEngine` backed by the AudioStreaming `AudioPlayer`.
 ///
@@ -15,6 +16,8 @@ nonisolated final class AudioStreamingPlayerEngine: AudioStreamingPlaybackEngine
     /// Start with two seconds of decoded audio, then continue filling the 30-second reservoir.
     /// A real underrun requires five seconds before resuming, keeping fast startup separate
     /// from recovery hysteresis. These are decoded durations, not wall-clock latency promises.
+    /// A 0.75s experiment did not lower first-audio latency on device (4.4–10.2s, network
+    /// dominated) and was reverted rather than kept unverified.
     nonisolated static let defaultConfiguration = AudioPlayerConfiguration(
         flushQueueOnSeek: true,
         bufferSizeInSeconds: 30,
@@ -32,6 +35,16 @@ nonisolated final class AudioStreamingPlayerEngine: AudioStreamingPlaybackEngine
     private var filters: [String: FilterCallback] = [:]
     private var pendingNodes: [AVAudioNode] = []
     private var storedVolume: Float = 1
+    private var visualizationRevision: UInt64 = 0
+
+    var analysisClock: PlaybackAnalysisClock? {
+        playerLock.withLock {
+            guard let player = storedPlayer else { return nil }
+            return PlaybackAnalysisClock(position: player.progress, hostTime: CACurrentMediaTime(),
+                itemID: ObjectIdentifier(player), generation: visualizationRevision, seekSequence: 0,
+                playing: player.state == .playing)
+        }
+    }
 
     var playerIdentity: ObjectIdentifier? { playerLock.withLock { storedPlayer.map(ObjectIdentifier.init) } }
 
@@ -45,8 +58,8 @@ nonisolated final class AudioStreamingPlayerEngine: AudioStreamingPlaybackEngine
         if let storedPlayer { return storedPlayer }
         let player = AudioPlayer(configuration: configuration)
         player.volume = storedVolume
-        player.frameFiltering.add(entry: PlaybackBeatMeter.filterName) { buffer, _ in
-            PlaybackBeatMeter.enqueue(buffer: buffer)
+        player.frameFiltering.add(entry: PlaybackBeatMeter.filterName) { [weak mixer = player.mainMixerNode] buffer, when in
+            PlaybackBeatMeter.enqueue(buffer: buffer, when: when, outputLatency: mixer?.outputPresentationLatency ?? 0)
         }
         for (name, filter) in filters { player.frameFiltering.add(entry: name, filter: filter) }
         if !pendingNodes.isEmpty { player.attach(nodes: pendingNodes) }
@@ -90,8 +103,8 @@ nonisolated final class AudioStreamingPlayerEngine: AudioStreamingPlaybackEngine
         old.frameFiltering.remove(entry: PlaybackBeatMeter.filterName)
         let replacement = AudioPlayer(configuration: configuration)
         replacement.volume = volume
-        replacement.frameFiltering.add(entry: PlaybackBeatMeter.filterName) { buffer, _ in
-            PlaybackBeatMeter.enqueue(buffer: buffer)
+        replacement.frameFiltering.add(entry: PlaybackBeatMeter.filterName) { [weak mixer = replacement.mainMixerNode] buffer, when in
+            PlaybackBeatMeter.enqueue(buffer: buffer, when: when, outputLatency: mixer?.outputPresentationLatency ?? 0)
         }
         for (name, filter) in filters { replacement.frameFiltering.add(entry: name, filter: filter) }
         if !nodes.isEmpty { replacement.attach(nodes: nodes) }
@@ -114,6 +127,7 @@ nonisolated final class AudioStreamingPlayerEngine: AudioStreamingPlaybackEngine
 
     func play(url: URL, headers: [String: String]) {
         playerLock.withLock {
+            visualizationRevision &+= 1
             if needsReplacement || storedPlayer?.state == .error { replacePlayer(preserveNodes: true) }
             playerForPlaybackLocked().play(url: url, headers: headers)
         }
@@ -135,9 +149,9 @@ nonisolated final class AudioStreamingPlayerEngine: AudioStreamingPlaybackEngine
             storedPlayer?.stop()
         }
     }
-    func pause() { playerLock.withLock { storedPlayer?.pause() } }
+    func pause() { playerLock.withLock { visualizationRevision &+= 1; storedPlayer?.pause() } }
     func resume() { playerLock.withLock { storedPlayer?.resume() } }
-    func seek(to time: Double) { playerLock.withLock { storedPlayer?.seek(to: time) } }
+    func seek(to time: Double) { playerLock.withLock { visualizationRevision &+= 1; storedPlayer?.seek(to: time) } }
 
     func recoverQueuedTransitionIfNeeded() {
         playerLock.withLock {

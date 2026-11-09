@@ -71,7 +71,10 @@ struct ReplayGainDetailSettingsView: View {
             } header: {
                 SettingsSectionHeader("ReplayGain")
             } footer: {
-                SettingsSectionFooter("ReplayGain levels volume across tracks so quieter and louder songs play more evenly.")
+                ContextualGuideNote(
+                    guide: .replayGain,
+                    message: String(localized: "ReplayGain evens out loudness using the server's tags. It never changes the original audio file.", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale)
+                )
             }
         }
         .formStyle(.grouped)
@@ -98,6 +101,12 @@ struct CrossfadeSettingsView: View {
     var body: some View {
         Form {
             CrossfadeSettingsSection()
+            Section {
+                ContextualGuideNote(
+                    guide: .crossfade,
+                    message: String(localized: "Crossfade overlaps the current track with the next. It is disabled while Gapless is active, and seeking cancels the fade.", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale)
+                )
+            }
         }
         .formStyle(.grouped)
         .modifier(SettingsSubpageStyle())

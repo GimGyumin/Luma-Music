@@ -11,6 +11,10 @@ nonisolated struct AlbumZoomDestination: Hashable {
     let downloadedOnly: Bool
     let sourceID: String
     let namespace: Namespace.ID
+    /// One id per actual route value. It is deliberately excluded from equality/hash:
+    /// the same album/source opened twice is still the same destination identity, while
+    /// logs can tell the two navigation attempts apart.
+    let attemptID: UUID
 
     init?(destination: HomeDestination, sourceID: String, namespace: Namespace.ID) {
         switch destination {
@@ -28,6 +32,7 @@ nonisolated struct AlbumZoomDestination: Hashable {
         default: return nil
         }
         self.sourceID = sourceID; self.namespace = namespace
+        self.attemptID = UUID()
     }
 
     static func == (lhs: Self, rhs: Self) -> Bool {
@@ -40,10 +45,13 @@ nonisolated struct AlbumZoomDestination: Hashable {
 }
 
 extension HomeDestination {
-    /// Album navigation currently uses the standard push/pop transition. Keep the
-    /// link call sites stable so their destination identity and queue state do not change.
+    /// Album entry/exit stays on the standard `NavigationStack` push/pop.
+    /// The value wrapper remains for older call sites, but no navigation
+    /// transition is requested here.
     func albumZoom(sourceID: String, namespace: Namespace.ID) -> Self {
-        self
+        _ = sourceID
+        _ = namespace
+        return self
     }
 }
 

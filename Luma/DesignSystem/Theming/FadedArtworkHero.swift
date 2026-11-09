@@ -13,6 +13,8 @@ import AppKit
 /// The fade spans the title and its supporting information. Layout anchors keep
 /// it aligned with real text bounds, including multi-line/accessibility titles.
 struct FadedArtworkHero<Information: View>: View {
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @Environment(\.colorSchemeContrast) private var contrast
     let coverArtId: String
     let initialImage: PlatformImage?
     let background: Color
@@ -62,7 +64,7 @@ struct FadedArtworkHero<Information: View>: View {
             }
             Text(title)
                 .font(.lumaFadedAlbumTitle)
-                .foregroundStyle(.white)
+                .foregroundStyle(LumaColors.prefersLightControl(on: background) ? Color.white : Color.black)
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity)
@@ -91,6 +93,9 @@ struct FadedArtworkHero<Information: View>: View {
                 let fadeEnd = min(geometry.size.height,
                                   detailsFrame.map { $0.maxY + width * LumaAlbumLayout.fadedDetailsTail }
                                   ?? informationFrame?.maxY ?? geometry.size.height)
+                let titleStart = (titleFrame?.minY ?? fadeStart) - fadeStart
+                let titleStop = max(0.01, min(0.25, titleStart / max(1, fadeEnd - fadeStart)))
+                let solidTitle = reduceTransparency || contrast == .increased
                 ZStack(alignment: .top) {
                     background
                     ZStack(alignment: .top) {
@@ -111,12 +116,11 @@ struct FadedArtworkHero<Information: View>: View {
                     .compositingGroup()
                     .opacity(1 - min(max(artworkFadeProgress, 0), 1))
                     // Keep the title/button scrim outside the artwork fade group.
-                    // It must remain dark while the artwork blurs and disappears;
-                    // otherwise a light page colour leaks behind the white header.
+                    // Establish the page tone before the title when stronger readability is requested.
                     LinearGradient(stops: [
                         .init(color: .clear, location: 0),
-                        .init(color: background.opacity(0.25), location: 0.25),
-                        .init(color: background.opacity(0.90), location: 0.70),
+                        .init(color: background.opacity(solidTitle ? 1 : 0.65), location: titleStop),
+                        .init(color: background.opacity(solidTitle ? 1 : 0.90), location: 0.70),
                         .init(color: background, location: 1)
                     ], startPoint: .top, endPoint: .bottom)
                     .frame(height: max(0, fadeEnd - fadeStart))

@@ -6,6 +6,7 @@
 import SwiftUI
 import SwiftSonic
 import SwiftData
+import AppIntents
 import OSLog
 #if os(iOS)
 import UniformTypeIdentifiers
@@ -69,6 +70,17 @@ struct PlaylistDetailView: View {
     }
 
     @Environment(\.appContainer) var container
+
+    /// Lets Siri AI resolve “this playlist” while the playlist page is on screen.
+    private var onscreenEntityIdentifier: EntityIdentifier? {
+        guard #available(iOS 27.0, macOS 27.0, *) else { return nil }
+        return OnscreenEntityAnnotation.playlistIdentifier(
+            id: playlistId,
+            title: initialName,
+            trackCount: 0,
+            serverId: container?.serverState.activeServer?.id
+        )
+    }
     @Environment(\.dismiss) var dismiss
     @Environment(DominantColorExtractor.self) var colorExtractor
     @Environment(\.colorScheme) var colorScheme
@@ -82,6 +94,10 @@ struct PlaylistDetailView: View {
     @State var viewModel: PlaylistDetailViewModel?
     @State private var viewModelAccountID: UUID?
     @State private var foregroundRefresh: Task<Void, Never>?
+    /// Set from the UIKit transition lifecycle at departure. Async palette, gradient
+    /// and foreground work must not publish into a page that is already shrinking
+    /// into its zoom source.
+    @State var presentationSuspended = false
     @ScaledMetric(relativeTo: .largeTitle) var heroTitleSize: CGFloat = 44
     @State var dominantColor: Color = .clear
     /// A user-picked gradient spec (if any) -> the hero renders CRISP from it instead of the JPEG. Resolved
@@ -209,6 +225,7 @@ struct PlaylistDetailView: View {
                 compactPlaylistBody
             }
         }
+        .lumaContentReveal(isReady: !isLoadingSkeleton)
         #if os(iOS)
         // Edit mode ONLY while editing — nil otherwise. Forcing an editMode binding (even .inactive) in view
         // mode broke the List's scrolling; nil restores the default (normal scroll) for the read-only view.
@@ -219,11 +236,23 @@ struct PlaylistDetailView: View {
         .miniPlayerBottomMargin()
         .refreshable { await viewModel?.load(forceRefresh: true) }
         .onChange(of: scenePhase) { _, phase in
-            guard generatedSource != nil, phase == .active else { return }
+            guard generatedSource != nil, phase == .active, !presentationSuspended else { return }
             foregroundRefresh?.cancel()
             foregroundRefresh = Task { await viewModel?.load(forceRefresh: true) }
         }
         .onDisappear { foregroundRefresh?.cancel() }
+        #if os(iOS)
+        .background {
+            AlbumPresentationLifecycle(
+                pageID: playlistId,
+                onDeparture: { suspendPresentation() },
+                onReturn: { await resumePresentation() }
+            )
+            .frame(width: 0, height: 0)
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+        }
+        #endif
         .lumaDestructiveAlert(
             "Remove downloaded playlist?",
             isPresented: $showDeleteAlert,
@@ -352,10 +381,11 @@ struct PlaylistDetailView: View {
 
     var body: some View {
         playlistPresentation
+        .appEntityIdentifier(onscreenEntityIdentifier)
         // Keyed on connectivity so the list re-loads from the right source when
         // NWPathMonitor flips isOnline — same pattern as PlaylistDetailMacOS.
         .task(id: "\(container?.serverState.activeServer?.id.uuidString ?? ""):\(container?.serverState.isOnline == true)") {
-            guard let c = container else { return }
+            guard let c = container, !presentationSuspended else { return }
             if viewModel == nil || viewModelAccountID != c.serverState.activeServer?.id {
                 viewModel = PlaylistDetailViewModel(
                     playlistId: playlistId,
@@ -371,10 +401,17 @@ struct PlaylistDetailView: View {
                 )
                 viewModelAccountID = c.serverState.activeServer?.id
             }
+            // A departure can land while the first view-model creation is still
+            // awaiting its dependencies. Hand the gate to the newly created model
+            // instead of starting a load for a page that is already leaving.
+            guard !presentationSuspended else {
+                viewModel?.suspendPendingLoad()
+                return
+            }
             await viewModel?.load()
         }
         .task(id: effectiveCoverArtId) {
-            guard generatedSource == nil else { return }
+            guard generatedSource == nil, !presentationSuspended else { return }
             // Photo / server cover -> extract the dominant. Gradient playlists are themed from the spec base
             // color (cover-refresh task), not the JPEG, so gradient + body stay coherent.
             guard gradientSpec == nil else { return }
@@ -387,6 +424,7 @@ struct PlaylistDetailView: View {
             await loadDominantColor(coverArtId: artId)
         }
         .task(id: coverRefreshID) {
+            guard !presentationSuspended else { return }
             if let generatedSource {
                 let kind = generatedSource.mixKind ?? .essentials
                 dominantColor = Color(hex: "#24283E")
@@ -408,4 +446,17 @@ struct PlaylistDetailView: View {
         .lumaZoomTransition(sourceID: zoomSourceId, in: zoomNamespace)
     }
 
+    /// Called by the UIKit transition lifecycle before the interactive pop snapshot
+    /// is taken. Cancel view-owned work and invalidate any in-flight playlist load.
+    private func suspendPresentation() {
+        presentationSuspended = true
+        foregroundRefresh?.cancel()
+        viewModel?.suspendPendingLoad()
+    }
+
+    /// Called only after a real return (push-over or cancelled swipe) has settled.
+    private func resumePresentation() async {
+        presentationSuspended = false
+        await viewModel?.resumePendingLoadIfNeeded()
+    }
 }

@@ -190,6 +190,40 @@ struct ResumePlaybackStateTests {
         #expect(engine.calls.contains(.resume))
         #expect(published == .playing)
     }
+
+    @Test func aLongPauseWhoseEngineLostItsClockReopensAtTheSavedPosition() async throws {
+        let engine = FakePlaybackEngine()
+        // AudioStreaming can keep `.paused` after suspension but lose its item clock.
+        engine.state = .paused
+        engine.progress = 0
+        let container = try AppContainer(inMemory: true, engine: engine)
+        let service = try #require(container.playerService as? PlayerService)
+        container.playerState.currentTrack = DisplayableSong(
+            from: Song(id: "suspended", title: "Suspended", duration: 240)
+        )
+        container.playerState.playbackState = .paused
+        container.playerState.position = 120
+        await service.setTestCurrentSource(.cached(URL(fileURLWithPath: "/dev/null")))
+        service.systemEngine.eventHandler = nil
+
+        await service.resume()
+        // Resuming the dead clock would restart the song; a fresh engine must be opened.
+        // Engine installation is asynchronous; wait for the observable hand-off instead
+        // of racing the first assertion on a loaded test host.
+        let engineDeadline = Date().addingTimeInterval(1)
+        while !service.systemEngine.hasCurrentItem,
+              !engine.calls.contains(where: { if case .play = $0 { return true }; return false }),
+              Date() < engineDeadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(!engine.calls.contains(.resume))
+        #expect(service.systemEngine.hasCurrentItem || engine.calls.contains { if case .play = $0 { return true }; return false })
+        #expect(container.playerState.position >= 120)
+        #expect(container.playerState.playbackState == .recovering)
+        await service.stopProgressTimer()
+        await service.stopPositionSaveTimer()
+        await service.stop()
+    }
 }
 
 private extension PlayerService {

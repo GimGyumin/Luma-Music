@@ -5,8 +5,9 @@
 
 import SwiftUI
 
-/// Troubleshooting and onboarding. Kept out of the main settings list, and
-/// only the actions that really destroy data are shown in red.
+/// Combined troubleshooting, diagnostics, logging, and onboarding settings.
+/// The former Diagnostics / Advanced / Developer rows now live here as one
+/// destination so the main settings list stays focused on music preferences.
 struct AdvancedSettingsView: View {
     @Environment(\.appContainer) private var container
     @State private var isClearingCache = false
@@ -24,6 +25,10 @@ struct AdvancedSettingsView: View {
             } footer: {
                 SettingsSectionFooter("Clears playback cache, artwork memory, descriptions, and translations. Downloads and server sign-ins are kept.")
             }
+
+            DiagnosticsSettingsSections()
+
+            DeveloperLogsSection()
 
             Section {
                 OnboardingReplayButton()

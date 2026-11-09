@@ -67,6 +67,7 @@ struct QueueView: View {
     private func queueList(_ playerState: PlayerState) -> some View {
         let queue = playerState.queue
         let currentIndex = playerState.currentIndex
+        let snapshot = QueueListSnapshot(tracks: queue, currentIndex: currentIndex)
         let upNext = Array(queue.dropFirst(currentIndex + 1))
 
         List {
@@ -80,7 +81,9 @@ struct QueueView: View {
 
             if let current = playerState.currentTrack {
                 Section("Now Playing") {
-                    QueueRow(song: current, isCurrent: true)
+                    QueueRow(song: current, isCurrent: true, onPlay: {
+                        playQueueEntry(at: currentIndex, snapshot: snapshot, container: container)
+                    })
                 }
             }
 
@@ -88,17 +91,12 @@ struct QueueView: View {
                 Section("Up Next") {
                     ForEach(Array(upNext.enumerated()), id: \.offset) { offset, song in
                         let absoluteIndex = currentIndex + 1 + offset
-                        QueueRow(song: song, isCurrent: false)
+                        QueueRow(song: song, isCurrent: false, onPlay: {
+                            playQueueEntry(at: absoluteIndex, snapshot: snapshot, container: container)
+                        })
                             .contentShape(Rectangle())
                             .onTapGesture {
-                                HapticFeedback.medium.trigger()
-                                Task {
-                                    do {
-                                        try await container?.playerService.play(tracks: queue, startIndex: absoluteIndex)
-                                    } catch {
-                                        Logger.player.error("[PLAYBACK] play failed: \(error, privacy: .public)")
-                                    }
-                                }
+                                playQueueEntry(at: absoluteIndex, snapshot: snapshot, container: container)
                             }
                             #if os(macOS)
                             // macOS reorders by drag-and-drop; show a between-rows insertion line at the
@@ -152,8 +150,7 @@ struct QueueView: View {
         .listStyle(.plain)
         #if !os(macOS)
         // iOS List reorder only engages in edit mode (per the PlaylistDetailView precedent). Keep it
-        // always-on so Up Next is reorderable via the system grips without an explicit Edit toggle;
-        // this is why iOS shows edit-mode chrome and tap-to-play yields to the reorder/delete affordances.
+        // always-on so Up Next is reorderable via the system grips without an explicit Edit toggle.
         .environment(\.editMode, .constant(.active))
         #endif
     }
@@ -217,6 +214,7 @@ struct QueueRow: View {
     let song: DisplayableSong
     let isCurrent: Bool
     let onRemove: (() -> Void)?
+    let onPlay: () -> Void
     // Default to the system label colors (macOS popover, which has its own background); the inline iOS
     // queue passes the full player's luminance-adaptive content colors so text reads over the cover blur.
     var contentColor: Color = .primary
@@ -234,10 +232,11 @@ struct QueueRow: View {
     @Query private var favoriteMatches: [FavoriteRecord]
 
     init(song: DisplayableSong, isCurrent: Bool, onRemove: (() -> Void)? = nil,
-         contentColor: Color = .primary, secondaryContentColor: Color = .secondary, loadArtwork: Bool = true, compactPhoneLayout: Bool = false) {
+         contentColor: Color = .primary, secondaryContentColor: Color = .secondary, loadArtwork: Bool = true, compactPhoneLayout: Bool = false, onPlay: @escaping () -> Void) {
         self.song = song
         self.isCurrent = isCurrent
         self.onRemove = onRemove
+        self.onPlay = onPlay
         self.contentColor = contentColor
         self.secondaryContentColor = secondaryContentColor
         self.loadArtwork = loadArtwork
@@ -269,7 +268,7 @@ struct QueueRow: View {
                     #else
                     .font(compactPhoneLayout ? .system(size: compactTitleSize, weight: .regular) : .lumaCellTitle)
                     #endif
-                    .foregroundStyle(isCurrent ? playingAccent : contentColor)
+                    .foregroundStyle(contentColor)
                     .lineLimit(1)
                 if let artist = song.artist {
                     Text(artist)
@@ -286,7 +285,8 @@ struct QueueRow: View {
             Spacer(minLength: 0)
 
             if isCurrent {
-                NowPlayingBarsIndicator(isPlaying: isPlaying)
+                NowPlayingBarsIndicator(isPlaying: isPlaying,
+                        isBuffering: container?.playerState.playbackState == .buffering)
             } else {
                 #if os(macOS)
                 // macOS has no edit-mode grip, so keep the visual reorder hint here; on iOS the system
@@ -297,15 +297,7 @@ struct QueueRow: View {
         }
         .padding(.vertical, compactPhoneLayout ? 0 : LumaSpacing.xs)
         .contextMenu {
-            Button {
-                Task {
-                    do {
-                        try await container?.playerService.play(tracks: [song], startIndex: 0)
-                    } catch {
-                        Logger.player.error("[PLAYBACK] play failed: \(error, privacy: .public)")
-                    }
-                }
-            } label: {
+            Button(action: onPlay) {
                 Label("Play", systemImage: "play.fill")
             }
 
@@ -368,6 +360,49 @@ struct QueueRow: View {
     }
 }
 
+/// A rendered row owns its song and position even while the live queue changes.
+nonisolated struct QueueListSnapshot {
+    struct Entry: Identifiable, Sendable {
+        let id: Int
+        let song: DisplayableSong
+    }
+
+    let tracks: [DisplayableSong]
+    let currentIndex: Int
+    let intentionalEnd: Int
+    private let entries: [Entry]
+
+    init(tracks: [DisplayableSong], currentIndex: Int, intentionalEnd: Int? = nil) {
+        self.tracks = tracks
+        self.currentIndex = min(max(0, currentIndex), tracks.count)
+        self.intentionalEnd = min(max(0, intentionalEnd ?? tracks.count), tracks.count)
+        entries = tracks.enumerated().map { Entry(id: $0.offset, song: $0.element) }
+    }
+
+    var history: ArraySlice<Entry> { entries[..<currentIndex] }
+    var continuing: ArraySlice<Entry> { entries[min(currentIndex + 1, intentionalEnd)..<intentionalEnd] }
+    var autoplay: ArraySlice<Entry> { entries[intentionalEnd...] }
+
+    func selection(at index: Int, currentQueue: [DisplayableSong]) -> (tracks: [DisplayableSong], index: Int)? {
+        guard tracks == currentQueue, tracks.indices.contains(index) else { return nil }
+        return (tracks, index)
+    }
+}
+
+@MainActor
+private func playQueueEntry(at index: Int, snapshot: QueueListSnapshot, container: AppContainer?) {
+    guard let container else { return }
+    HapticFeedback.medium.trigger()
+    Task {
+        guard let selection = snapshot.selection(at: index, currentQueue: container.playerState.queue) else { return }
+        do {
+            try await container.playerService.play(tracks: selection.tracks, startIndex: selection.index)
+        } catch {
+            Logger.player.error("[PLAYBACK] queue selection failed: \(error, privacy: .public)")
+        }
+    }
+}
+
 /// The iOS queue list: History (scroll up) · Continue Playing · Autoplay.
 /// Native `List` + `.onMove` — offset-based / duplicate-safe. Removal via row context menu.
 struct InlineQueueList: View {
@@ -380,26 +415,11 @@ struct InlineQueueList: View {
     var compactPhoneLayout: Bool = false
     @Environment(\.appContainer) private var container
 
-    private var queue: [DisplayableSong] { playerState.queue }
-    private var currentIndex: Int { playerState.currentIndex }
-
-    /// End of the user-intentional segment (album / playlist). Autoplay starts here when set.
-    private var intentionalEnd: Int {
-        min(playerState.originalQueueEndIndex ?? queue.count, queue.count)
-    }
-
-    private var historyIndices: Range<Int> { 0..<max(currentIndex, 0) }
-    private var continueIndices: Range<Int> {
-        let start = min(currentIndex + 1, intentionalEnd)
-        return start..<intentionalEnd
-    }
-    private var autoplayIndices: Range<Int> { intentionalEnd..<queue.count }
-
     /// Only name a source when the intentional queue is actually one album.
     /// Mixed queues and autoplay must not inherit the current song's album label.
-    private var continuationAlbum: String? {
+    private func continuationAlbum(in snapshot: QueueListSnapshot) -> String? {
         guard let current = playerState.currentTrack, let album = current.albumName, !album.isEmpty else { return nil }
-        let intentional = queue.prefix(intentionalEnd)
+        let intentional = snapshot.tracks.prefix(snapshot.intentionalEnd)
         guard !intentional.isEmpty, intentional.allSatisfy({ song in
             if let albumID = current.albumId { return song.albumId == albumID }
             return song.albumName == album && song.artist == current.artist
@@ -415,10 +435,14 @@ struct InlineQueueList: View {
     }
 
     var body: some View {
-        let historyEmpty = historyIndices.isEmpty
-        let continueEmpty = continueIndices.isEmpty
-        let autoplayEmpty = autoplayIndices.isEmpty
+        let snapshot = QueueListSnapshot(tracks: playerState.queue, currentIndex: playerState.currentIndex,
+                                         intentionalEnd: playerState.originalQueueEndIndex)
+        let historyEmpty = snapshot.history.isEmpty
+        let continueEmpty = snapshot.continuing.isEmpty
+        let autoplayEmpty = snapshot.autoplay.isEmpty
         let showAutoplaySection = playerState.isAutoExtendEnabled && playerState.repeatMode == .off
+        let showContinueSection = !continueEmpty || !showAutoplaySection || autoplayEmpty
+        let firstSectionID = showContinueSection ? "continuePlayingHeader" : "autoplayHeader"
 
         if historyEmpty, continueEmpty, autoplayEmpty, !showAutoplaySection {
             EmptyStateView(
@@ -432,8 +456,8 @@ struct InlineQueueList: View {
                 List {
                     if !historyEmpty {
                         Section {
-                            ForEach(Array(historyIndices), id: \.self) { absoluteIndex in
-                                queueTapRow(absoluteIndex: absoluteIndex, reorderable: false)
+                            ForEach(Array(snapshot.history)) { entry in
+                                queueTapRow(entry: entry, snapshot: snapshot, reorderable: false)
                             }
                         } header: {
                             HStack {
@@ -451,59 +475,67 @@ struct InlineQueueList: View {
                                 .buttonStyle(.plain)
                             }
                         }
+                        .listRowBackground(Color.clear)
+                        .listSectionSeparator(.hidden)
                     }
 
-                    Section {
-                        if continueEmpty {
-                            if playerState.repeatMode == .one {
-                                Text(String(localized: "Repeating this song", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale))
-                                    .font(.lumaCaption)
-                                    .foregroundStyle(secondaryContentColor)
-                                    .listRowBackground(Color.clear)
-                            } else if !showAutoplaySection || autoplayEmpty {
-                                Text(String(localized: "Nothing up next", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale))
-                                    .font(.lumaCaption)
-                                    .foregroundStyle(secondaryContentColor)
-                                    .listRowBackground(Color.clear)
-                            }
-                        } else {
-                            ForEach(Array(continueIndices), id: \.self) { absoluteIndex in
-                                queueTapRow(absoluteIndex: absoluteIndex, reorderable: true)
-                            }
-                            .onMove { source, destination in
-                                guard let relativeSource = source.first else { return }
-                                let absoluteSource = continueIndices.lowerBound + relativeSource
-                                let absoluteDestination = continueIndices.lowerBound + destination
-                                HapticFeedback.light.trigger()
-                                Task {
-                                    await container?.playerService.moveInQueue(
-                                        fromIndex: absoluteSource,
-                                        toIndex: absoluteDestination
-                                    )
+                    // Avoid a native empty-section filler between Continue Playing and Autoplay.
+                    if showContinueSection {
+                        Section {
+                            if continueEmpty {
+                                if playerState.repeatMode == .one {
+                                    Text(String(localized: "Repeating this song", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale))
+                                        .font(.lumaCaption)
+                                        .foregroundStyle(secondaryContentColor)
+                                        .listRowBackground(Color.clear)
+                                } else {
+                                    Text(String(localized: "Nothing up next", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale))
+                                        .font(.lumaCaption)
+                                        .foregroundStyle(secondaryContentColor)
+                                        .listRowBackground(Color.clear)
+                                }
+                            } else {
+                                ForEach(Array(snapshot.continuing)) { entry in
+                                    queueTapRow(entry: entry, snapshot: snapshot, reorderable: true)
+                                }
+                                .onMove { source, destination in
+                                    guard let relativeSource = source.first else { return }
+                                    let absoluteSource = snapshot.continuing.startIndex + relativeSource
+                                    let absoluteDestination = snapshot.continuing.startIndex + destination
+                                    HapticFeedback.light.trigger()
+                                    Task {
+                                        guard container?.playerState.queue == snapshot.tracks else { return }
+                                        await container?.playerService.moveInQueue(
+                                            fromIndex: absoluteSource,
+                                            toIndex: absoluteDestination
+                                        )
+                                    }
                                 }
                             }
-                        }
-                    } header: {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(String(localized: "Continue Playing", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale))
-                                .font(sectionFont)
-                                .foregroundStyle(contentColor)
-                                .textCase(nil)
-                            if compactPhoneLayout, let album = continuationAlbum {
-                                Text(String(localized: "Provided by: \(album)", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale))
-                                    .font(.system(size: 15, weight: .regular))
-                                    .foregroundStyle(secondaryContentColor.opacity(0.78))
-                                    .lineLimit(1)
+                        } header: {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(String(localized: "Continue Playing", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale))
+                                    .font(sectionFont)
+                                    .foregroundStyle(contentColor)
                                     .textCase(nil)
+                                if compactPhoneLayout, let album = continuationAlbum(in: snapshot) {
+                                    Text(String(localized: "Provided by: \(album)", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale))
+                                        .font(.system(size: 15, weight: .regular))
+                                        .foregroundStyle(secondaryContentColor.opacity(0.78))
+                                        .lineLimit(1)
+                                        .textCase(nil)
+                                }
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .listRowInsets(EdgeInsets(top: 8, leading: compactPhoneLayout ? 32 : 16, bottom: 12, trailing: compactPhoneLayout ? 32 : 16))
+                            .id("continuePlayingHeader")
+                        } footer: {
+                            VStack(alignment: .leading, spacing: 6) {
+                                repeatFooter
                             }
                         }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .listRowInsets(EdgeInsets(top: 8, leading: compactPhoneLayout ? 32 : 16, bottom: 12, trailing: compactPhoneLayout ? 32 : 16))
-                        .id("continuePlayingHeader")
-                    } footer: {
-                        VStack(alignment: .leading, spacing: 6) {
-                            repeatFooter
-                        }
+                        .listRowBackground(Color.clear)
+                        .listSectionSeparator(.hidden)
                     }
 
                     if showAutoplaySection {
@@ -514,15 +546,16 @@ struct InlineQueueList: View {
                                     .foregroundStyle(secondaryContentColor)
                                     .listRowBackground(Color.clear)
                             } else {
-                                ForEach(Array(autoplayIndices), id: \.self) { absoluteIndex in
-                                    queueTapRow(absoluteIndex: absoluteIndex, reorderable: true)
+                                ForEach(Array(snapshot.autoplay)) { entry in
+                                    queueTapRow(entry: entry, snapshot: snapshot, reorderable: true)
                                 }
                                 .onMove { source, destination in
                                     guard let relativeSource = source.first else { return }
-                                    let absoluteSource = autoplayIndices.lowerBound + relativeSource
-                                    let absoluteDestination = autoplayIndices.lowerBound + destination
+                                    let absoluteSource = snapshot.autoplay.startIndex + relativeSource
+                                    let absoluteDestination = snapshot.autoplay.startIndex + destination
                                     HapticFeedback.light.trigger()
                                     Task {
+                                        guard container?.playerState.queue == snapshot.tracks else { return }
                                         await container?.playerService.moveInQueue(
                                             fromIndex: absoluteSource,
                                             toIndex: absoluteDestination
@@ -543,7 +576,10 @@ struct InlineQueueList: View {
                                     .textCase(nil)
                             }
                             .frame(maxWidth: .infinity, alignment: .leading)
+                            .id("autoplayHeader")
                         }
+                        .listRowBackground(Color.clear)
+                        .listSectionSeparator(.hidden)
                     }
                 }
                 .listStyle(.plain)
@@ -552,6 +588,7 @@ struct InlineQueueList: View {
                 #endif
                 .environment(\.defaultMinListRowHeight, compactPhoneLayout ? 61 : 44)
                 .scrollContentBackground(.hidden)
+                .background(Color.clear)
                 .lumaHideScrollEdgeEffects()
                 .lumaContentEdgeFade(top: 24, bottom: 40)
                 #if !os(macOS)
@@ -560,12 +597,12 @@ struct InlineQueueList: View {
                 .onAppear {
                     // Land on Continue Playing so History sits above (scroll up to reveal).
                     DispatchQueue.main.async {
-                        proxy.scrollTo("continuePlayingHeader", anchor: .top)
+                        proxy.scrollTo(firstSectionID, anchor: .top)
                     }
                 }
-                .onChange(of: currentIndex) { _, _ in
+                .onChange(of: snapshot.currentIndex) { _, _ in
                     withAnimation(LumaAnimation.surface) {
-                        proxy.scrollTo("continuePlayingHeader", anchor: .top)
+                        proxy.scrollTo(firstSectionID, anchor: .top)
                     }
                 }
             }
@@ -577,7 +614,7 @@ struct InlineQueueList: View {
         switch playerState.repeatMode {
         case .all:
             Label(
-                String(localized: "Repeating \(queue.count) songs", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale),
+                String(localized: "Repeating \(playerState.queue.count) songs", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale),
                 systemImage: "repeat"
             )
             .font(.lumaCaption)
@@ -595,37 +632,32 @@ struct InlineQueueList: View {
     }
 
     @ViewBuilder
-    private func queueTapRow(absoluteIndex: Int, reorderable: Bool) -> some View {
-        let song = queue[absoluteIndex]
-        QueueRow(
-            song: song,
-            isCurrent: false,
-            onRemove: { removeFromQueue(at: absoluteIndex) },
-            contentColor: contentColor,
-            secondaryContentColor: secondaryContentColor,
-            loadArtwork: loadArtwork,
-            compactPhoneLayout: compactPhoneLayout
-        )
+    private func queueTapRow(entry: QueueListSnapshot.Entry, snapshot: QueueListSnapshot, reorderable: Bool) -> some View {
+        Button {
+            playQueueEntry(at: entry.id, snapshot: snapshot, container: container)
+        } label: {
+            QueueRow(
+                song: entry.song,
+                isCurrent: false,
+                onRemove: { removeFromQueue(at: entry.id, snapshot: snapshot) },
+                contentColor: contentColor,
+                secondaryContentColor: secondaryContentColor,
+                loadArtwork: loadArtwork,
+                compactPhoneLayout: compactPhoneLayout,
+                onPlay: { playQueueEntry(at: entry.id, snapshot: snapshot, container: container) }
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
         .listRowInsets(rowInsets)
         .listRowBackground(Color.clear)
         .listRowSeparator(.hidden)
-        .contentShape(Rectangle())
-        .onTapGesture {
-            HapticFeedback.medium.trigger()
-            Task {
-                do {
-                    try await container?.playerService.play(tracks: queue, startIndex: absoluteIndex)
-                } catch {
-                    Logger.player.error("[PLAYBACK] play failed: \(error, privacy: .public)")
-                }
-            }
-        }
         .moveDisabled(!reorderable)
     }
 
-    private func removeFromQueue(at index: Int) {
+    private func removeFromQueue(at index: Int, snapshot: QueueListSnapshot) {
         Task {
-            guard let queue = container?.playerState.queue, index >= 0, index < queue.count else { return }
+            guard let queue = container?.playerState.queue, snapshot.selection(at: index, currentQueue: queue) != nil else { return }
             HapticFeedback.light.trigger()
             await container?.playerService.removeFromQueue(at: index)
         }

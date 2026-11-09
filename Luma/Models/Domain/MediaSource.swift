@@ -52,6 +52,14 @@ nonisolated enum MediaSource: Sendable {
         }
     }
 
+    var visualizationSourceType: String {
+        switch self {
+        case .downloaded: "downloaded"
+        case .cached: "cached"
+        case .stream, .liveStream: "streamed"
+        }
+    }
+
     var url: URL {
         switch self {
         case .downloaded(let url, _), .cached(let url, _):

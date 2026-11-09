@@ -12,6 +12,9 @@
 		DBA4A77D2F9BE3C8008BC5A9 /* SwiftSonic in Frameworks */ = {isa = PBXBuildFile; productRef = DBA4A77C2F9BE3C8008BC5A9 /* SwiftSonic */; };
 		DBBC62D82FB3B9A600010D3F /* WidgetKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = DBBC62D72FB3B9A600010D3F /* WidgetKit.framework */; };
 		DBBC62DA2FB3B9A600010D3F /* SwiftUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = DBBC62D92FB3B9A600010D3F /* SwiftUI.framework */; };
+		FB0010000000000000000001 /* FirebaseCore in Frameworks */ = {isa = PBXBuildFile; platformFilter = ios; productRef = FB0010000000000000000002 /* FirebaseCore */; };
+		FB0010000000000000000004 /* FirebasePerformance in Frameworks */ = {isa = PBXBuildFile; platformFilter = ios; productRef = FB0010000000000000000005 /* FirebasePerformance */; };
+		FB0010000000000000000006 /* FirebaseCrashlytics in Frameworks */ = {isa = PBXBuildFile; platformFilter = ios; productRef = FB0010000000000000000007 /* FirebaseCrashlytics */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -77,6 +80,15 @@
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		DBA4A7F12F9BBFCC008BC5A9 /* Exceptions for "Luma" folder in "Luma" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				DesignSystem/LumaColors.md,
+				DesignSystem/Platform/CONVENTIONS.md,
+				DesignSystem/README.md,
+			);
+			target = DBA4A7502F9BBFCB008BC5A9 /* Luma */;
+		};
 		DBBC62E72FB3B9A700010D3F /* Exceptions for "LumaWidgets" folder in "LumaWidgetsExtension" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
@@ -97,23 +109,14 @@
 			);
 			target = DBBC62D42FB3B9A600010D3F /* LumaWidgetsExtension */;
 		};
-		DBA4A7F12F9BBFCC008BC5A9 /* Exceptions for "Luma" folder in "Luma" target */ = {
-			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
-			membershipExceptions = (
-				DesignSystem/LumaColors.md,
-				DesignSystem/Platform/CONVENTIONS.md,
-				DesignSystem/README.md,
-			);
-			target = DBA4A7502F9BBFCB008BC5A9 /* Luma */;
-		};
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		DBA4A7532F9BBFCB008BC5A9 /* Luma */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
-				DBBC62ED2FB3BD3000010D3F /* Exceptions for "Luma" folder in "LumaWidgetsExtension" target */,
 				DBA4A7F12F9BBFCC008BC5A9 /* Exceptions for "Luma" folder in "Luma" target */,
+				DBBC62ED2FB3BD3000010D3F /* Exceptions for "Luma" folder in "LumaWidgetsExtension" target */,
 			);
 			path = Luma;
 			sourceTree = "<group>";
@@ -144,6 +147,9 @@
 			buildActionMask = 2147483647;
 			files = (
 				DB2EFE092FBF805C00C2C11F /* AudioStreaming in Frameworks */,
+				FB0010000000000000000001 /* FirebaseCore in Frameworks */,
+				FB0010000000000000000004 /* FirebasePerformance in Frameworks */,
+				FB0010000000000000000006 /* FirebaseCrashlytics in Frameworks */,
 				DBA4A77D2F9BE3C8008BC5A9 /* SwiftSonic in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -226,6 +232,7 @@
 				DBA4A74E2F9BBFCB008BC5A9 /* Frameworks */,
 				DBA4A74F2F9BBFCB008BC5A9 /* Resources */,
 				DB04DC122FB3CA280077CCD3 /* Embed Foundation Extensions */,
+				FB0010000000000000000008 /* Crashlytics dSYM Upload */,
 			);
 			buildRules = (
 			);
@@ -239,6 +246,9 @@
 			);
 			name = Luma;
 			packageProductDependencies = (
+				FB0010000000000000000002 /* FirebaseCore */,
+				FB0010000000000000000005 /* FirebasePerformance */,
+				FB0010000000000000000007 /* FirebaseCrashlytics */,
 				DBA4A77C2F9BE3C8008BC5A9 /* SwiftSonic */,
 				DB2EFE082FBF805C00C2C11F /* AudioStreaming */,
 			);
@@ -351,6 +361,7 @@
 			mainGroup = DBA4A7482F9BBFCB008BC5A9;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
+				FB0010000000000000000003 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */,
 				DBA4A77B2F9BE3C8008BC5A9 /* XCLocalSwiftPackageReference "Packages/SwiftSonic" */,
 				DB2EFE072FBF805C00C2C11F /* XCLocalSwiftPackageReference "Packages/AudioStreaming" */,
 			);
@@ -397,6 +408,26 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		FB0010000000000000000008 /* Crashlytics dSYM Upload */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputPaths = (
+				"${TARGET_BUILD_DIR}/${INFOPLIST_PATH}",
+				"${DWARF_DSYM_FOLDER_PATH}/${DWARF_DSYM_FILE_NAME}",
+			);
+			name = "Crashlytics dSYM Upload";
+			outputPaths = (
+				"$(DERIVED_FILE_DIR)/crashlytics-upload.stamp",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/bash;
+			shellScript = "\"${SRCROOT}/scripts/firebase/crashlytics-run.sh\"\n";
+		};
+/* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		DBA4A74D2F9BBFCB008BC5A9 /* Sources */ = {
@@ -493,7 +524,7 @@
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 1029;
+				CURRENT_PROJECT_VERSION = 1031;
 				DEAD_CODE_STRIPPING = YES;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
@@ -560,7 +591,7 @@
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 1029;
+				CURRENT_PROJECT_VERSION = 1031;
 				DEAD_CODE_STRIPPING = YES;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				ENABLE_NS_ASSERTIONS = NO;
@@ -595,6 +626,7 @@
 				DEAD_CODE_STRIPPING = YES;
 				DEVELOPMENT_TEAM = ZKZ9SNL8LZ;
 				ENABLE_APP_SANDBOX = YES;
+				ENABLE_CODE_COVERAGE = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_INCOMING_NETWORK_CONNECTIONS = NO;
 				ENABLE_OUTGOING_NETWORK_CONNECTIONS = NO;
@@ -607,6 +639,7 @@
 				ENABLE_RESOURCE_ACCESS_LOCATION = NO;
 				ENABLE_RESOURCE_ACCESS_PRINTING = NO;
 				ENABLE_RESOURCE_ACCESS_USB = NO;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				ENABLE_USER_SELECTED_FILES = readonly;
 				"EXECUTABLE_NAME[sdk=iphoneos*]" = "$(PRODUCT_NAME)-$(CURRENT_PROJECT_VERSION)";
 				"EXECUTABLE_NAME[sdk=iphonesimulator*]" = "$(PRODUCT_NAME)-$(CURRENT_PROJECT_VERSION)";
@@ -661,6 +694,7 @@
 				DEAD_CODE_STRIPPING = YES;
 				DEVELOPMENT_TEAM = ZKZ9SNL8LZ;
 				ENABLE_APP_SANDBOX = YES;
+				ENABLE_CODE_COVERAGE = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_INCOMING_NETWORK_CONNECTIONS = NO;
 				ENABLE_OUTGOING_NETWORK_CONNECTIONS = NO;
@@ -673,6 +707,7 @@
 				ENABLE_RESOURCE_ACCESS_LOCATION = NO;
 				ENABLE_RESOURCE_ACCESS_PRINTING = NO;
 				ENABLE_RESOURCE_ACCESS_USB = NO;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				ENABLE_USER_SELECTED_FILES = readonly;
 				"EXECUTABLE_NAME[sdk=iphoneos*]" = "$(PRODUCT_NAME)-$(CURRENT_PROJECT_VERSION)";
 				"EXECUTABLE_NAME[sdk=iphonesimulator*]" = "$(PRODUCT_NAME)-$(CURRENT_PROJECT_VERSION)";
@@ -775,6 +810,7 @@
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
 				DEAD_CODE_STRIPPING = YES;
+				DEVELOPMENT_TEAM = ZKZ9SNL8LZ;
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 18.6;
 				MACOSX_DEPLOYMENT_TARGET = 15.6;
@@ -783,7 +819,7 @@
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = auto;
 				STRING_CATALOG_GENERATE_SYMBOLS = NO;
-				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
@@ -798,6 +834,7 @@
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
 				DEAD_CODE_STRIPPING = YES;
+				DEVELOPMENT_TEAM = ZKZ9SNL8LZ;
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 18.6;
 				MACOSX_DEPLOYMENT_TARGET = 15.6;
@@ -806,7 +843,7 @@
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = auto;
 				STRING_CATALOG_GENERATE_SYMBOLS = NO;
-				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
@@ -827,6 +864,7 @@
 				DEAD_CODE_STRIPPING = YES;
 				DEVELOPMENT_TEAM = ZKZ9SNL8LZ;
 				ENABLE_APP_SANDBOX = YES;
+				ENABLE_CODE_COVERAGE = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_OUTGOING_NETWORK_CONNECTIONS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -869,6 +907,7 @@
 				DEAD_CODE_STRIPPING = YES;
 				DEVELOPMENT_TEAM = ZKZ9SNL8LZ;
 				ENABLE_APP_SANDBOX = YES;
+				ENABLE_CODE_COVERAGE = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_OUTGOING_NETWORK_CONNECTIONS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -962,6 +1001,17 @@
 		};
 /* End XCLocalSwiftPackageReference section */
 
+/* Begin XCRemoteSwiftPackageReference section */
+		FB0010000000000000000003 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/firebase/firebase-ios-sdk";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 13.1.1;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
 /* Begin XCSwiftPackageProductDependency section */
 		DB2EFE082FBF805C00C2C11F /* AudioStreaming */ = {
 			isa = XCSwiftPackageProductDependency;
@@ -972,6 +1022,21 @@
 			isa = XCSwiftPackageProductDependency;
 			package = DBA4A77B2F9BE3C8008BC5A9 /* XCLocalSwiftPackageReference "Packages/SwiftSonic" */;
 			productName = SwiftSonic;
+		};
+		FB0010000000000000000002 /* FirebaseCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = FB0010000000000000000003 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseCore;
+		};
+		FB0010000000000000000005 /* FirebasePerformance */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = FB0010000000000000000003 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebasePerformance;
+		};
+		FB0010000000000000000007 /* FirebaseCrashlytics */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = FB0010000000000000000003 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseCrashlytics;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

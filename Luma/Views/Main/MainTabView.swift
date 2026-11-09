@@ -33,6 +33,7 @@ struct MainTabView: View {
     @State private var showingFullPlayer = false
     @State private var openPlayerWithLyrics = false
     @State private var openPlayerWithQueue = false
+    @State private var openPlayerLyricsMode: LumaLyricsViewMode = .lyrics
     @State private var showAccountSheet = false
     @State private var showCreatePlaylist = false
     /// Path change requested from the full player / a notification, applied after the player's cover is
@@ -40,6 +41,7 @@ struct MainTabView: View {
     @State private var pendingNavigation: (destination: HomeDestination, tab: AppTab, mode: NavigationMode)?
     @Namespace private var playerZoom
     private let fullPlayerZoomID = "full-player"
+    @State private var tabBarChrome = TabBarChromeState()
     /// Identity of this `tabs` hierarchy, so a device log can tell a re-render from a rebuild.
     @State private var tabsInstanceID = UUID()
 
@@ -64,13 +66,18 @@ struct MainTabView: View {
         case append
     }
 
-    /// Intercepts tab selection so re-tapping Search focuses the field.
+    /// Preserve mounted tab state. User re-taps are handled by SearchTabReselectObserver.
     private var tabSelection: Binding<AppTab> {
         Binding(
             get: { selectedTab },
             set: { newValue in
-                if newValue == .search, selectedTab == .search {
-                    NotificationCenter.default.post(name: .lumaFocusSearch, object: nil)
+                guard newValue != selectedTab else {
+                    #if os(macOS)
+                    if newValue == .search {
+                        NotificationCenter.default.post(name: .lumaFocusSearch, object: nil)
+                    }
+                    #endif
+                    return
                 }
                 mountedTabs.insert(newValue)
                 selectedTab = newValue
@@ -81,6 +88,10 @@ struct MainTabView: View {
     private var accountDisplayName: String {
         container?.serverState.activeServer?.username
             ?? String(localized: "Account", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale)
+    }
+
+    private func tabVisualsPresented(_ tab: AppTab) -> Bool {
+        selectedTab == tab && !showingFullPlayer && !showAccountSheet && !showCreatePlaylist
     }
 
     // MARK: - Tabs View
@@ -99,6 +110,7 @@ struct MainTabView: View {
                     #endif
                 }
                 .environment(\.detailNavigationPath, $searchPath)
+                .environment(\.playbackVisualsPresented, tabVisualsPresented(.search))
                 .onChange(of: searchPath.count) { old, new in logPathChange(.search, from: old, to: new) }
             }
 
@@ -111,6 +123,7 @@ struct MainTabView: View {
                         }
                 }
                 .environment(\.detailNavigationPath, $homePath)
+                .environment(\.playbackVisualsPresented, tabVisualsPresented(.home))
                 .onChange(of: homePath.count) { old, new in logPathChange(.home, from: old, to: new) }
             }
 
@@ -123,12 +136,13 @@ struct MainTabView: View {
                         }
                 }
                 .environment(\.detailNavigationPath, $discoverPath)
+                .environment(\.playbackVisualsPresented, tabVisualsPresented(.discover))
                 .onChange(of: discoverPath.count) { old, new in logPathChange(.discover, from: old, to: new) }
             }
 
             // Library hub — keep it available in every tab presentation, including the
             // iPad floating tab bar and sidebar.
-            Tab("Library", systemImage: "square.stack.fill", value: AppTab.library) {
+            Tab("Library", systemImage: "music.note.square.stack.fill", value: AppTab.library) {
                 NavigationStack(path: $libraryPath) {
                     HomeView()
                         .environment(\.registersHomeDestinations, false)
@@ -137,6 +151,7 @@ struct MainTabView: View {
                         }
                 }
                 .environment(\.detailNavigationPath, $libraryPath)
+                .environment(\.playbackVisualsPresented, tabVisualsPresented(.library))
                 .onChange(of: libraryPath.count) { old, new in logPathChange(.library, from: old, to: new) }
             }
             #if os(iOS)
@@ -148,6 +163,7 @@ struct MainTabView: View {
                                 .navigationDestination(for: HomeDestination.self) { libraryDestinationView($0) }
                         }
                         .environment(\.detailNavigationPath, $recentlyAddedPath)
+                        .environment(\.playbackVisualsPresented, tabVisualsPresented(.recentlyAdded))
                         .onChange(of: recentlyAddedPath.count) { old, new in logPathChange(.recentlyAdded, from: old, to: new) }
                     }
                     Tab("Artists", systemImage: "music.mic", value: AppTab.artists) {
@@ -156,6 +172,7 @@ struct MainTabView: View {
                                 .navigationDestination(for: HomeDestination.self) { libraryDestinationView($0) }
                         }
                         .environment(\.detailNavigationPath, $artistsPath)
+                        .environment(\.playbackVisualsPresented, tabVisualsPresented(.artists))
                         .onChange(of: artistsPath.count) { old, new in logPathChange(.artists, from: old, to: new) }
                     }
                     Tab("Albums", systemImage: "square.stack", value: AppTab.albums) {
@@ -164,6 +181,7 @@ struct MainTabView: View {
                                 .navigationDestination(for: HomeDestination.self) { libraryDestinationView($0) }
                         }
                         .environment(\.detailNavigationPath, $albumsPath)
+                        .environment(\.playbackVisualsPresented, tabVisualsPresented(.albums))
                         .onChange(of: albumsPath.count) { old, new in logPathChange(.albums, from: old, to: new) }
                     }
                     Tab("Favorites", systemImage: "star", value: AppTab.favorites) {
@@ -172,6 +190,7 @@ struct MainTabView: View {
                                 .navigationDestination(for: HomeDestination.self) { libraryDestinationView($0) }
                         }
                         .environment(\.detailNavigationPath, $favoritesPath)
+                        .environment(\.playbackVisualsPresented, tabVisualsPresented(.favorites))
                         .onChange(of: favoritesPath.count) { old, new in logPathChange(.favorites, from: old, to: new) }
                     }
                     Tab("Downloads", systemImage: "arrow.down.circle", value: AppTab.downloads) {
@@ -181,6 +200,7 @@ struct MainTabView: View {
                                 .navigationDestination(for: HomeDestination.self) { libraryDestinationView($0) }
                         }
                         .environment(\.detailNavigationPath, $downloadsPath)
+                        .environment(\.playbackVisualsPresented, tabVisualsPresented(.downloads))
                         .onChange(of: downloadsPath.count) { old, new in logPathChange(.downloads, from: old, to: new) }
                     }
                 }
@@ -193,6 +213,7 @@ struct MainTabView: View {
                                 .navigationDestination(for: HomeDestination.self) { libraryDestinationView($0) }
                         }
                         .environment(\.detailNavigationPath, $playlistsPath)
+                        .environment(\.playbackVisualsPresented, tabVisualsPresented(.playlists))
                         .onChange(of: playlistsPath.count) { old, new in logPathChange(.playlists, from: old, to: new) }
                     }
                 }
@@ -350,13 +371,15 @@ struct MainTabView: View {
         Group {
             if #available(iOS 26.1, *) {
                 tabs
-                    .tabBarMinimizeBehavior(selectedTab == .search ? .never : .onScrollDown)
+                    .tabBarMinimizeBehavior(selectedTab == .search || tabBarChrome.isAlbumPresented ? .never : .onScrollDown)
+                    .toolbar(tabBarChrome.isAlbumPresented ? .visible : .automatic, for: .tabBar)
                     .tabViewBottomAccessory(isEnabled: hasPlayerContent) {
                         miniPlayerAccessory(usesSystemAccessory: true)
                     }
             } else if #available(iOS 26.0, *) {
                 tabs
-                    .tabBarMinimizeBehavior(selectedTab == .search ? .never : .onScrollDown)
+                    .tabBarMinimizeBehavior(selectedTab == .search || tabBarChrome.isAlbumPresented ? .never : .onScrollDown)
+                    .toolbar(tabBarChrome.isAlbumPresented ? .visible : .automatic, for: .tabBar)
                     .tabViewBottomAccessory {
                         if hasPlayerContent { miniPlayerAccessory(usesSystemAccessory: true) }
                     }
@@ -369,8 +392,18 @@ struct MainTabView: View {
         .onReceive(NotificationCenter.default.publisher(for: .lumaOpenFullPlayer)) { _ in
             showingFullPlayer = true
         }
+        .onReceive(NotificationCenter.default.publisher(for: .lumaOpenFullPlayerLyrics)) { _ in
+            presentFullPlayer(lyrics: true, queue: false,
+                              mode: SiriPlayerRequestStore.consumeLyrics() ?? .lyrics)
+        }
+        .onAppear {
+            guard let mode = SiriPlayerRequestStore.consumeLyrics() else { return }
+            presentFullPlayer(lyrics: true, queue: false, mode: mode)
+        }
         .fullScreenCover(isPresented: $showingFullPlayer, onDismiss: fullPlayerDidDismiss) {
-            FullPlayerView(openWithLyrics: openPlayerWithLyrics, openWithQueue: openPlayerWithQueue)
+            FullPlayerView(openWithLyrics: openPlayerWithLyrics, openWithQueue: openPlayerWithQueue,
+                           openWithLyricsMode: openPlayerLyricsMode)
+                .environment(\.playbackVisualsPresented, showingFullPlayer)
                 .presentationBackground(.black)
                 .lumaZoomTransition(sourceID: fullPlayerZoomID, in: playerZoom)
         }
@@ -381,6 +414,7 @@ struct MainTabView: View {
             }
         }
         .modifier(TabBarChromeAppearance())
+        .environment(tabBarChrome)
         .onChange(of: selectedTab) { _, tab in mountedTabs.insert(tab) }
         .sheet(isPresented: $showAccountSheet) {
             AccountSheetView()
@@ -412,7 +446,7 @@ struct MainTabView: View {
             }
         }
         .background {
-            SearchTabReselectObserver {
+            SearchTabReselectObserver(isSearchSelected: selectedTab == .search) {
                 NotificationCenter.default.post(name: .lumaFocusSearch, object: nil)
             }
             .frame(width: 0, height: 0)
@@ -428,6 +462,7 @@ struct MainTabView: View {
             }
             .sheet(isPresented: $showingFullPlayer) {
                 FullPlayerView()
+                    .environment(\.playbackVisualsPresented, showingFullPlayer)
             }
 #endif
     }
@@ -446,15 +481,17 @@ struct MainTabView: View {
             .lumaMatchedTransitionSource(id: fullPlayerZoomID, in: playerZoom)
     }
 
-    private func presentFullPlayer(lyrics: Bool, queue: Bool) {
+    private func presentFullPlayer(lyrics: Bool, queue: Bool, mode: LumaLyricsViewMode = .lyrics) {
         openPlayerWithLyrics = lyrics
         openPlayerWithQueue = queue
+        openPlayerLyricsMode = mode
         showingFullPlayer = true
     }
 
     private func resetFullPlayerLaunchFlags() {
         openPlayerWithLyrics = false
         openPlayerWithQueue = false
+        openPlayerLyricsMode = .lyrics
     }
 
     private func fullPlayerDidDismiss() {
@@ -465,6 +502,7 @@ struct MainTabView: View {
         resetFullPlayerLaunchFlags()
         guard let request = pendingNavigation else { return }
         pendingNavigation = nil
+        Logger.ui.debug("[NAV] pending execute tab=\(String(describing: request.tab), privacy: .public) mode=\(String(describing: request.mode), privacy: .public)")
         switch request.mode {
         case .replace: performNavigation(to: request.destination, tab: request.tab)
         case .append: appendDestination(request.destination, to: request.tab)
@@ -489,6 +527,7 @@ struct MainTabView: View {
         guard let id = note.userInfo?["albumId"] as? String else { return }
         let name = note.userInfo?["albumName"] as? String ?? ""
         let cover = note.userInfo?["coverArtId"] as? String
+        Logger.ui.debug("[NAV] notification album id=\(id, privacy: .public) tab=\(String(describing: self.selectedTab), privacy: .public) player=\(self.showingFullPlayer, privacy: .public)")
         let dest = HomeDestination.albumById(id: id, name: name, subtitle: "", coverArtId: cover)
         navigateReplacingPath(to: dest, tab: .home)
     }
@@ -505,6 +544,7 @@ struct MainTabView: View {
     /// delay races the full-screen dismissal animation and can leave the destination under
     /// a stale black presentation layer.
     private func navigateReplacingPath(to destination: HomeDestination, tab: AppTab) {
+        Logger.ui.debug("[NAV] replace request tab=\(String(describing: tab), privacy: .public) player=\(self.showingFullPlayer, privacy: .public)")
         if showingFullPlayer {
             pendingNavigation = (destination, tab, .replace)
             showingFullPlayer = false
@@ -515,6 +555,7 @@ struct MainTabView: View {
 
     /// Pushes the destination onto the tab the user is in, after any presentation has fully gone.
     private func navigateAppending(to destination: HomeDestination, tab: AppTab) {
+        Logger.ui.debug("[NAV] append request tab=\(String(describing: tab), privacy: .public) player=\(self.showingFullPlayer, privacy: .public)")
         if showingFullPlayer {
             pendingNavigation = (destination, tab, .append)
             showingFullPlayer = false

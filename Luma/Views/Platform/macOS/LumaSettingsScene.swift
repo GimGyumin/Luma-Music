@@ -36,7 +36,7 @@ struct LumaSettingsScene: Scene {
 let lumaSettingsSelectedTabKey = "luma.settings.selectedTab"
 
 enum SettingsTab: Int {
-    case general, account, playback, library, integrations, about
+    case general, account, playback, library, integrations, help, about
 }
 
 struct MacOSSettingsView: View {
@@ -63,6 +63,10 @@ struct MacOSSettingsView: View {
             IntegrationsSettingsTab()
                 .tabItem { Label("Integrations", systemImage: "link.circle") }
                 .tag(SettingsTab.integrations.rawValue)
+
+            NavigationStack { HelpSettingsView() }
+                .tabItem { Label("Help", systemImage: "questionmark.circle") }
+                .tag(SettingsTab.help.rawValue)
 
             AboutSettingsTab()
                 .tabItem { Label("About", systemImage: "info.circle") }
@@ -148,11 +152,13 @@ private struct MacAudioQualitySettingsSection: View {
 // MARK: - General tab
 
 private struct GeneralSettingsTab: View {
+    @AppStorage("luma.visuals.albumFollowsAppearance") private var albumFollowsAppearance = false
     @ObservedObject private var appleMusic = AppleMusicSettings.shared
 
     var body: some View {
         Form {
             Section {
+                Toggle("Match Album Background to Appearance", isOn: $albumFollowsAppearance)
                 LabeledContent("Theme") {
                     Text("Follow System")
                         .foregroundStyle(.secondary)
@@ -165,14 +171,10 @@ private struct GeneralSettingsTab: View {
 
             Section {
                 Toggle("Enrich album & artist descriptions", isOn: $appleMusic.enrichMetadata)
-                TextField("Spotify Client ID", text: $appleMusic.spotifyClientId)
-                    .textFieldStyle(.roundedBorder)
-                SecureField("Spotify Client Secret", text: $appleMusic.spotifyClientSecret)
-                    .textFieldStyle(.roundedBorder)
             } header: {
                 Text("Catalog Enrichment")
             } footer: {
-                Text("Descriptions come from Wikipedia. Spotify Client ID/Secret (Client Credentials) are used for ISRC lookup.")
+                Text("Descriptions come from Wikipedia.")
             }
 
             LyricsSettingsSections()
@@ -240,7 +242,7 @@ private struct ServerSettingsTab: View {
             } header: {
                 Text("Account")
             } footer: {
-                Text("Log out, change password, sync library data, media scans, and Spotify credentials.")
+                Text("Log out, change password, sync library data, and run media scans.")
             }
         }
         .formStyle(.grouped)
@@ -367,7 +369,7 @@ private struct AboutSettingsTab: View {
         Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "—"
     }
     private var buildIdentifier: String {
-        Bundle.main.infoDictionary?["LumaBuildIdentifier"] as? String ?? "26A1001rc1"
+        Bundle.main.infoDictionary?["LumaBuildIdentifier"] as? String ?? "26A1001e"
     }
     private var copyrightNotice: String {
         Bundle.main.infoDictionary?["NSHumanReadableCopyright"] as? String ?? "© 2026 Kyumin"

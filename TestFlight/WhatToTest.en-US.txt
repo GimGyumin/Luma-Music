@@ -1,26 +1,20 @@
-Luma 1.0 RC1
+Luma 1.8.4
 
-Welcome to Luma.
+NEW
+• Redesigned playlists — immersive full-screen artwork, color-matched theming, and a smoother editor. Edit a playlist right in place: swap the cover (photo or generated gradient), reorder and remove tracks, and add music without leaving the page.
+• Redesigned artist pages — immersive header, latest release, most-played tracks, large album artwork, and related artists.
+• Deleting a playlist now lets you choose: remove the playlist only, or also delete its downloaded files.
 
-Luma is a native music player for your Navidrome and OpenSubsonic libraries, designed for a calm, focused listening experience.
-
-HIGHLIGHTS
-• Synchronized lyrics that follow along as you listen.
-• Lossless audio and gapless playback for uninterrupted albums.
-• A beautiful library for browsing artists, albums, songs, and playlists.
-• Full-screen artwork, fluid animations, and a player designed for iPhone and iPad.
-• Lock Screen and Control Center playback controls.
-• Playlist editing with artwork, reordering, and track management.
-• Offline downloads for listening without a network connection.
-• Native support for iOS and macOS, with widgets and system integrations.
-
-PRIVACY
-• No analytics, telemetry, or Luma account.
-• Your music library stays with the server you configure.
+FIXED
+• Lock Screen / Control Center: skip and scrubber controls no longer show up greyed out.
+• End of an album/queue no longer triggers stray "phantom" playback — it now stops cleanly, and resumes from the top if you press play.
+• Volume slider no longer desyncs or jumps to random positions on launch.
+• Deleting a playlist from its detail view now updates the library right away.
+• Removing downloads now reliably frees up disk space.
+• Fixed a crash that could happen while scrubbing.
 
 PLEASE TEST
-• Sign in to a Navidrome or OpenSubsonic server and browse your library.
-• Play an album from beginning to end with repeat off.
-• Check synchronized lyrics, seeking, Lock Screen controls, and volume.
-• Edit a playlist, download music, then try playback while offline.
-• Try the app on both iPhone and iPad if available.
+• Play an album to the very end with repeat off — it should stop cleanly with no stray audio, then start from the beginning when you press play.
+• Lock your device while playing, then try skip and scrubbing from the Lock Screen.
+• Edit a playlist's cover and tracks; delete a playlist both with and without downloaded files.
+• Check the volume slider right after a cold launch.

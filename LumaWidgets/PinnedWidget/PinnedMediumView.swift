@@ -6,41 +6,39 @@
 import SwiftUI
 import WidgetKit
 
-/// Apple Music Pins medium: four equal cover tiles on a system material background.
+/// Apple Music Pins medium: four cover tiles in one row on the shared card.
 struct PinnedMediumView: View {
     let entry: PinnedEntry
 
     var body: some View {
         Group {
             if entry.items.isEmpty {
-                emptyState
+                PinnedEmptyState()
             } else {
-                HStack(alignment: .top, spacing: 10) {
-                    ForEach(entry.items.prefix(4), id: \.id) { item in
-                        PinnedTileView(
-                            item: item,
-                            image: entry.coverImages[item.coverArtFilename ?? ""],
-                            coverSize: 72
-                        )
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                VStack(alignment: .leading, spacing: 8) {
+                    WidgetSectionHeader(
+                        title: WidgetChrome.text(korean: "고정", english: "Pinned"),
+                        noteSize: 18
+                    )
+
+                    HStack(alignment: .top, spacing: 8) {
+                        ForEach(entry.items.prefix(4), id: \.id) { item in
+                            PinnedTileView(
+                                item: item,
+                                image: entry.coverImages[item.coverArtFilename ?? ""],
+                                coverSize: 64,
+                                titleSize: 13
+                            )
+                            .frame(maxWidth: .infinity)
+                        }
                     }
+
+                    Spacer(minLength: 0)
                 }
             }
         }
         .containerBackground(for: .widget) {
-            Color.clear
+            WidgetCardBackground()
         }
-    }
-
-    private var emptyState: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("Pins")
-                .font(.system(size: 15, weight: .semibold))
-            Text("Pin albums or playlists in Luma")
-                .font(.system(size: 12))
-                .foregroundStyle(.secondary)
-            Spacer(minLength: 0)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 }

@@ -79,7 +79,7 @@ struct PlayerExperienceRegressionTests {
         let identity = try server.state.requestIdentity(for: serverID)
         let song = try JSONDecoder().decode(Song.self, from: Data(
             #"{"id":"spatial","title":"Fixture","album":"Fixture (Dolby Atmos)","suffix":"mp3","duration":3}"#.utf8))
-        let fixture = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("Fixtures/SilentMP3.mp3")
+        let fixture = LumaTestResources.fixture("Fixtures/SilentMP3.mp3", sourceFile: #filePath)
         let bytes = try Data(contentsOf: fixture)
         let source = root.appendingPathComponent("original.mp3")
         try bytes.write(to: source)

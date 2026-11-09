@@ -12,33 +12,16 @@ import UniformTypeIdentifiers
 #endif
 
 extension PlaylistDetailView {
-    // MARK: - Skeleton rows (list-compatible; kept with listRow modifiers since List is preserved)
-
-    @ViewBuilder
-    var skeletonRows: some View {
-        ForEach(0..<5, id: \.self) { _ in
-            HStack(spacing: LumaSpacing.m) {
-                SkeletonBlock(width: 20, height: 20, cornerRadius: 4)
-                VStack(alignment: .leading, spacing: 6) {
-                    SkeletonBlock(width: 200, height: 16, cornerRadius: 4)
-                    SkeletonBlock(width: 140, height: 12, cornerRadius: 4)
-                }
-                Spacer()
-            }
-            .padding(.vertical, LumaSpacing.xs)
-            .listRowInsets(EdgeInsets(top: 0, leading: LumaSpacing.l, bottom: 0, trailing: LumaSpacing.l))
-            .listRowBackground(bodyColor)
-            .listRowSeparator(.hidden)
-        }
-    }
-
     // MARK: - Color loading
 
     func loadDominantColor(coverArtId: String) async {
+        guard !presentationSuspended else { return }
         guard let image = await container?.artworkImageCache.load(coverArtId: coverArtId, tier: .hero) else { return }
+        guard !presentationSuspended, !Task.isCancelled else { return }
         let packed = await Task.detached(priority: .utility) {
             DominantColorExtractor.packedAverageColor(from: image)
         }.value
+        guard !presentationSuspended, !Task.isCancelled else { return }
         let color = colorExtractor.storeColor(packed: packed, for: coverArtId)
         withAnimation(LumaAnimation.theme) {
             dominantColor = color

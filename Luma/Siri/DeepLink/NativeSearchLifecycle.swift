@@ -14,6 +14,14 @@ struct NativeSearchLifecycle: ViewModifier {
             .onOpenURL { url in
                 enqueue(url)
             }
+            // Allows device automation to exercise the real deep-link path while
+            // xctrace owns CoreDevice; normal launches never set this variable.
+            .task {
+                guard pendingURL == nil,
+                      let raw = ProcessInfo.processInfo.environment["LUMA_TEST_OPEN_URL"],
+                      let url = URL(string: raw) else { return }
+                enqueue(url)
+            }
             .onContinueUserActivity(CSSearchableItemActionType) { activity in
                 if let key = activity.userInfo?[CSSearchableItemActivityIdentifier] as? String {
                     if let url = Self.url(for: key) { enqueue(url) }

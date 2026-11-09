@@ -87,6 +87,11 @@ struct LyricsSettingsSections: View {
             }
         } header: {
             SettingsSectionHeader("Lyrics")
+        } footer: {
+            ContextualGuideNote(
+                guide: .lyricsSync,
+                message: String(localized: "Word-by-word timing and pronunciation require lyric data supplied by your server. Translation works with the selected provider.", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale)
+            )
         }
     }
 

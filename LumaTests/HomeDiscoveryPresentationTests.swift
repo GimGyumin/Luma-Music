@@ -51,8 +51,8 @@ struct HomeDiscoveryPresentationTests {
         .padding(16).frame(width: 402, height: 700, alignment: .topLeading)
         .background(.black).environment(\.colorScheme, .dark)
         .environment(container.artworkImageCache).environment(\.appContainer, container)
-        try export(discovery, to: "/tmp/luma-discover-components.png")
-        try export(home, to: "/tmp/luma-home-components.png")
+        try export(discovery, to: LumaTestResources.temporaryFile("luma-discover-components.png").path)
+        try export(home, to: LumaTestResources.temporaryFile("luma-home-components.png").path)
     }
 
     private func export<Content: View>(_ view: Content, to path: String) throws {

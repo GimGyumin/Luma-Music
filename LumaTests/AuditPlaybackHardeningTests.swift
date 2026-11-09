@@ -145,8 +145,7 @@ struct AuditPlaybackHardeningTests {
         f.engine.progress = 180
         // A local fixture keeps this test about source reuse: a remote `example.invalid` URL made
         // AVPlayer's asynchronous DNS failure race the assertion and re-resolve intermittently.
-        let preparedURL = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
-            .appendingPathComponent("Fixtures/SilentMP3.mp3")
+        let preparedURL = LumaTestResources.fixture("Fixtures/SilentMP3.mp3", sourceFile: #filePath)
         let source = MediaSource.downloaded(preparedURL)
         await f.player.armAuditPreparedNext(next, source: source)
         // The fake engine never selects its queue entry, exercising the grace-window fallback.
@@ -381,7 +380,7 @@ struct AuditPlaybackHardeningTests {
 
     @Test func originalLossyCodecDoesNotBecomeTranscoded() async throws {
         let f = try AuditPlaybackFixture()
-        let url = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("Fixtures/SilentMP3.mp3")
+        let url = LumaTestResources.fixture("Fixtures/SilentMP3.mp3", sourceFile: #filePath)
         await f.player.installAuditNativeSource(url)
         let id = try #require(f.player.systemEngine.observedItemID)
         let generation = await f.player.systemPlayback.generation

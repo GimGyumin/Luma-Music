@@ -11,6 +11,8 @@ struct DashboardHomeView: View {
     @Environment(\.appContainer) private var container
     @State private var vm: DiscoverViewModel?
     @State private var loadedServerID: String?
+    @State private var listenAgain: AlbumListenAgainRecommendation?
+    @State private var isLoadingListenAgain = true
     @State private var songToAddToPlaylist: DisplayableSong?
     @State private var isHeaderScrolled = false
 
@@ -18,7 +20,13 @@ struct DashboardHomeView: View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 32) {
                 if let container {
-                    HomePlaylistShelf(playlists: container.homeDiscoveryFeed.playlists, mixes: vm?.personalMixes ?? [])
+                    HomePlaylistShelf(
+                        playlists: container.homeDiscoveryFeed.playlists,
+                        mixes: vm?.personalMixes ?? [],
+                        listenAgain: listenAgain,
+                        isLoadingListenAgain: isLoadingListenAgain,
+                        isLoadingMixes: vm?.personalMixesLoaded != true
+                    )
                     if !container.homeDiscoveryFeed.favoriteSongs.isEmpty {
                         favoriteSongs(container.homeDiscoveryFeed.favoriteSongs)
                     }
@@ -29,7 +37,7 @@ struct DashboardHomeView: View {
                             subtitle: "Check your connection and try again.",
                             action: .init(label: "Retry") { Task { await reload(forceRefresh: true) } })
                     } else if vm.isInitialLoading {
-                        skeletonShelves
+                        EmptyView()
                     } else {
                         albumShelf("Recently Played", albums: vm.recentlyPlayed)
                         albumShelf("In Heavy Rotation", albums: vm.mostPlayed)
@@ -43,7 +51,7 @@ struct DashboardHomeView: View {
                         }
                         MoodPlaylistShelf()
                     }
-                } else { skeletonShelves }
+                } else { EmptyView() }
             }
             .padding(.horizontal, 16)
             .padding(.top, 16)
@@ -64,6 +72,9 @@ struct DashboardHomeView: View {
                     personalMixService: container.personalMixService, serverId: sid)
                 loadedServerID = sid
             }
+            listenAgain = nil
+            isLoadingListenAgain = true
+            await loadListenAgain(container: container, serverID: sid)
             await vm?.loadHomeDashboard(serverId: sid)
             await container.homeDiscoveryFeed.load()
         }
@@ -90,39 +101,37 @@ struct DashboardHomeView: View {
             VStack(spacing: 0) {
                 ForEach(Array(songs.prefix(3).enumerated()), id: \.element.id) { index, song in
                     SongRow(song: song, index: index + 1, showCoverArt: true, isFavorite: true,
-                        onAddToPlaylist: { songToAddToPlaylist = $0 }, showsEllipsisInsteadOfDuration: true)
-                        .contentShape(Rectangle())
-                        .onTapGesture {
+                        onAddToPlaylist: { songToAddToPlaylist = $0 }, showsEllipsisInsteadOfDuration: true,
+                        onPlay: {
                             Task { try? await container?.playerService.play(tracks: songs, startIndex: index) }
-                        }
+                        })
                 }
             }
         }
     }
 
     private func reload(forceRefresh: Bool) async {
+        if let container {
+            if listenAgain == nil { isLoadingListenAgain = true }
+            await loadListenAgain(container: container,
+                                  serverID: container.serverState.activeServer?.id.uuidString)
+        }
         await vm?.loadHomeDashboard(forceRefresh: forceRefresh, serverId: container?.serverState.activeServer?.id.uuidString)
         await container?.homeDiscoveryFeed.load(forceRefresh: forceRefresh)
     }
 
-    private var skeletonShelves: some View {
-        VStack(alignment: .leading, spacing: 32) {
-            ForEach(["Recently Played", "In Heavy Rotation", "Rediscover"], id: \.self) { title in
-                VStack(alignment: .leading, spacing: 12) {
-                    HomeShelfHeading(title: String(localized: String.LocalizationValue(title), bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale))
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 12) {
-                            ForEach(0..<4, id: \.self) { _ in
-                                VStack(alignment: .leading, spacing: 8) {
-                                    SkeletonBlock(width: 160, height: 160, cornerRadius: 12)
-                                    SkeletonBlock(width: 132, height: 14)
-                                    SkeletonBlock(width: 110, height: 12)
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }.allowsHitTesting(false)
+    private func loadListenAgain(container: AppContainer, serverID: String?) async {
+        guard let serverID else {
+            listenAgain = nil
+            isLoadingListenAgain = false
+            return
+        }
+        let recommendation = await container.statsService
+            .albumListenAgainRecommendation(serverId: serverID)
+        guard !Task.isCancelled,
+              container.serverState.activeServer?.id.uuidString == serverID else { return }
+        listenAgain = recommendation
+        isLoadingListenAgain = false
     }
+
 }

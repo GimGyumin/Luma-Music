@@ -124,7 +124,8 @@ struct PlayerLandscapeInteractionTests {
         vm.hasTimedPlayback = true
         func ink(at time: Int) throws -> Int {
             vm.karaokePlaybackMs = time
-            let renderer = ImageRenderer(content: LyricsBackgroundClockBlock(viewModel: vm, index: 0,
+            let active = time >= 1000 && time < 2000
+            let renderer = ImageRenderer(content: LyricsBackgroundClockBlock(viewModel: vm, index: 0, active: active,
                 translation: "Translation", alignment: .leading, textAlignment: .leading,
                 fontSize: 24, reduceMotion: true).frame(width: 300, height: 100).background(.black))
             let image = try #require(renderer.cgImage)

@@ -9,6 +9,9 @@ import Foundation
 import SwiftData
 import SwiftSonic
 import ImageIO
+#if os(macOS)
+import AppKit
+#endif
 @testable import Luma
 
 // MARK: - Mocks
@@ -168,6 +171,20 @@ struct LyricsTrackingCacheTests {
 @Suite("Apple translation session lifecycle")
 @MainActor
 struct LyricsAppleTranslationSessionTests {
+    @Test func englishLyricsWithNonverbalLinesAreRecognizedBeforeOfferingStoredTranslations() async throws {
+        let lyrics = StructuredLyrics(lang: "en", synced: true, line: [
+            Line(value: "We are walking down the road together", start: 0), Line(value: "♪", start: 3000)
+        ])
+        let (vm, _) = try makeViewModel(lyrics: LyricsList(structuredLyrics: [lyrics]))
+        await vm.load()
+        #expect(vm.hasEnglishOnlyLyrics)
+        #expect(!LyricsLanguage.shouldTranslateRow("♪", targetCode: "en"))
+        if AppLanguage.current == .english || LyricsTranslationSettings.shared.targetLanguage == "en" {
+            vm.selectedServerTranslationLang = "ko"
+            #expect(!vm.needsTranslation)
+        }
+    }
+
     @Test func changedTranslationSettingsDiscardOldClientResult() async throws {
         let (vm, _) = try makeViewModel(lyrics: syncedList())
         await vm.load()
@@ -867,6 +884,58 @@ struct LyricsPresentationLifetimeTests {
         #expect(!vm.prefersHiddenChrome)
     }
 
+    #if os(macOS)
+    @Test(arguments: [true, false])
+    func retainedScrollViewRecoversOffsetAfterClosingAndReopening(timed: Bool) async throws {
+        let lyrics = LyricsList(structuredLyrics: [StructuredLyrics(lang: "en", synced: timed,
+            line: (0..<50).map { Line(value: "Verse \($0) with several words", start: timed ? $0 * 1000 : nil) })])
+        let (vm, _) = try makeViewModel(lyrics: lyrics)
+        await vm.load()
+        vm.playerState.playbackState = .paused
+        vm.playerState.position = 25.2
+        if !timed { vm.unsyncedScrollIndex = 25 }
+        let toggle = LyricPresentationTestVisibility()
+        let content = LyricPresentationTestSurface(viewModel: vm, visibility: toggle)
+        let window = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 350, height: 500),
+            styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = NSHostingView(rootView: content)
+        window.orderFront(nil)
+        defer { window.close(); vm.setVisible(false) }
+        func findScroll(_ view: NSView) -> NSScrollView? {
+            if let scroll = view as? NSScrollView { return scroll }
+            return view.subviews.compactMap { findScroll($0) }.first
+        }
+        try await Task.sleep(for: .milliseconds(550))
+        let scroll = try #require(window.contentView.flatMap { findScroll($0) })
+        #expect(scroll.documentVisibleRect.minY > 500)
+        toggle.visible = false
+        try await Task.sleep(for: .milliseconds(100))
+        scroll.contentView.scroll(to: .zero)
+        scroll.reflectScrolledClipView(scroll.contentView)
+        toggle.visible = true
+        try await Task.sleep(for: .milliseconds(550))
+        if timed { #expect(vm.scrollLineIndex == 25) }
+        else { #expect(vm.unsyncedScrollIndex == 25) }
+        #expect(scroll.documentVisibleRect.minY > 500)
+    }
+    #endif
+
+    @Test func reopeningWhilePausedImmediatelyRestoresTheCurrentLyric() async throws {
+        let (vm, _) = try makeViewModel(lyrics: syncedList())
+        await vm.load()
+        vm.playerState.playbackState = .paused
+        vm.setVisible(true)
+        vm.setVisible(false)
+        vm.playerState.position = 2.2
+        let restore = vm.scrollRestoreToken
+        vm.setVisible(true)
+        #expect(vm.scrollLineIndex == 2)
+        #expect(vm.scrollRestoreToken > restore)
+        #expect(vm.trackingTask == nil)
+        vm.setVisible(false)
+    }
+
     @Test func sameSongResumesAfterBackgroundPauseAndPanelChanges() async throws {
         let (vm, _) = try makeViewModel(lyrics: syncedList())
         let host = UUID(), portrait = UUID(), landscape = UUID()
@@ -897,3 +966,16 @@ struct LyricsPresentationLifetimeTests {
         vm.setVisible(false, owner: host)
     }
 }
+
+#if os(macOS)
+@Observable @MainActor private final class LyricPresentationTestVisibility { var visible = true }
+private struct LyricPresentationTestSurface: View {
+    let viewModel: LyricsViewModel
+    var visibility: LyricPresentationTestVisibility
+    var body: some View {
+        LyricsView(viewModel: viewModel, presentationIsVisible: visibility.visible)
+            .opacity(visibility.visible ? 1 : 0)
+            .environment(\.scenePhase, .active)
+    }
+}
+#endif

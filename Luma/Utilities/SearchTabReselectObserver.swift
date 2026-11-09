@@ -10,16 +10,19 @@ import UIKit
 /// Observes re-taps on the Search tab without replacing `UITabBarController.delegate`
 /// (hijacking that delegate breaks SwiftUI `TabView` selection — e.g. Library bouncing to Home).
 struct SearchTabReselectObserver: UIViewControllerRepresentable {
+    var isSearchSelected: Bool
     var onSearchReselect: () -> Void
 
     func makeUIViewController(context: Context) -> UIViewController {
         let controller = UIViewController()
+        context.coordinator.isSearchSelected = isSearchSelected
         context.coordinator.onSearchReselect = onSearchReselect
         context.coordinator.attachIfNeeded(from: controller)
         return controller
     }
 
     func updateUIViewController(_ uiViewController: UIViewController, context: Context) {
+        context.coordinator.isSearchSelected = isSearchSelected
         context.coordinator.onSearchReselect = onSearchReselect
         context.coordinator.attachIfNeeded(from: uiViewController)
     }
@@ -28,11 +31,13 @@ struct SearchTabReselectObserver: UIViewControllerRepresentable {
         Coordinator()
     }
 
-    final class Coordinator: NSObject {
+    final class Coordinator: NSObject, UIGestureRecognizerDelegate {
+        var isSearchSelected = false
+        private var beganOnSelectedSearch = false
         var onSearchReselect: (() -> Void)?
         private weak var tabBar: UITabBar?
+        private weak var tabController: UITabBarController?
         private var tapRecognizer: UITapGestureRecognizer?
-        private var lastSelectedIndex: Int?
 
         override init() {
             super.init()
@@ -51,12 +56,26 @@ struct SearchTabReselectObserver: UIViewControllerRepresentable {
 
                 let recognizer = UITapGestureRecognizer(target: self, action: #selector(handleTap(_:)))
                 recognizer.cancelsTouchesInView = false
+                recognizer.delegate = self
                 bar.addGestureRecognizer(recognizer)
 
+                self.tabController = tab
                 self.tabBar = bar
                 self.tapRecognizer = recognizer
-                self.lastSelectedIndex = tab.selectedIndex
             }
+        }
+
+        func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+            beganOnSelectedSearch = isSearchSelected
+            // iOS can embed the active search field in the tab bar. Typing and
+            // tapping its clear/cancel controls must never request another focus.
+            var view = touch.view
+            while let current = view {
+                if current is UITextInput || current is UISearchBar { return false }
+                if current === tabBar { break }
+                view = current.superview
+            }
+            return true
         }
 
         @objc private func handleTap(_ recognizer: UITapGestureRecognizer) {
@@ -71,12 +90,34 @@ struct SearchTabReselectObserver: UIViewControllerRepresentable {
             guard width > 0 else { return }
             let index = min(items.count - 1, max(0, Int(x / width)))
 
-            // Search uses `Tab(..., role: .search)` and sits on the trailing edge.
-            let isSearch = index == items.count - 1
-            if isSearch, lastSelectedIndex == index {
+            // `Tab(..., role: .search)` is not guaranteed to be the trailing item
+            // on every iOS version. Resolve the real search tab first, then fall
+            // back to the title/icon and finally the historical trailing slot.
+            let isSearch: Bool
+            if #available(iOS 18.0, *),
+               let controller = tabController,
+               controller.tabs.count == items.count,
+               let searchIndex = controller.tabs.firstIndex(where: { $0 is UISearchTab }) {
+                isSearch = index == searchIndex
+            } else {
+                isSearch = Self.isSearchItem(items[index]) || index == items.count - 1
+            }
+
+            if isSearch, beganOnSelectedSearch {
                 onSearchReselect?()
             }
-            lastSelectedIndex = index
+        }
+
+        private static func isSearchItem(_ item: UITabBarItem) -> Bool {
+            let labels = [item.title, item.accessibilityLabel].compactMap { $0 }
+            if labels.contains(where: {
+                $0.localizedCaseInsensitiveContains("search") || $0.contains("검색")
+            }) {
+                return true
+            }
+            guard let image = item.image,
+                  let symbol = UIImage(systemName: "magnifyingglass") else { return false }
+            return image.pngData() == symbol.pngData()
         }
 
         @MainActor

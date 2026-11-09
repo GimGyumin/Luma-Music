@@ -4,15 +4,38 @@ import SwiftUI
 /// Artwork and header stay fixed as the lyrics toolbar appears or disappears.
 nonisolated struct PhoneLandscapePlayerMetrics {
     let size: CGSize
-    var artworkFrame: CGRect {
-        let side = min(size.height * (420.0 / 588.0), size.width * (420.0 / 1280.0))
-        return CGRect(x: size.width * (126.0 / 1280.0), y: size.height * (85.0 / 588.0), width: side, height: side)
+    var safeAreaInsets: EdgeInsets
+
+    init(size: CGSize, safeAreaInsets: EdgeInsets = EdgeInsets()) {
+        self.size = size
+        self.safeAreaInsets = safeAreaInsets
     }
+
+    /// Layout is expressed as fractions of the *usable* viewport, not a fixed
+    /// device resolution. Dynamic Island, camera housing and the home indicator
+    /// shrink the content rectangle instead of being covered by controls.
+    private var contentWidth: CGFloat {
+        max(0, size.width - safeAreaInsets.leading - safeAreaInsets.trailing)
+    }
+
+    private var contentHeight: CGFloat {
+        max(0, size.height - safeAreaInsets.top - safeAreaInsets.bottom)
+    }
+
+    var artworkFrame: CGRect {
+        let side = min(contentHeight * (420.0 / 588.0), contentWidth * (420.0 / 1280.0))
+        return CGRect(x: safeAreaInsets.leading + contentWidth * (126.0 / 1280.0),
+                      y: safeAreaInsets.top + contentHeight * (85.0 / 588.0),
+                      width: side, height: side)
+    }
+
     var controlsFrame: CGRect {
-        let x = max(size.width * (600.0 / 1280.0), artworkFrame.maxX + 24)
-        let top = size.height * (100.0 / 588.0)
-        return CGRect(x: x, y: top, width: max(0, size.width - x - size.width * (106.0 / 1280.0)),
-                      height: max(0, size.height - top))
+        let left = safeAreaInsets.leading
+        let x = max(left + contentWidth * (600.0 / 1280.0), artworkFrame.maxX + 24)
+        let top = safeAreaInsets.top + contentHeight * (100.0 / 588.0)
+        return CGRect(x: x, y: top,
+                      width: max(0, left + contentWidth - x - contentWidth * (106.0 / 1280.0)),
+                      height: max(0, safeAreaInsets.top + contentHeight - top))
     }
 }
 
@@ -22,7 +45,8 @@ struct PhoneLandscapePlayerColumns<Artwork: View, Controls: View>: View {
 
     var body: some View {
         GeometryReader { geometry in
-            let metrics = PhoneLandscapePlayerMetrics(size: geometry.size)
+            let metrics = PhoneLandscapePlayerMetrics(size: geometry.size,
+                                                       safeAreaInsets: geometry.safeAreaInsets)
             let cover = metrics.artworkFrame
             let panel = metrics.controlsFrame
             ZStack(alignment: .topLeading) {

@@ -6,49 +6,50 @@
 import SwiftUI
 import WidgetKit
 
-/// Apple Music–style medium Now Playing: blurred art backdrop, lifted square cover, clean type, round control.
+/// Medium Now Playing: lifted square cover on the left, now-playing label, type and pill.
 struct NowPlayingMediumView: View {
     let entry: NowPlayingEntry
 
     var body: some View {
-        HStack(spacing: 14) {
-            WidgetCoverArtView(image: entry.coverImage, cornerRadius: 12)
-                .frame(width: 108, height: 108)
-                .shadow(color: .black.opacity(0.4), radius: 14, y: 8)
+        Group {
+            if let track = entry.track {
+                HStack(spacing: 14) {
+                    WidgetCoverArtView(image: entry.coverImage, cornerRadius: 11)
+                        .frame(width: 112, height: 112)
 
-            VStack(alignment: .leading, spacing: 3) {
-                if let track = entry.track {
-                    Text(track.title)
-                        .font(.system(size: 17, weight: .semibold))
-                        .foregroundStyle(.white)
-                        .lineLimit(2)
-                    Text(track.artist)
-                        .font(.system(size: 14, weight: .regular))
-                        .foregroundStyle(.white.opacity(0.78))
-                        .lineLimit(1)
-                } else {
-                    Text("Not Playing")
-                        .font(.system(size: 17, weight: .semibold))
-                        .foregroundStyle(.white)
-                    Text("Open Luma to play")
-                        .font(.system(size: 13, weight: .regular))
-                        .foregroundStyle(.white.opacity(0.7))
-                }
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(WidgetChrome.nowPlaying)
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(.primary.opacity(0.58))
+                            .lineLimit(1)
 
-                Spacer(minLength: 0)
+                        Text(track.title)
+                            .font(.system(size: 18, weight: .semibold))
+                            .foregroundStyle(.primary)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.8)
 
-                HStack {
+                        Text(track.artist)
+                            .font(.system(size: 14))
+                            .foregroundStyle(.primary.opacity(0.62))
+                            .lineLimit(1)
+
+                        WidgetPlayPillButton(isPlaying: entry.isPlaying, height: 28)
+                            .padding(.top, 5)
+                    }
+                    .padding(.trailing, 22)
+
                     Spacer(minLength: 0)
-                    WidgetPlayButton(isPlaying: entry.isPlaying)
-                        .environment(\.colorScheme, .dark)
                 }
+                .overlay(alignment: .topTrailing) {
+                    WidgetMusicNote(size: 20)
+                }
+            } else {
+                NowPlayingEmptyState()
             }
-
-            Spacer(minLength: 0)
         }
-        .padding(.leading, 4)
         .containerBackground(for: .widget) {
-            WidgetReadableBackground(dominantColor: entry.dominantColor, image: entry.coverImage)
+            WidgetCardBackground(tint: entry.track == nil ? nil : entry.dominantColor)
         }
     }
 }

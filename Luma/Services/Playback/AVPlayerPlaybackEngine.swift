@@ -1,6 +1,7 @@
 import Foundation
 import AVFoundation
 import AudioStreaming
+import QuartzCore
 import OSLog
 
 /// Owns the native queue, observations, buffering and transport. PlayerService owns queue metadata.
@@ -8,7 +9,7 @@ import OSLog
 nonisolated final class AVPlayerPlaybackEngine: PlaybackEngine, @unchecked Sendable {
     enum Event: Sendable {
         case itemChanged(UInt64)
-        case ended(UInt64, ObjectIdentifier)
+        case ended(UInt64, ObjectIdentifier, itemTime: Double? = nil)
         case failed(UInt64, ObjectIdentifier, PlaybackFailure)
         case timeControl(UInt64, Int)
         case stalled(UInt64)
@@ -21,8 +22,17 @@ nonisolated final class AVPlayerPlaybackEngine: PlaybackEngine, @unchecked Senda
     private var player: AVQueuePlayer?
     private var queuedItem: AVPlayerItem?
     private var queuedURL: URL?
-    private var currentURL: URL?
-    private var observedID: ObjectIdentifier?
+    private var currentHeaders: [String: String] = [:]
+    private var queuedHeaders: [String: String] = [:]
+    private var spectrumFileURL: URL?
+    private var currentURL: URL? {
+        didSet {
+            if oldValue.map(Self.spectrumIdentity) != currentURL.map(Self.spectrumIdentity) {
+                spectrumFileURL = nil
+            }
+        }
+    }
+    private var observedItem: AVPlayerItem?
     private var generation: UInt64 = 0
     private var statusObservation: NSKeyValueObservation?
     private var bufferObservation: NSKeyValueObservation?
@@ -59,6 +69,7 @@ nonisolated final class AVPlayerPlaybackEngine: PlaybackEngine, @unchecked Senda
         let player: AVQueuePlayer
         let item: AVPlayerItem
         let url: URL
+        let headers: [String: String]
         let outgoingID: ObjectIdentifier
         let offset: Double
         var seekFinished: Bool?
@@ -67,9 +78,75 @@ nonisolated final class AVPlayerPlaybackEngine: PlaybackEngine, @unchecked Senda
         var inspectionFinished = false
         var inspectionTask: Task<Void, Never>?
         var meter: NativePlaybackMeterTap?
-        init(player: AVQueuePlayer, item: AVPlayerItem, url: URL, outgoingID: ObjectIdentifier, offset: Double) {
-            self.player = player; self.item = item; self.url = url
+        init(player: AVQueuePlayer, item: AVPlayerItem, url: URL, headers: [String: String], outgoingID: ObjectIdentifier, offset: Double) {
+            self.player = player; self.item = item; self.url = url; self.headers = headers
             self.outgoingID = outgoingID; self.offset = offset
+        }
+    }
+
+    /// Snapshot for independent analysis of local/cached audio, without installing an audio mix.
+    /// Reuse the completed cache file for analysis at the native item's clock.
+    /// Never attach a second mixer tap to a gapless item.
+    func provideSpectrumFile(_ file: URL, forStream stream: URL) {
+        lock.withLock {
+            guard file.isFileURL, !stream.isFileURL, let currentURL,
+                  Self.spectrumIdentity(currentURL) == Self.spectrumIdentity(stream) else { return }
+            spectrumFileURL = file
+        }
+    }
+
+    /// OpenSubsonic offset requests are slices of the same song. Authentication,
+    /// song id, server and format remain part of the identity.
+    private static func spectrumIdentity(_ url: URL) -> URL {
+        guard !url.isFileURL, var parts = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return url }
+        let query = parts.queryItems?.filter { $0.name.lowercased() != "timeoffset" }
+        parts.queryItems = query?.isEmpty == true ? nil : query
+        return parts.url ?? url
+    }
+
+    private static func spectrumOffset(_ url: URL) -> Double {
+        guard !url.isFileURL else { return 0 }
+        let value = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?
+            .first { $0.name.lowercased() == "timeoffset" }?.value.flatMap(Double.init) ?? 0
+        return value.isFinite ? max(0, value) : 0
+    }
+
+    var analysisClock: PlaybackAnalysisClock? {
+        lock.withLock {
+            guard let player, let item = player.currentItem else { return nil }
+            let position = item.currentTime().seconds
+            guard position.isFinite else { return nil }
+            return PlaybackAnalysisClock(position: position, hostTime: CACurrentMediaTime(),
+                itemID: ObjectIdentifier(item), generation: generation, seekSequence: seekSequence,
+                playing: intendsToPlay && player.timeControlStatus == .playing && pendingSeek == nil && executingSeek == nil)
+        }
+    }
+
+    var analysisSource: NativePlaybackAnalysisSource? {
+        lock.withLock {
+            guard !allowsAudioAnalysis, spectrumFileURL == nil,
+                  currentURL?.isFileURL == false, intendsToPlay,
+                  pendingSeek == nil, executingSeek == nil,
+                  let player, player.timeControlStatus == .playing,
+                  let item = observedItem, item === player.currentItem, let url = currentURL else { return nil }
+            let position = item.currentTime().seconds
+            guard position.isFinite, position >= 0 else { return nil }
+            return NativePlaybackAnalysisSource(item: item, url: url, headers: currentHeaders, position: position,
+                generation: generation, seekSequence: seekSequence)
+        }
+    }
+
+    var spectrumSource: PlaybackSpectrumSource? {
+        lock.withLock {
+            guard intendsToPlay, pendingSeek == nil, executingSeek == nil,
+                  let player, player.timeControlStatus == .playing,
+                  let item = observedItem, item === player.currentItem,
+                  let playingURL = currentURL,
+                  let url = playingURL.isFileURL ? playingURL : spectrumFileURL else { return nil }
+            let position = item.currentTime().seconds
+            guard position.isFinite, position >= 0 else { return nil }
+            return PlaybackSpectrumSource(url: url, position: position + Self.spectrumOffset(playingURL),
+                itemID: ObjectIdentifier(item), generation: generation, seekSequence: seekSequence)
         }
     }
 
@@ -109,8 +186,27 @@ nonisolated final class AVPlayerPlaybackEngine: PlaybackEngine, @unchecked Senda
             }
         }
     }
-    var progress: Double { lock.withLock { Self.finite(player?.currentItem?.currentTime().seconds) } }
-    var duration: Double { lock.withLock { Self.finite(player?.currentItem?.duration.seconds) } }
+    // AVQueuePlayer may already expose the successor (or nil) before the service
+    // commits its title and index. Keep external position reads on the acknowledged item.
+    var progress: Double { lock.withLock { Self.finite(observedItem?.currentTime().seconds) } }
+    var currentItemProgress: Double? {
+        lock.withLock {
+            guard let item = observedItem, player?.currentItem === item else { return nil }
+            let position = item.currentTime().seconds
+            return position.isFinite ? max(0, position) : nil
+        }
+    }
+    var unacknowledgedEndID: ObjectIdentifier? {
+        lock.withLock {
+            guard let player, let observedItem, observedItem.status == .readyToPlay else { return nil }
+            let current = player.currentItem
+            // Queue edits can discard our prepared successor just after AVQueuePlayer
+            // selects it. The acknowledged item has still ended in that case.
+            guard current == nil || (current !== observedItem && queuedItem == nil) else { return nil }
+            return ObjectIdentifier(observedItem)
+        }
+    }
+    var duration: Double { lock.withLock { Self.finite(observedItem?.duration.seconds) } }
     var isSeekable: Bool { lock.withLock { player?.currentItem?.duration.isNumeric == true } }
     var volume: Float {
         get { lock.withLock { storedVolume } }
@@ -121,8 +217,9 @@ nonisolated final class AVPlayerPlaybackEngine: PlaybackEngine, @unchecked Senda
         } }
     }
     var hasCurrentItem: Bool { lock.withLock { player?.currentItem != nil } }
+    var hasSelectedQueuedItem: Bool { lock.withLock { queuedItem != nil && player?.currentItem === queuedItem } }
     var hasQueuedItem: Bool { lock.withLock { queuedItem != nil } }
-    var observedItemID: ObjectIdentifier? { lock.withLock { observedID } }
+    var observedItemID: ObjectIdentifier? { lock.withLock { observedItem.map(ObjectIdentifier.init) } }
     var timeControlStatus: AVPlayer.TimeControlStatus { lock.withLock { player?.timeControlStatus ?? .paused } }
     var bufferedDuration: Double {
         lock.withLock {
@@ -155,6 +252,7 @@ nonisolated final class AVPlayerPlaybackEngine: PlaybackEngine, @unchecked Senda
             self.promptStartupBuffer = promptStartupBuffer
             intendsToPlay = !paused
             let item = makeMeteredItem(url: url, headers: headers)
+            if let promptStartupBuffer { item.preferredForwardBufferDuration = promptStartupBuffer }
             let player = retainedPlayer ?? AVQueuePlayer()
             player.insert(item, after: nil)
             player.allowsExternalPlayback = true
@@ -165,6 +263,7 @@ nonisolated final class AVPlayerPlaybackEngine: PlaybackEngine, @unchecked Senda
             #endif
             self.player = player
             currentURL = url
+            currentHeaders = headers
             observeItem(item, generation: generation)
             observePlayerLocked(player, generation: generation)
             if position > 0 {
@@ -197,16 +296,17 @@ nonisolated final class AVPlayerPlaybackEngine: PlaybackEngine, @unchecked Senda
 
     @discardableResult func prepareNext(url: URL, headers: [String: String]) -> Bool {
         lock.withLock {
-            guard let player, player.currentItem != nil else { return false }
+            guard let player, let current = player.currentItem, current === observedItem else { return false }
             cancelQueuedItemLocked()
             // Preparing a next item opts into continuous playback, including when gapless
             // was enabled during an already-playing item. Never add an analysis mix here.
             let item = Self.makeItem(url: url, headers: headers)
             item.preferredForwardBufferDuration = 5
-            guard player.canInsert(item, after: player.currentItem) else { return false }
+            guard player.canInsert(item, after: current) else { return false }
             queuedItem = item
             queuedURL = url
-            player.insert(item, after: player.currentItem)
+            queuedHeaders = headers
+            player.insert(item, after: current)
             return true
         }
     }
@@ -220,6 +320,7 @@ nonisolated final class AVPlayerPlaybackEngine: PlaybackEngine, @unchecked Senda
         }
         queuedItem = nil
         queuedURL = nil
+        queuedHeaders = [:]
     }
 
     /// Acknowledge exactly one native handover without restarting the new item.
@@ -227,6 +328,8 @@ nonisolated final class AVPlayerPlaybackEngine: PlaybackEngine, @unchecked Senda
         lock.withLock {
             guard let item = queuedItem, player?.currentItem === item else { return false }
             currentURL = queuedURL
+            currentHeaders = queuedHeaders
+            queuedHeaders = [:]
             queuedItem = nil; queuedURL = nil
             allowsAudioAnalysis = false
             observeItem(item, generation: generation)
@@ -339,7 +442,7 @@ nonisolated final class AVPlayerPlaybackEngine: PlaybackEngine, @unchecked Senda
         for meter in meters.values { meter.setActive(false) }
         meters.removeAll()
         if let endObserver { NotificationCenter.default.removeObserver(endObserver) }
-        endObserver = nil; observedID = nil
+        endObserver = nil; observedItem = nil
         player?.pause()
         let removedItems = player?.items() ?? []
         for item in removedItems { item.cancelPendingSeeks() }
@@ -352,6 +455,7 @@ nonisolated final class AVPlayerPlaybackEngine: PlaybackEngine, @unchecked Senda
         }
         player?.removeAllItems(); player = nil
         queuedItem = nil; queuedURL = nil; currentURL = nil
+        currentHeaders = [:]; queuedHeaders = [:]
         seekDeadline = .distantPast
     }
     private func observeItem(_ item: AVPlayerItem, generation: UInt64) {
@@ -365,10 +469,12 @@ nonisolated final class AVPlayerPlaybackEngine: PlaybackEngine, @unchecked Senda
         for (key, meter) in meters { meter.setActive(key == id) }
         // Release the completed item's tap while retaining the prebuffered next item.
         meters = meters.filter { $0.key == id || $0.key == queuedItem.map(ObjectIdentifier.init) }
-        observedID = id
+        observedItem = item
         let emit = handler
-        endObserver = NotificationCenter.default.addObserver(forName: .AVPlayerItemDidPlayToEndTime, object: item, queue: .main) { _ in
-            emit?(.ended(generation, id))
+        endObserver = NotificationCenter.default.addObserver(forName: .AVPlayerItemDidPlayToEndTime, object: item, queue: nil) { note in
+            // The queue may already have advanced or drained by the next progress tick.
+            let time = (note.object as? AVPlayerItem)?.currentTime().seconds
+            emit?(.ended(generation, id, itemTime: time))
         }
         statusObservation = item.observe(\.status, options: [.initial, .new]) { [weak self] item, _ in
             self?.observationQueue.async { [weak self] in
@@ -566,7 +672,7 @@ nonisolated final class AVPlayerPlaybackEngine: PlaybackEngine, @unchecked Senda
             #if os(iOS)
             next.audiovisualBackgroundPlaybackPolicy = .continuesIfPossible
             #endif
-            let prepared = QualityReplacement(player: next, item: nextItem, url: url,
+            let prepared = QualityReplacement(player: next, item: nextItem, url: url, headers: headers,
                                                outgoingID: ObjectIdentifier(item), offset: timelineOffset)
             qualityReplacement = prepared
             qualityPreparationStage = "loading"
@@ -738,6 +844,7 @@ nonisolated final class AVPlayerPlaybackEngine: PlaybackEngine, @unchecked Senda
             generation = retainedGeneration
             player = replacement.player
             currentURL = replacement.url
+            currentHeaders = replacement.headers
             intendsToPlay = true
             allowsAudioAnalysis = analysis
             forwardBuffer = 5

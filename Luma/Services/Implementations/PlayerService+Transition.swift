@@ -38,6 +38,7 @@ extension PlayerService {
               stopBarrierCount == 0, tracks.indices.contains(startIndex) else { return }
         if explicitRequest { clearInterruptionForExplicitPlayback() }
         guard !transport.interrupted else { return }
+        playbackRequestStartedAt = Date()
         recordPlaybackDiagnostic(event: "play_request", source: explicitRequest ? "explicit_selection" : "queue_advance", target: 0)
         transportCommandID &+= 1
         let selectionCommand = transportCommandID
@@ -135,6 +136,7 @@ extension PlayerService {
             return
         }
         try Task.checkCancellation()
+        telemetry.beginRequest()
         playbackAcquisitionTask?.cancel()
         playbackAcquisitionTask = nil
         if await advancePreparedSystemTrack(tracks: tracks, startIndex: startIndex) { return }
@@ -190,7 +192,7 @@ extension PlayerService {
         // resolve. A hand-over that kept the previous track audible until the new item started reads as
         // "the old song is still playing", which is worse than a short gap.
         stopEngine()
-        currentSource = nil
+        await replaceCurrentSource(nil)
         // The progress ticker keeps running (it also drives scrobbling, prefetch and fade-out), but
         // it stops *attributing* the outgoing engine's clock to the incoming track while the flag
         // above is set — see `startProgressTimer`. That was the bug behind a skip showing the
@@ -217,6 +219,13 @@ extension PlayerService {
             state.playbackState = .loading
             return true
         }) else { return }
+
+        #if os(iOS)
+        // Warm/activate the audio session while the URL resolver talks to the
+        // server. This removes the route/category activation from the critical
+        // path between "source resolved" and "first audio".
+        configureAudioSessionIfNeeded(preferMultichannel: true)
+        #endif
 
         // URL resolution happens before the engine's acquisition watchdog exists.
         // Bound this phase too, including a resolver that is slow to honor cancellation.
@@ -386,22 +395,6 @@ extension PlayerService {
         await applyReplayGain(track: source.playbackSong ?? song, config: config, context: context)
         guard epoch == playbackEpoch, !Task.isCancelled else { return }
 
-        // Change the visible track immediately, but keep playback in `.loading` until the
-        // engine has been started below.
-        guard await commitPresentation(context, { state in
-            state.currentTrack = song
-            state.duration = song.duration
-            state.position = 0
-            state.pendingSeekPosition = nil
-            // Keep the scrubber usable while the streaming parser is still discovering
-            // its own duration. We already have a finite catalog duration and the engine
-            // can queue an early seek request until parsing catches up.
-            state.isSeekable = song.duration > 0
-            state.playbackState = .loading
-            return true
-        }) else { return }
-        guard epoch == playbackEpoch, !Task.isCancelled else { return }
-
         let songId = source.playbackSong?.id ?? song.id
         if Self.isListeningHistoryEnabled {
             Task { [libraryService] in
@@ -429,7 +422,7 @@ extension PlayerService {
         seekNeedsCommit = false
         liveStreamStallTask?.cancel()
         liveStreamStallTask = nil
-        currentSource = source
+        await replaceCurrentSource(source)
         pendingRestoreInfo = nil
 
         restorePauseTask?.cancel()
@@ -438,10 +431,6 @@ extension PlayerService {
             setEngineVolume(restoredVolume)
             isMutedForRestore = false
         }
-
-        #if os(iOS)
-        configureAudioSessionIfNeeded(preferMultichannel: useSystemPlayer)
-        #endif
 
         let fadingInAllowed: Bool
         #if os(iOS)
@@ -483,12 +472,17 @@ extension PlayerService {
         pendingSelectionCommand = nil
         resetTrackAccumulator(isPlaying: false)
         pendingFadeInDuration = fadingInAllowed ? crossfadeConfig.duration : nil
+        let preferredSampleRate = AudioQualityClassifier.nativePlaybackSampleRate(
+            for: source.playbackSong ?? song,
+            source: source
+        )
         startEnginePlayback(
             url: source.url,
             headers: source.customHeaders,
             useSystemPlayer: useSystemPlayer,
             isLimitedNetwork: isLimitedNetwork,
-            initialVolume: fadingInAllowed ? 0 : nil
+            initialVolume: fadingInAllowed ? 0 : nil,
+            preferredSampleRate: preferredSampleRate
         )
         if let context = source.jellyfinPlaybackContext {
             Task { [weak self] in await self?.reportJellyfinStarted(context, position: 0) }
@@ -504,8 +498,19 @@ extension PlayerService {
         startProgressTimer()
         schedulePlaybackAcquisitionRecovery(song: song, serverId: serverId, epoch: epoch)
 
-        // Audio is already starting. Artwork credentials and MediaSession/Siri registration
-        // must not hold up the first frame, including cold starts and cached playback.
+        startPositionSaveTimer()
+        // The outgoing EOF handler must release the queue before artwork or a server
+        // playback report can suspend. The next selection cancels this track's work.
+        trackMetadataTask = Task { [weak self] in
+            await self?.finishTrackMetadata(song: song, source: source, serverId: serverId,
+                                            publication: publication)
+        }
+    }
+
+    private func finishTrackMetadata(song: DisplayableSong, source: MediaSource, serverId: UUID,
+                                     publication: PlaybackPublication) async {
+        let epoch = publication.context.epoch
+        guard epoch == playbackEpoch, !Task.isCancelled else { return }
         let artworkURL = await resolveArtworkURL(for: song)
         guard epoch == playbackEpoch, !Task.isCancelled else { return }
         let artworkHeaders: [String: String]
@@ -525,7 +530,7 @@ extension PlayerService {
             title: song.title,
             artist: song.artist,
             album: song.albumName,
-            duration: duration,
+            duration: song.duration,
             position: engineProgress(),
             playbackRate: nowPlayingState.2 ? 1.0 : 0,
             artworkURL: artworkURL,
@@ -552,11 +557,13 @@ extension PlayerService {
             await self?.resolveAndPublishISRC(for: song)
         }
         await saveSession()
-        startPositionSaveTimer()
+        guard epoch == playbackEpoch, !Task.isCancelled else { return }
         preloadNextTrackArtwork()
         await evaluateAutoExtend()
+        guard epoch == playbackEpoch, !Task.isCancelled else { return }
         // Single widget entry on track start — onPlayStateChanged would redo cover/color work.
         await publishWidgetStatus(recordTrackStart: true)
+        guard contextIsCurrent(publication.context), transport.permitsAudio else { return }
         await reportOpenSubsonicPlayback(state: .playing, songId: song.id, positionMs: 0)
     }
 

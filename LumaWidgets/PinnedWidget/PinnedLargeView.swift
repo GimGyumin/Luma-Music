@@ -19,37 +19,49 @@ struct PinnedLargeView: View {
     var body: some View {
         Group {
             if entry.items.isEmpty {
-                emptyState
+                PinnedEmptyState()
             } else {
-                VStack(alignment: .leading, spacing: 12) {
-                    Text("Pins")
-                        .font(.system(size: 15, weight: .semibold))
-                    LazyVGrid(columns: columns, spacing: 14) {
+                VStack(alignment: .leading, spacing: 10) {
+                    WidgetSectionHeader(
+                        title: WidgetChrome.text(korean: "고정", english: "Pinned"),
+                        noteSize: 19
+                    )
+
+                    LazyVGrid(columns: columns, spacing: 12) {
                         ForEach(entry.items.prefix(6), id: \.id) { item in
                             PinnedTileView(
                                 item: item,
                                 image: entry.coverImages[item.coverArtFilename ?? ""],
-                                coverSize: 92
+                                coverSize: 88,
+                                titleSize: 13
                             )
                         }
                     }
+
                     Spacer(minLength: 0)
                 }
             }
         }
         .containerBackground(for: .widget) {
-            Color.clear
+            WidgetCardBackground()
         }
     }
+}
 
-    private var emptyState: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("Pins")
-                .font(.system(size: 17, weight: .semibold))
-            Text("Pin albums or playlists in Luma")
-                .font(.system(size: 13))
-                .foregroundStyle(.secondary)
+struct PinnedEmptyState: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            WidgetMusicNote(size: 22)
             Spacer(minLength: 0)
+            Text(WidgetChrome.text(korean: "고정한 항목이 없어요", english: "Nothing pinned yet"))
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(.primary)
+            Text(WidgetChrome.text(
+                korean: "Luma에서 앨범이나 재생목록을 고정해 보세요.",
+                english: "Pin albums or playlists in Luma."
+            ))
+            .font(.system(size: 12))
+            .foregroundStyle(.primary.opacity(0.6))
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }

@@ -3,6 +3,7 @@
 // Licensed under the Mozilla Public License 2.0.
 // See LICENSE file in the project root for full license information.
 
+import Combine
 import SwiftUI
 import SwiftData
 import OSLog
@@ -18,6 +19,7 @@ struct LumaApp: App {
     @UIApplicationDelegateAdaptor(LumaAppDelegate.self) private var appDelegate
     #endif
 
+    @AppStorage(ReplayHistorySync.enabledKey) private var replayEnabled = true
     @State private var container: AppContainer?
     @State private var bootFailureMessage: String?
     @State private var bootAttempt = 0
@@ -32,9 +34,12 @@ struct LumaApp: App {
     /// Set once the container exists. Runs one library-preparation pass when iOS grants a
     /// background window, which is the only way a long cover pass can continue off-screen.
     @MainActor private static var _bgLibraryPreparation: (@MainActor () async -> Void)?
+    @MainActor private static var _bgCacheMaintenance: (@MainActor () async -> Void)?
     #endif
 
     init() {
+        DiagnosticsBootstrap.start()
+        DiagnosticsLifecycle.beginAppLaunch()
         RuntimeDiagnostics.mark(.appInit)
         // Start the battery / thermal policy before the first view body runs, so no frame is ever
         // rendered with the placeholder budget.
@@ -90,6 +95,31 @@ struct LumaApp: App {
             }
             processingTask.expirationHandler = { workTask.cancel() }
         }
+        BGTaskScheduler.shared.register(
+            forTaskWithIdentifier: "app.luma.cache.maintenance",
+            using: nil
+        ) { task in
+            guard let processingTask = task as? BGProcessingTask else {
+                task.setTaskCompleted(success: false)
+                LumaApp.scheduleCacheMaintenance()
+                return
+            }
+            let workTask = Task { @MainActor in
+                defer { processingTask.expirationHandler = nil }
+                guard !Task.isCancelled, let maintain = LumaApp._bgCacheMaintenance else {
+                    processingTask.setTaskCompleted(success: false)
+                    LumaApp.scheduleCacheMaintenance()
+                    return
+                }
+                await maintain()
+                processingTask.setTaskCompleted(success: !Task.isCancelled)
+                LumaApp.scheduleCacheMaintenance()
+            }
+            processingTask.expirationHandler = {
+                workTask.cancel()
+                LumaApp.scheduleCacheMaintenance()
+            }
+        }
         #endif
     }
 
@@ -114,14 +144,33 @@ struct LumaApp: App {
         request.earliestBeginDate = Date().addingTimeInterval(24 * 3600)
         try? BGTaskScheduler.shared.submit(request)
     }
+
+    /// Opportunistic only: iOS decides whether and when this runs. The cache
+    /// coordinator still refuses to touch files while playback has intent.
+    static func scheduleCacheMaintenance() {
+        let request = BGProcessingTaskRequest(identifier: "app.luma.cache.maintenance")
+        request.requiresNetworkConnectivity = false
+        request.requiresExternalPower = false
+        request.earliestBeginDate = Date().addingTimeInterval(6 * 3600)
+        try? BGTaskScheduler.shared.submit(request)
+    }
     #endif
+
+    private var replayTaskKey: String {
+        let state = container?.serverState
+        return [state?.activeServer?.replayProfile ?? "", String(scenePhase == .active),
+                String(state?.isOnline == true && state?.isServerReachable == true), String(replayEnabled)].joined(separator: "|")
+    }
 
     var body: some Scene {
         WindowGroup {
             Group {
                 if let container {
                     RootView()
-                        .onAppear { RuntimeDiagnostics.mark(.rootAppeared) }
+                        .onAppear {
+                            RuntimeDiagnostics.mark(.rootAppeared)
+                            DiagnosticsLifecycle.finishColdStart()
+                        }
                         .modifier(AccountVerificationLaunchPrompt())
                         .accessibilityIdentifier("luma.content")
                         // .toastOverlay() must be the INNERMOST modifier: a toast pill now renders a
@@ -158,6 +207,9 @@ struct LumaApp: App {
                 }
             }
             .modifier(NativeSearchLifecycle(container: container))
+            .onReceive(NotificationCenter.default.publisher(for: .lumaDownloadCompleted)) { _ in
+                container?.streamingCacheMaintenance.scheduleIfNeeded()
+            }
             .tint(LumaColors.accent)
             .environment(\.locale, appLocale)
             .onAppear {
@@ -204,6 +256,7 @@ struct LumaApp: App {
                 // Publish immediately so RootView can replace the solid boot screen with its loader
                 // while setup / persisted-server load continue.
                 container = newContainer
+                MemoryFootprintProbe.report("container_published")
                 #if os(iOS)
                 // Grants a background window that runs one preparation pass, so a long cover sync
                 // can continue off-screen when iOS allows it.
@@ -228,6 +281,11 @@ struct LumaApp: App {
                         coverPreload: newContainer.albumCoverPreloadService
                     )
                 }
+                LumaApp._bgCacheMaintenance = {
+                    guard !Task.isCancelled else { return }
+                    _ = await newContainer.streamingCacheMaintenance.runIfNeeded()
+                }
+                LumaApp.scheduleCacheMaintenance()
                 #endif
                 Logger.boot.notice("🟡 container published (UI can leave solid launch screen)")
 
@@ -269,8 +327,10 @@ struct LumaApp: App {
                 // Session restore waits for Home's first list so it doesn't compete for the Subsonic client.
                 Task(priority: .utility) {
                     await AppBootGate.waitForHome()
+                    let restoreTrace = DiagnosticsCenter.shared.begin(.restoreSession)
                     Logger.boot.notice("🟡 restoreSession() start")
                     await newContainer.playerService.restoreSession()
+                    restoreTrace.finish(Task.isCancelled ? .cancelled : .success)
                     Logger.boot.notice("🟡 restoreSession() done")
                 }
                 // Warm the Siri catalog (song store + Spotlight) once per server so the
@@ -334,6 +394,25 @@ struct LumaApp: App {
                 }
             }
             #endif
+            .task(id: replayTaskKey) {
+                guard scenePhase == .active, let c = container, let account = c.serverState.activeServer,
+                      c.serverState.isOnline, c.serverState.isServerReachable else { return }
+                // Replay sync is background maintenance; do not compete with the
+                // first remote audio frame on a cold restore. Session restoration
+                // publishes its playback intent slightly after launch, so give it
+                // a short grace before checking the first-audio gate.
+                try? await Task.sleep(for: .seconds(2))
+                guard !Task.isCancelled else { return }
+                await PlaybackStartupGate.waitForFirstAudio(c.playerState)
+                guard !Task.isCancelled else { return }
+                try? await c.replayHistory.flushIfOnline(account)
+                while replayEnabled && !Task.isCancelled {
+                    if !ProcessInfo.processInfo.isLowPowerModeEnabled && !c.serverState.isLimitedNetwork {
+                        _ = await c.replayHistory.sync(minimumInterval: 600)
+                    }
+                    do { try await Task.sleep(for: .seconds(600)) } catch { return }
+                }
+            }
             .task(id: container?.serverState.isOnline) {
                 guard let c = container, c.serverState.isOnline else { return }
                 await c.playerService.handleNetworkRestored()
@@ -345,6 +424,12 @@ struct LumaApp: App {
                 guard let c = container, c.serverState.isServerReachable else { return }
                 await c.playerService.handleNetworkRestored()
                 await c.listenBrainzService.flushOfflineQueue()
+            }
+            .task(id: "\(scenePhase == .active)-\(container?.serverState.accountRevision ?? 0)") {
+                guard scenePhase == .active, let c = container else { return }
+                // No timer: this runs on activation and is gated by the cache's
+                // six-hour due date. Playback intent is checked again inside.
+                c.streamingCacheMaintenance.scheduleIfNeeded()
             }
             #if os(macOS)
             .frame(minHeight: 580)
@@ -387,8 +472,10 @@ struct LumaApp: App {
             // The reachability poll is pointless while suspended, and a resume should re-ping before
             // the server-backed tabs redraw rather than show a stale "unreachable" state.
             c.serverReachabilityMonitor.isAppActive = newPhase != .background
+            let isWarmStart = oldPhase == .background
             switch newPhase {
             case .active:
+                if isWarmStart { DiagnosticsLifecycle.beginWarmStart() }
                 Task(priority: .utility) {
                     await (c.downloadService as? DownloadService)?.recoverBackgroundDownloads()
                 }
@@ -403,6 +490,9 @@ struct LumaApp: App {
                     await c.playerService.handleAppBecameActive()
                     // CR-01: re-enable skip/previous after sleep so CarPlay / lock screen respond.
                     await c.nowPlayingService.reassertRemoteCommands()
+                    if isWarmStart {
+                        DiagnosticsLifecycle.finishWarmStart(result: Task.isCancelled ? .cancelled : .success)
+                    }
                 }
                 Task(priority: .utility) {
                     let previousRG = c.replayGainSettings.config

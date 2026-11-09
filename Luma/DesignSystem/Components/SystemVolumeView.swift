@@ -15,6 +15,12 @@ import MediaPlayer
 /// only for user-posted `userTarget` values (no KVO feedback loop).
 struct SystemVolumeView: View {
     var contentColor: Color = .white
+    /// Artwork-derived tint for the unfilled track; nil keeps the white-alpha
+    /// track used by the standard/wide players.
+    var trackTint: Color? = nil
+    var sliderHeight: CGFloat = 36
+    var sliderTrackHeight: CGFloat = 6
+    var sliderActiveTrackHeight: CGFloat = 14
 
     #if os(iOS)
     @State private var observer = SystemVolumeObserver()
@@ -34,11 +40,13 @@ struct SystemVolumeView: View {
             ),
             total: 1.0,
             onEditingChanged: { editing in observer.setEditing(editing) },
-            trackColor: contentColor.opacity(0.22),
+            trackColor: trackTint?.opacity(0.45) ?? contentColor.opacity(0.22),
             fillColor: contentColor,
-            height: 36,
-            trackHeight: 6,
-            activeTrackHeight: 28,
+            height: sliderHeight,
+            trackHeight: sliderTrackHeight,
+            // Match Music's restrained active state: a modest thicker white fill,
+            // not the previous 28pt grey capsule that dominated the player footer.
+            activeTrackHeight: sliderActiveTrackHeight,
             dragMinimumDistance: 0,
             // A tap only shows the active bar — it must not slam the volume to that position.
             ignoresTapForValueChange: true

@@ -33,6 +33,20 @@ nonisolated enum SiriBridge {
     /// Resolves the playlist service (for add-to-playlist).
     nonisolated(unsafe) static var playlistProvider: (@Sendable () async -> (any PlaylistServiceProtocol)?)?
 
+    /// Resolves the local listening-history service for Siri's history tools.
+    nonisolated(unsafe) static var statsProvider: (@Sendable () async -> StatsService?)?
+
+    /// Resolves the live library service for starred lists and other bounded
+    /// server reads that are not part of the Siri catalog facade.
+    nonisolated(unsafe) static var libraryProvider: (@Sendable () async -> (any LibraryServiceProtocol)?)?
+
+    /// Resolves Luma's existing lyrics pipeline. Tools never read lyrics aloud;
+    /// they only report availability or seek to a matched line.
+    nonisolated(unsafe) static var lyricsProvider: (@Sendable () async -> LyricsService?)?
+
+    /// Resolves the streaming-cache service for the storage settings tool.
+    nonisolated(unsafe) static var cacheProvider: (@Sendable () async -> (any CacheServiceProtocol)?)?
+
     /// Opens a Luma entity deep link in the host app.
     nonisolated(unsafe) static var openURLAction: (@Sendable (URL) async -> Void)?
 

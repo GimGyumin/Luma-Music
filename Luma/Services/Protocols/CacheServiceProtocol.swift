@@ -25,6 +25,10 @@ protocol CacheServiceProtocol: AnyObject, Sendable {
     /// The caller retains ownership of the source file until this call returns.
     func store(fileAt sourceURL: URL, forSongId songId: String, serverId: UUID, mimeType: String) async throws -> URL
 
+    /// Captures display metadata for an automatic-cache entry so the Downloads
+    /// surfaces can list cached tracks without a network round-trip.
+    func recordMetadata(_ song: DisplayableSong, serverId: UUID) async
+
     /// Updates the maximum cache size. Triggers FIFO eviction when total bytes exceed it.
     func setMaxBytes(_ value: Int64) async
 
@@ -46,10 +50,35 @@ protocol CacheServiceProtocol: AnyObject, Sendable {
 
     /// Deletes all cached tracks for a specific server — called at server switch (phase 6).
     func clearAllForServer(_ serverId: UUID) async
+
+    /// Last completed smart-maintenance pass. Used by Settings to show whether
+    /// the automatic cleanup is alive without keeping a timer in the UI.
+    var lastMaintenanceDate: Date? { get async }
+    /// Free space available to the app at the cache volume, when the platform exposes it.
+    var availableStorageBytes: Int64? { get async }
+
+    /// LRU + TTL + capacity maintenance. Implementations must re-check pinned,
+    /// leased and active files immediately before unlinking them.
+    func performMaintenance(policy: CacheMaintenancePolicy,
+                            reason: CacheMaintenanceReason) async -> CacheMaintenanceResult
+
+    /// A cache file currently owned by the audio engine. Retention is re-entrant
+    /// because a transition may briefly resolve the same URL twice.
+    func retainPlayback(url: URL) async
+    func releasePlayback(url: URL) async
 }
 
 extension CacheServiceProtocol {
+    func recordMetadata(_ song: DisplayableSong, serverId: UUID) async {}
     var reclaimableBytes: Int64 { get async { await usedBytes } }
+    var lastMaintenanceDate: Date? { get async { nil } }
+    var availableStorageBytes: Int64? { get async { nil } }
+    func performMaintenance(policy: CacheMaintenancePolicy,
+                            reason: CacheMaintenanceReason) async -> CacheMaintenanceResult {
+        .empty(reason)
+    }
+    func retainPlayback(url: URL) async {}
+    func releasePlayback(url: URL) async {}
     func invalidate(songId: String, serverId: UUID, matching url: URL) async {
         await invalidate(songId: songId, serverId: serverId)
     }

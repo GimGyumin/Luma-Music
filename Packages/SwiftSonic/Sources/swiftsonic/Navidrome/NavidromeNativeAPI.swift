@@ -28,6 +28,24 @@ public struct NavidromeNativeAPI: NavidromePlaylistCoverUploading {
         self.transport = transport
     }
 
+    public func scrobbles(baseURL: URL, token: String, offset: Int, limit: Int) async throws -> [NavidromeScrobble] {
+        guard offset >= 0, (1...501).contains(limit), offset <= Int.max - limit,
+              var url = URLComponents(url: baseURL.appendingPathComponent("api/scrobble"), resolvingAgainstBaseURL: false) else {
+            throw NavidromeNativeAPIError.invalidResponse
+        }
+        url.queryItems = [URLQueryItem(name: "_start", value: String(offset)), URLQueryItem(name: "_end", value: String(offset+limit)),
+                          URLQueryItem(name: "_sort", value: "id"), URLQueryItem(name: "_order", value: "ASC")]
+        guard let endpoint = url.url else { throw NavidromeNativeAPIError.invalidResponse }
+        var request = URLRequest(url: endpoint)
+        request.cachePolicy = .reloadIgnoringLocalCacheData
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "x-nd-authorization")
+        let (data, response) = try await transport.data(for: request)
+        guard response.statusCode == 200 else { throw NavidromeNativeAPIError.metadataRequestFailed(statusCode: response.statusCode) }
+        guard data.count <= 2_000_000, let rows = try? JSONDecoder().decode([NavidromeScrobble].self, from: data),
+              rows.count <= limit else { throw NavidromeNativeAPIError.invalidResponse }
+        return rows
+    }
+
     // MARK: - NavidromePlaylistCoverUploading
 
     /// Reads imported tags, or (when authorized by the server) the file inspection
@@ -64,6 +82,10 @@ public struct NavidromeNativeAPI: NavidromePlaylistCoverUploading {
         username: String,
         password: String
     ) async throws -> String {
+        try await login(baseURL: baseURL, username: username, password: password).token
+    }
+
+    public func login(baseURL: URL, username: String, password: String) async throws -> NavidromeLogin {
         let url = baseURL.appendingPathComponent("auth/login")
         logger.debug("NavidromeNativeAPI: authenticate → \(url.absoluteString, privacy: .public)")
 
@@ -91,11 +113,11 @@ public struct NavidromeNativeAPI: NavidromePlaylistCoverUploading {
             throw NavidromeNativeAPIError.authenticationFailed
         }
 
-        guard let loginResponse = try? JSONDecoder().decode(LoginResponseBody.self, from: data) else {
+        guard let loginResponse = try? JSONDecoder().decode(NavidromeLogin.self, from: data) else {
             throw NavidromeNativeAPIError.invalidResponse
         }
         logger.debug("NavidromeNativeAPI: JWT obtained")
-        return loginResponse.token
+        return loginResponse
     }
 
     public func uploadPlaylistCover(
@@ -174,6 +196,14 @@ private struct LoginRequestBody: Encodable {
     let password: String
 }
 
-private struct LoginResponseBody: Decodable {
-    let token: String
+public struct NavidromeScrobble: Decodable, Sendable {
+    public let id: Int64
+    public let mediaFileId: String
+    public let submissionTime: Int64
+}
+
+public struct NavidromeLogin: Decodable, Sendable {
+    public let id: String?
+    public let username: String?
+    public let token: String
 }

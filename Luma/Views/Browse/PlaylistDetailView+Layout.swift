@@ -61,9 +61,7 @@ extension PlaylistDetailView {
 
     @ViewBuilder
     private var playlistListRows: some View {
-        if isLoadingSkeleton {
-            skeletonRows
-        } else if isEditing {
+        if isEditing {
             editableSongRows
         } else if let vm = viewModel {
             let songs = resolvedSongs(vm)
@@ -115,6 +113,7 @@ extension PlaylistDetailView {
                     onAddToPlaylist: { song in songToAddToPlaylist = song },
                     rowBackground: bodyColor
                 )
+                .transition(.opacity)
 
                 let featured = FeaturedArtist.from(songs)
                 if !featured.isEmpty {

@@ -20,18 +20,43 @@ struct HomeShelfHeading: View {
 struct HomePlaylistShelf: View {
     let playlists: [Playlist]
     let mixes: [PersonalMix]
+    var listenAgain: AlbumListenAgainRecommendation?
+    var isLoadingListenAgain = false
+    var isLoadingMixes = false
     @Environment(\.appContainer) private var container
+
+    private var orderedMixes: [PersonalMix] {
+        PlaylistRecommendationPolicy.ordered(mixes)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             NavigationLink(value: HomeDestination.libraryPlaylists) {
                 HomeShelfHeading(title: String(localized: "Your Playlists", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale), showsChevron: true)
             }.buttonStyle(.plain)
-            if playlists.isEmpty && mixes.isEmpty {
+            if playlists.isEmpty && orderedMixes.isEmpty && listenAgain == nil && !isLoadingMixes && !isLoadingListenAgain {
                 Text("Your playlists and personalized mixes appear here.")
                     .font(.subheadline).foregroundStyle(.secondary).padding(.vertical, 16)
             } else {
                 ScrollView(.horizontal, showsIndicators: false) {
                     LazyHStack(alignment: .top, spacing: 12) {
+                        if let listenAgain {
+                            NavigationLink(value: HomeDestination.albumById(
+                                id: listenAgain.albumId,
+                                name: listenAgain.albumTitle,
+                                subtitle: listenAgain.artistName,
+                                coverArtId: listenAgain.coverArtId
+                            )) {
+                                HomeListenAgainCard(recommendation: listenAgain)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                        ForEach(orderedMixes) { mix in
+                            NavigationLink(value: HomeDestination.personalMix(mix.kind)) {
+                                PersonalMixCard(mix: mix)
+                            }
+                            .buttonStyle(.plain)
+                        }
                         ForEach(playlists) { playlist in
                             NavigationLink(value: HomeDestination.playlist(playlist)) {
                                 VStack(alignment: .leading, spacing: 8) {
@@ -49,16 +74,54 @@ struct HomePlaylistShelf: View {
                                 }.frame(width: PersonalMixCard.cardWidth, alignment: .leading)
                             }.buttonStyle(.plain)
                         }
-                        ForEach(mixes) { mix in
-                            NavigationLink(value: HomeDestination.personalMix(mix.kind)) { PersonalMixCard(mix: mix) }
-                                .buttonStyle(.plain)
-                        }
                     }
                 }
             }
         }
     }
 }
+
+/// One album recommendation at the leading edge of Your Playlists. The album is
+/// represented by its real artwork; no server playlist is created.
+struct HomeListenAgainCard: View {
+    let recommendation: AlbumListenAgainRecommendation
+    @Environment(\.appContainer) private var container
+
+    private var isKorean: Bool { GuideCatalog.languageCode == "ko" }
+    private var coverArtID: String {
+        container?.libraryIndexService.albumArtworkSnapshot[recommendation.albumId]
+            ?? recommendation.coverArtId
+    }
+
+    private var title: String {
+        isKorean ? "\(recommendation.albumTitle) 다시 듣기" : "\(recommendation.albumTitle) · Listen Again"
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            CoverArtView(id: coverArtID, size: 500,
+                         cornerRadius: LumaCornerRadius.standard,
+                         placeholderSystemImage: "music.note")
+                .frame(width: PersonalMixCard.cardWidth, height: PersonalMixCard.cardWidth)
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            Text(title)
+                .font(.body.weight(.semibold))
+                .foregroundStyle(.primary)
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+            Text(recommendation.artistName)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+        }
+        .frame(width: PersonalMixCard.cardWidth, alignment: .leading)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(Text(title))
+    }
+}
+
+
+
 
 struct RecommendedStationsShelf: View {
     let artists: [ArtistID3]

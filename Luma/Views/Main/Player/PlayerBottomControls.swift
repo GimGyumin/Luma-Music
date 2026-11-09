@@ -30,6 +30,9 @@ struct BottomToolbar: View {
     var showsRouteName: Bool = true
     var phoneLandscape: Bool = false
     var phonePortrait: Bool = false
+    /// Landscape matches Music's generic AirPlay glyph instead of the current
+    /// route's device glyph. The button still opens the real route picker.
+    var prefersAirPlayGlyph: Bool = false
 
     private var glyphColor: Color { secondaryContentColor }
 
@@ -38,7 +41,12 @@ struct BottomToolbar: View {
             if phoneLandscape {
                 lyricsButton
                 Spacer(minLength: 0)
-                AudioOutputRouteButton(tintColor: glyphColor, showsRouteName: showsRouteName, showsHeadphones: true)
+                AudioOutputRouteButton(
+                    tintColor: glyphColor,
+                    showsRouteName: showsRouteName,
+                    showsHeadphones: true,
+                    prefersAirPlayGlyph: prefersAirPlayGlyph
+                )
                 Spacer(minLength: 0)
                 queueButton
             } else if spreadToEdges {
@@ -133,15 +141,27 @@ struct BottomToolbar: View {
     private func toolbarGlyph(_ systemName: String, isActive: Bool) -> some View {
         Image(systemName: systemName)
             .font(phonePortrait ? .system(size: ImmersivePlayerMetrics.footerGlyph) : .title3)
-            .foregroundStyle(isActive ? Color.black.opacity(0.72) : glyphColor)
+            .foregroundStyle(isActive
+                ? (phonePortrait ? Color.white : Color.black.opacity(0.72))
+                : glyphColor)
             .frame(width: phoneLandscape ? 44 : ImmersivePlayerMetrics.footerHeight,
                    height: phoneLandscape ? 44 : ImmersivePlayerMetrics.footerHeight)
             .background {
                 if isActive {
-                    Circle()
-                        .fill(Color.white.opacity(0.68))
-                        .frame(width: phonePortrait ? ImmersivePlayerMetrics.footerSelectionDiameter : (phoneLandscape ? 38 : 44),
-                               height: phonePortrait ? ImmersivePlayerMetrics.footerSelectionDiameter : (phoneLandscape ? 38 : 44))
+                    if phonePortrait {
+                        // Frosted selection: the artwork colour behind the
+                        // toolbar shows through instead of a flat white disc.
+                        Circle()
+                            .fill(.ultraThinMaterial)
+                            .overlay(Circle().fill(Color.white.opacity(0.16)))
+                            .frame(width: ImmersivePlayerMetrics.footerSelectionDiameter,
+                                   height: ImmersivePlayerMetrics.footerSelectionDiameter)
+                    } else {
+                        Circle()
+                            .fill(Color.white.opacity(phoneLandscape ? 0.92 : 0.68))
+                            .frame(width: phonePortrait ? ImmersivePlayerMetrics.footerSelectionDiameter : (phoneLandscape ? 38 : 44),
+                                   height: phonePortrait ? ImmersivePlayerMetrics.footerSelectionDiameter : (phoneLandscape ? 38 : 44))
+                    }
                 }
             }
             .contentShape(Circle())
@@ -154,6 +174,7 @@ private struct AudioOutputRouteButton: View {
     var tintColor: Color = Color.white.opacity(0.7)
     var showsRouteName: Bool = true
     var showsHeadphones: Bool = false
+    var prefersAirPlayGlyph: Bool = false
     @State private var routeName = ""
     @State private var routeSymbol = "airplayaudio"
 
@@ -162,8 +183,9 @@ private struct AudioOutputRouteButton: View {
     }
 
     private var deviceSymbol: String {
-        // Always reflect the connected AirPods/headphones/speaker route.
-        routeSymbol
+        // Landscape matches Music's generic AirPlay mark; other surfaces keep
+        // reflecting the connected AirPods/headphones/speaker route.
+        prefersAirPlayGlyph ? "airplayaudio" : routeSymbol
     }
 
     var body: some View {
@@ -257,7 +279,9 @@ private enum RouteSymbol {
 
         switch output.portType {
         case .builtInSpeaker, .builtInReceiver:
-            return UIDevice.current.userInterfaceIdiom == .pad ? "iPad" : "iPhone"
+            // The phone's own speaker needs no device label. External routes
+            // (AirPods, Bluetooth, AirPlay, USB, CarPlay) show their real name.
+            return ""
         default:
             let name = output.portName.trimmingCharacters(in: .whitespacesAndNewlines)
             return name.isEmpty
@@ -317,6 +341,7 @@ private struct AudioOutputRouteButton: View {
     var tintColor: Color = Color.white.opacity(0.7)
     var showsRouteName: Bool = true
     var showsHeadphones: Bool = false
+    var prefersAirPlayGlyph: Bool = false
 
     var body: some View {
         AirPlayButton()
@@ -330,6 +355,7 @@ private struct AudioOutputRouteButton: View {
     var tintColor: Color = Color.white.opacity(0.7)
     var showsRouteName: Bool = true
     var showsHeadphones: Bool = false
+    var prefersAirPlayGlyph: Bool = false
 
     var body: some View {
         Image(systemName: "airplayaudio")
@@ -345,6 +371,10 @@ private struct AudioOutputRouteButton: View {
 struct VolumeSection: View {
     let contentColor: Color
     let secondaryContentColor: Color
+    var phoneLandscape: Bool = false
+    /// Artwork-derived tint for the unfilled track. Nil keeps the neutral
+    /// white-opacity track used by the other players.
+    var backgroundTint: Color? = nil
     @Environment(\.appContainer) private var container
     #if os(macOS)
     @AppStorage("luma.lastVolume") private var localVolume: Double = 0.7
@@ -359,7 +389,13 @@ struct VolumeSection: View {
                 .accessibilityHidden(true)
 
             #if os(iOS)
-            SystemVolumeView(contentColor: contentColor)
+            SystemVolumeView(
+                contentColor: contentColor,
+                trackTint: backgroundTint,
+                sliderHeight: phoneLandscape ? 28 : 36,
+                sliderTrackHeight: phoneLandscape ? 4 : 6,
+                sliderActiveTrackHeight: phoneLandscape ? 10 : 14
+            )
             #elseif os(macOS)
             Slider(
                 value: Binding(

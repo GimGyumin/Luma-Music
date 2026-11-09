@@ -13,9 +13,12 @@ struct NowPlayingWidget: Widget {
         StaticConfiguration(kind: kind, provider: NowPlayingProvider()) { entry in
             NowPlayingWidgetView(entry: entry)
         }
-        .configurationDisplayName("Now Playing")
-        .description("See what’s playing in Luma and control playback.")
-        .supportedFamilies([.systemSmall, .systemMedium])
+        .configurationDisplayName(Text(WidgetChrome.nowPlaying))
+        .description(Text(WidgetChrome.text(
+            korean: "지금 재생 중인 음악을 확인하고 재생을 제어합니다.",
+            english: "See what's playing in Luma and control playback."
+        )))
+        .supportedFamilies([.systemSmall, .systemMedium, .systemLarge])
     }
 }
 
@@ -25,6 +28,8 @@ struct NowPlayingWidgetView: View {
 
     var body: some View {
         switch family {
+        case .systemLarge:
+            NowPlayingLargeView(entry: entry)
         case .systemMedium:
             NowPlayingMediumView(entry: entry)
         default:

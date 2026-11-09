@@ -134,7 +134,7 @@ extension AlbumDetailContentView {
         } label: {
             Image(systemName: "ellipsis")
                 .font(.system(size: 20, weight: .semibold))
-                .foregroundStyle(headerTextColor)
+                .foregroundStyle(navigationInk)
                 .lumaHeroButton(size: 44)
         }
         .menuOrder(.fixed)

@@ -139,6 +139,7 @@ actor SpotlightIndexCoordinator {
             }
         } catch {
             if token == generation { status = error is CancellationError ? .cancelled : .failed }
+            if !(error is CancellationError) { DiagnosticsCenter.shared.report(.spotlight) }
             Logger.siri.error("[SPOTLIGHT] reconcile failed error=\(error.localizedDescription, privacy: .public)")
             throw error
         }

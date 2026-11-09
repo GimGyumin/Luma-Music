@@ -19,14 +19,11 @@ nonisolated enum ArtworkCompletionInventory {
         directory.appendingPathComponent(".completed-originals-\(serverID.uuidString).plist")
     }
     private static func stamp(_ name: String, directory: URL) -> FileStamp? {
-        guard name == URL(fileURLWithPath: name).lastPathComponent, name.hasSuffix("@original-v1") else { return nil }
-        let file = directory.appendingPathComponent(name)
-        guard let attributes = try? FileManager.default.attributesOfItem(atPath: file.path),
-              attributes[.type] as? FileAttributeType == .typeRegular,
-              let size = (attributes[.size] as? NSNumber)?.int64Value, size > 0,
-              let modified = attributes[.modificationDate] as? Date,
-              let identity = ArtworkContentStore.fileIdentity(file) else { return nil }
-        return FileStamp(name: name, size: size, modified: modified, identity: identity)
+        guard (name as NSString).lastPathComponent == name, name.hasSuffix("@original-v1") else { return nil }
+        // Explicit hint: the default overload stats the filesystem to infer a directory.
+        let file = directory.appendingPathComponent(name, isDirectory: false)
+        guard let info = FileStat.read(file), info.isRegularFile, info.size > 0 else { return nil }
+        return FileStamp(name: name, size: info.size, modified: info.modified, identity: info.identity)
     }
     static func save(ids: [String], directory: URL, serverID: UUID) throws -> Record {
         let names = Set(ids.map { DownloadService.coverStorageName(for: OriginalArtwork.storageID($0), serverId: serverID) })

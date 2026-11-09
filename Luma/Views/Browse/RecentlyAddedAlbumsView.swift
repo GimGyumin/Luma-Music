@@ -14,6 +14,7 @@ struct RecentlyAddedAlbumsView: View {
     @State private var albums: [AlbumID3] = []
     @State private var isLoading = false
     @State private var error: UserFacingError?
+    @Namespace private var albumZoomNamespace
 
     private var usesGrid: Bool {
         #if os(macOS)
@@ -44,10 +45,13 @@ struct RecentlyAddedAlbumsView: View {
                 )
             } else if usesGrid {
                 albumGrid
+                    .transition(.opacity)
             } else {
                 albumList
+                    .transition(.opacity)
             }
         }
+        .lumaContentReveal(isReady: !(isLoading && albums.isEmpty))
         .navigationTitle(String(localized: "Recently Added", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale))
         .task { await load() }
         .refreshable { await load() }
@@ -60,8 +64,8 @@ struct RecentlyAddedAlbumsView: View {
             ScrollView {
                 LazyVGrid(columns: columns, spacing: 24) {
                     ForEach(albums) { album in
-                        NavigationLink(value: HomeDestination.album(album)) {
-                            AlbumGridCell(album: album)
+                        AlbumNavigationLink(album: album, namespace: albumZoomNamespace) { sourceID, namespace in
+                            AlbumGridCell(album: album, zoomSourceId: sourceID, zoomNamespace: namespace)
                         }
                         .buttonStyle(.plain)
                     }
@@ -74,13 +78,15 @@ struct RecentlyAddedAlbumsView: View {
 
     private var albumList: some View {
         List(albums) { album in
-            NavigationLink(value: HomeDestination.album(album)) {
+            AlbumNavigationLink(album: album, namespace: albumZoomNamespace) { sourceID, namespace in
                 AlbumRow(
                     albumId: album.id,
                     name: album.name,
                     artist: album.artist,
                     year: album.year,
-                    coverArtId: album.coverArt
+                    coverArtId: album.coverArt,
+                    zoomSourceId: sourceID,
+                    zoomNamespace: namespace
                 )
             }
         }

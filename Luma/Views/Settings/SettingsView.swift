@@ -10,6 +10,7 @@ struct SettingsView: View {
     @Environment(\.appContainer) private var container
     @ObservedObject private var appleMusic = AppleMusicSettings.shared
     @AppStorage("luma.history.enabled") private var listeningHistoryEnabled = true
+    @AppStorage("luma.visuals.albumFollowsAppearance") private var albumFollowsAppearance = false
     @AppStorage("luma.visuals.immersiveAlbums") private var immersiveAlbums = true
     @AppStorage("luma.visuals.animatedArtwork") private var animatedArtwork = true
     @AppStorage("luma.download.automaticAfterStreaming") private var automaticDownloadsEnabled = false
@@ -103,8 +104,12 @@ struct SettingsView: View {
             SettingsSectionHeader("Downloads")
         } footer: {
             VStack(alignment: .leading, spacing: LumaSpacing.s) {
-                SettingsSectionFooter("Automatically saves songs after playback begins. Cellular downloads use mobile data and can be turned off separately.")
+                SettingsSectionFooter("Automatically saves songs after playback begins. Automatic streaming cache also turns off when this is off. Cellular downloads use mobile data and can be turned off separately.")
                 SettingsSectionFooter("Dolby Atmos downloads in Now Playing and Automatic Downloads preserve the original spatial file when a matching version is available. Otherwise, your download quality applies. Existing downloads are unchanged.")
+                ContextualGuideNote(
+                    guide: .offlineDownloads,
+                    message: String(localized: "Downloads are saved until you remove them. The streaming cache is temporary and can be cleared without deleting downloads or playlists.", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale)
+                )
             }
         }
     }
@@ -113,11 +118,8 @@ struct SettingsView: View {
     private var displaySections: some View {
         Section {
             SettingsNavigationRow("Lyrics & Translation") { LyricsSettingsView() }
-            Toggle(isOn: $immersiveAlbums) {
-                SettingsRowTitle("Immersive Album Artwork")
-            }
-            Toggle(isOn: $animatedArtwork) {
-                SettingsRowTitle("Animated Background")
+            SettingsNavigationRow("Album Artwork", value: SettingsOnOffChoice(immersiveAlbums).choiceTitle) {
+                albumArtworkSettings
             }
         } header: {
             SettingsSectionHeader("Display & Lyrics")
@@ -134,6 +136,44 @@ struct SettingsView: View {
         } footer: {
             SettingsSectionFooter("Listening activity on this device is used for Recently Played and Listening Replay.")
         }
+    }
+
+    private var albumArtworkSettings: some View {
+        Form {
+            Section {
+                Toggle(isOn: $albumFollowsAppearance) {
+                    SettingsRowTitle("Match Album Background to Appearance")
+                }
+                Toggle(isOn: $immersiveAlbums) {
+                    SettingsRowTitle("Immersive Album Artwork")
+                }
+            } header: {
+                SettingsSectionHeader("Albums")
+            } footer: {
+                VStack(alignment: .leading, spacing: LumaSpacing.s) {
+                    SettingsSectionFooter("Automatically extend suitable album covers. Turn off to use cover cards for every album.")
+                    ContextualGuideNote(
+                        guide: .immersiveArtwork,
+                        message: String(localized: "Immersive artwork needs a cover that the server can load at a sufficient resolution and whose edges extend naturally.", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale)
+                    )
+                }
+            }
+
+            Section {
+                Toggle(isOn: $animatedArtwork) {
+                    SettingsRowTitle("Animated Background")
+                }
+            } header: {
+                SettingsSectionHeader("Now Playing")
+            } footer: {
+                SettingsSectionFooter("The background moves with the music while Now Playing is visible.")
+            }
+        }
+        .formStyle(.grouped)
+        .modifier(SettingsSubpageStyle())
+        .lumaContentWidth(.readable)
+        .navigationTitle(Text("Album Artwork"))
+        .navigationBarTitleDisplayModeInline()
     }
 
     private var accountSection: some View {
@@ -157,9 +197,10 @@ struct SettingsView: View {
         Section {
             SettingsNavigationRow("Current Playback") { CurrentPlaybackSettingsView() }
             SettingsNavigationRow("Sharing") { SharingSettingsView() }
+            SettingsNavigationRow("Widgets") { GuideView(guide: .widgets) }
+            SettingsNavigationRow("도움말 및 지원") { HelpSettingsView() }
             SettingsActionRow("System Permissions") { LumaSystemSettings.openAppSettings() }
             SettingsNavigationRow("Advanced") { AdvancedSettingsView() }
-            SettingsNavigationRow("Developer") { DeveloperSettingsView() }
             SettingsNavigationRow("About") { AboutSettingsView() }
         } header: {
             SettingsSectionHeader("App")

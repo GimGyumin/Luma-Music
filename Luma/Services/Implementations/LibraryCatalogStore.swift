@@ -163,6 +163,12 @@ nonisolated enum LibraryCatalogStore {
 
     static func search(_ query: String, limit: Int, at url: URL,
                        seed: LibraryIndexService.LocalHits? = nil) throws -> LibraryIndexService.LocalHits {
+        let trace = DiagnosticsCenter.shared.begin(.ftsQuery)
+        var succeeded = false
+        defer {
+            trace.finish(Task.isCancelled ? .cancelled : succeeded ? .success : .failure)
+            if !succeeded, !Task.isCancelled { DiagnosticsCenter.shared.report(.database) }
+        }
         let db = try open(url); defer { sqlite3_close(db) }
         // One read transaction keeps direct matches and relationship expansion on one snapshot.
         try exec(db, "BEGIN DEFERRED")
@@ -193,7 +199,10 @@ nonisolated enum LibraryCatalogStore {
                          albums: rows("album", as: LibraryIndexService.IndexedAlbum.self),
                          playlists: rows("playlist", as: LibraryIndexService.IndexedPlaylist.self),
                          songs: rows("song", as: DisplayableSong.self))
-        guard limit > 0 else { return hits }
+        guard limit > 0 else {
+            succeeded = true
+            return hits
+        }
         // Include canonical artist matches even when Spotlight only returns their songs.
         let artists = try rows("artist", as: LibraryIndexService.IndexedArtist.self)
         var seenArtists = Set(hits.artists.map(\.id))
@@ -252,6 +261,7 @@ nonisolated enum LibraryCatalogStore {
             status = sqlite3_step(stmt)
         }
         guard status == SQLITE_DONE else { throw StoreError(message: String(cString: sqlite3_errmsg(db))) }
+        succeeded = true
         return hits
     }
 }

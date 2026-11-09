@@ -128,7 +128,7 @@ struct EditServerView: View {
     }
 
     private var serverSection: some View {
-        Section("Server") {
+        Section {
             SettingsTextFieldRow(title: "Address", systemImage: "network", color: .blue) {
                 TextField("https://music.example.com", text: $viewModel.serverURL)
                     .textContentType(.URL)
@@ -140,6 +140,13 @@ struct EditServerView: View {
             }
             invalidURLHint
             httpWarning
+        } header: {
+            Text("Server")
+        } footer: {
+            ContextualGuideNote(
+                guide: .serverConnection,
+                message: String(localized: "Enter the OpenSubsonic server address without /rest. Navidrome and compatible servers use the account credentials you enter below.", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale)
+            )
         }
     }
 

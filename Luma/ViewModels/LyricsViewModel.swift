@@ -54,6 +54,7 @@ final class LyricsViewModel {
     var karaokeByteEnds: [Int: Int] = [:]
     /// Clock used for word-level karaoke progress (ms, lyrics-offset adjusted).
     var karaokePlaybackMs: Int = 0
+    @ObservationIgnored var karaokeFrameTimeMs: Int = 0
     @ObservationIgnored var karaokeSampleHostTime: CFTimeInterval = CACurrentMediaTime()
     /// 0...1 while waiting through a long instrumental / inter-line gap; `nil` when a lyric line is active.
     var instrumentalGapProgress: Double? {
@@ -74,6 +75,7 @@ final class LyricsViewModel {
     var selectedServerTranslationLang: String?
     var selectedLanguage: String?
     var autoScrollEnabled = true
+    @ObservationIgnored var unsyncedScrollIndex: Int?
     var followState: LyricsFollowState = .followingPlayback
     var isUserScrolling: Bool {
         get { followState.isBrowsing }
@@ -88,7 +90,7 @@ final class LyricsViewModel {
     /// Absolute floor — never treat a long sung phrase or ordinary verse spacing as
     /// an instrumental break. LRC has starts but no trustworthy phrase ends, so a
     /// conservative floor avoids replacing a still-sung line with dots.
-    nonisolated static let instrumentalGapAbsoluteFloorMs = 9_000
+    nonisolated static let instrumentalGapAbsoluteFloorMs = 8_000
     /// A gap must also be clearly longer than this song’s typical line spacing.
     nonisolated static let instrumentalGapMedianMultiplier = 3.5
     /// LRC fallback bounds for estimating when a phrase has actually finished.
@@ -98,6 +100,7 @@ final class LyricsViewModel {
     /// Lines whose timestamps fall within this window are treated as a simultaneous duet
     /// when building display rows; active-track exclusivity is not used (multi-track concurrent).
     nonisolated static let simultaneousLineThresholdMs = 500
+    var hasEnglishOnlyLyrics = false
     /// Expanded lead + chorus agent rows for the loaded structured lyrics.
     var displayRows: [LyricDisplayRow] = [] {
         didSet {
@@ -267,6 +270,9 @@ final class LyricsViewModel {
         guard !Task.isCancelled else { return }
         invalidateTranslationWork()
         state = .loading
+        let loadTrace = DiagnosticsCenter.shared.begin(.lyricsLoad)
+        var loadResult = DiagnosticsResult.cancelled
+        defer { loadTrace.finish(Task.isCancelled ? .cancelled : loadResult) }
         do {
             let list = try await lyricsService.fetchLyrics(
                 forSongId: songId, serverId: serverId, match: match
@@ -279,14 +285,18 @@ final class LyricsViewModel {
             lyricsList = list
             rawTTMLData = ttml
             await applyCurrentLanguage()
+            loadResult = .success
         } catch {
+            loadResult = DiagnosticsResult.classify(error)
             guard generation == loadGeneration, !Task.isCancelled,
                   !(error is CancellationError), (error as? URLError)?.code != .cancelled else { return }
             switch error {
             case LyricsError.notSupportedByServer: state = .unsupported
             case LyricsError.notFound: state = .empty
             case let lyricsError as LyricsError: state = .error(networkErrorMessage(from: lyricsError))
-            default: state = .error(error.localizedDescription)
+            default:
+                DiagnosticsCenter.shared.report(.lyricsParse)
+                state = .error(error.localizedDescription)
             }
         }
     }

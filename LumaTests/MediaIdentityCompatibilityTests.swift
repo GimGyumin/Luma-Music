@@ -92,6 +92,45 @@ struct MediaIdentityCompatibilityTests {
         #expect(!service.registerAlias(oldID: "C", newID: "A", serverId: firstServer, entityType: .song, verificationSource: .serverResponse, confidence: 1))
     }
 
+    @Test func identityRevisionAdvancesWhenFavoriteResolutionInputsChange() throws {
+        let service = MediaIdentityService(modelContainer: try ModelContainer.luma(inMemory: true))
+        let server = UUID()
+        let initial = service.identityRevision
+
+        _ = service.observe(remoteID: "song", serverId: server, entityType: .song)
+        let afterObservation = service.identityRevision
+        #expect(afterObservation != initial)
+
+        #expect(service.registerAlias(oldID: "song", newID: "replacement", serverId: server,
+            entityType: .song, verificationSource: .serverResponse, confidence: 1))
+        #expect(service.identityRevision != afterObservation)
+    }
+
+    @Test func favoriteSongIDSetUsesRemoteItemIDNotCompositeRecordKey() {
+        let record = FavoriteRecord(
+            itemType: .song,
+            itemId: "remote-song",
+            starredDate: .now,
+            serverId: UUID()
+        )
+        let ids = FavoriteRecord.songIDSet(from: [record])
+        #expect(ids == ["remote-song"])
+        #expect(!ids.contains(record.id))
+    }
+
+    @Test func favoriteItemIDSetIsServerAndTypeScoped() {
+        let server = UUID()
+        let otherServer = UUID()
+        let records = [
+            FavoriteRecord(itemType: .artist, itemId: "artist-a", starredDate: .now, serverId: server),
+            FavoriteRecord(itemType: .album, itemId: "album-a", starredDate: .now, serverId: server),
+            FavoriteRecord(itemType: .artist, itemId: "artist-other", starredDate: .now, serverId: otherServer)
+        ]
+        #expect(FavoriteRecord.itemIDSet(from: records, itemType: .artist, serverId: server) == ["artist-a"])
+        #expect(FavoriteRecord.itemIDSet(from: records, itemType: .album, serverId: server) == ["album-a"])
+        #expect(FavoriteRecord.itemIDSet(from: records, itemType: .artist, serverId: otherServer) == ["artist-other"])
+    }
+
     @Test func entityTypesHaveIndependentNamespaces() throws {
         let service = MediaIdentityService(modelContainer: try ModelContainer.luma(inMemory: true))
         let server = UUID()

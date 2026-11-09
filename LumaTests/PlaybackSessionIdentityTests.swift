@@ -71,7 +71,7 @@ struct PlaybackSessionIdentityTests {
 
     @Test func resetRebuildsAudioObjectsAndRetainsAPausedQueue() async throws {
         let f = try AuditPlaybackFixture()
-        let url = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("Fixtures/SilentMP3.mp3")
+        let url = LumaTestResources.fixture("Fixtures/SilentMP3.mp3", sourceFile: #filePath)
         await f.player.installAuditNativeSource(url)
         let generation = await f.player.systemPlayback.generation
         await f.player.armAuditSegmentAndTasks()

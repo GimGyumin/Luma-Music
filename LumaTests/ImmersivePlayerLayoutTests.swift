@@ -290,7 +290,7 @@ struct ImmersivePlayerLayoutTests {
                     ForEach(titles, id: \.self) { title in
                         QueueRow(song: DisplayableSong(id: title, title: title, artist: "Michael Jackson"),
                             isCurrent: false, contentColor: .white, secondaryContentColor: ImmersivePlayerInk.artist,
-                            loadArtwork: false, compactPhoneLayout: true)
+                            loadArtwork: false, compactPhoneLayout: true, onPlay: {})
                             .padding(.horizontal, 32).padding(.top, 6).padding(.bottom, 7)
                     }
                 }

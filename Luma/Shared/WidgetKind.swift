@@ -9,4 +9,6 @@ import Foundation
 nonisolated enum WidgetKind {
     static let nowPlaying = "NowPlayingWidget"
     static let pinned = "PinnedWidget"
+    static let recent = "RecentWidget"
+    static let recommendations = "RecommendationsWidget"
 }

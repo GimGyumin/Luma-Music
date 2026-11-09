@@ -6,54 +6,43 @@
 import SwiftUI
 import WidgetKit
 
-/// Apple Music–style small Now Playing: edge-to-edge artwork, bottom fade, title + circular control.
+/// Small Now Playing: compact cover, monochrome note, title/artist and a play pill.
 struct NowPlayingSmallView: View {
     let entry: NowPlayingEntry
 
     var body: some View {
-        ZStack(alignment: .bottomLeading) {
-            WidgetCoverArtView(image: entry.coverImage, cornerRadius: 0)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .clipped()
+        Group {
+            if let track = entry.track {
+                VStack(alignment: .leading, spacing: 0) {
+                    HStack(alignment: .top, spacing: 0) {
+                        WidgetCoverArtView(image: entry.coverImage, cornerRadius: 7)
+                            .frame(width: 60, height: 60)
+                        Spacer(minLength: 8)
+                        WidgetMusicNote(size: 22)
+                    }
 
-            LinearGradient(
-                colors: [
-                    .clear,
-                    .black.opacity(0.15),
-                    .black.opacity(0.72)
-                ],
-                startPoint: .top,
-                endPoint: .bottom
-            )
+                    Spacer(minLength: 4)
 
-            VStack(alignment: .leading, spacing: 8) {
-                Spacer(minLength: 0)
-
-                if let track = entry.track {
                     Text(track.title)
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(.white)
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(.primary)
                         .lineLimit(1)
+                        .minimumScaleFactor(0.8)
                     Text(track.artist)
-                        .font(.system(size: 11, weight: .regular))
-                        .foregroundStyle(.white.opacity(0.78))
+                        .font(.system(size: 13))
+                        .foregroundStyle(.primary.opacity(0.62))
                         .lineLimit(1)
-                } else {
-                    Text("Not Playing")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(.white)
-                }
 
-                HStack {
-                    Spacer(minLength: 0)
-                    WidgetPlayButton(isPlaying: entry.isPlaying, compact: true)
-                        .environment(\.colorScheme, .dark)
+                    WidgetPlayPillButton(isPlaying: entry.isPlaying, height: 27)
+                        .padding(.top, 7)
                 }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            } else {
+                NowPlayingEmptyState()
             }
-            .padding(12)
         }
         .containerBackground(for: .widget) {
-            Color.black
+            WidgetCardBackground(tint: entry.track == nil ? nil : entry.dominantColor)
         }
     }
 }

@@ -253,6 +253,7 @@ extension PlayerService {
     }
 
     func cancelGaplessBridge() {
+        telemetry.finishGapless(.cancelled)
         gaplessPreparationGeneration &+= 1
         nextGaplessPreparationAttempt = .distantPast
         gaplessPreparationTask?.cancel()

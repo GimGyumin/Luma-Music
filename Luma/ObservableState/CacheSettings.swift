@@ -17,6 +17,7 @@ final class CacheSettings {
     @ObservationIgnored private var _maxCacheMegabytes: Int
     @ObservationIgnored private var _cacheFormat: CacheFormat
     @ObservationIgnored private var _cacheOverCellular: Bool
+    @ObservationIgnored private var _autoCleanupEnabled: Bool
 
     // MARK: - Visible properties (manual observation hooks)
 
@@ -64,6 +65,21 @@ final class CacheSettings {
         }
     }
 
+    /// Age/capacity cleanup is on by default but can be turned off without
+    /// disabling the hard storage limit.
+    var autoCleanupEnabled: Bool {
+        get {
+            access(keyPath: \.autoCleanupEnabled)
+            return _autoCleanupEnabled
+        }
+        set {
+            withMutation(keyPath: \.autoCleanupEnabled) {
+                _autoCleanupEnabled = newValue
+            }
+            UserDefaults.standard.set(newValue, forKey: Self.autoCleanupKey)
+        }
+    }
+
     // MARK: - Defaults & keys
 
     static let storageOptionsMB = [512, 1_024, 2_048, 4_096, 8_192, 16_384]
@@ -74,6 +90,8 @@ final class CacheSettings {
     private static let maxCacheMegabytesKey = "luma.cache.maxMegabytes"
     private static let cacheFormatKey = "luma.cache.format"
     private static let cacheOverCellularKey = "luma.cache.cellular"
+    private static let autoCleanupKey = "luma.cache.autoCleanup"
+    static let defaultAutoCleanupEnabled = true
 
     // MARK: - Init
 
@@ -87,6 +105,8 @@ final class CacheSettings {
         self._cacheFormat = CacheFormat(rawValue: loadedFormatRaw ?? "") ?? Self.defaultFormat
 
         self._cacheOverCellular = UserDefaults.standard.bool(forKey: Self.cacheOverCellularKey)
+        self._autoCleanupEnabled = UserDefaults.standard.object(forKey: Self.autoCleanupKey) as? Bool
+            ?? Self.defaultAutoCleanupEnabled
     }
 
     func reloadFromDefaults() {
@@ -97,5 +117,7 @@ final class CacheSettings {
         let loadedFormatRaw = UserDefaults.standard.string(forKey: Self.cacheFormatKey)
         _cacheFormat = CacheFormat(rawValue: loadedFormatRaw ?? "") ?? Self.defaultFormat
         _cacheOverCellular = UserDefaults.standard.bool(forKey: Self.cacheOverCellularKey)
+        _autoCleanupEnabled = UserDefaults.standard.object(forKey: Self.autoCleanupKey) as? Bool
+            ?? Self.defaultAutoCleanupEnabled
     }
 }

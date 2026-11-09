@@ -52,7 +52,8 @@ actor WidgetSyncService {
         bridgedOriginals.removeAll()
         lastReloadDate = nil
         writeShared { defaults in
-            for key in [SharedStorageKey.recentlyPlayedItems, .pinnedItems, .dominantColors, .nowPlayingState] {
+            for key in [SharedStorageKey.recentlyPlayedItems, .pinnedItems, .dominantColors,
+                        .nowPlayingState, .personalMixes] {
                 defaults.removeObject(forKey: key.rawValue)
             }
             WidgetCenter.shared.reloadAllTimelines()
@@ -86,7 +87,7 @@ actor WidgetSyncService {
 
     private func writeShared(_ body: @escaping (UserDefaults) -> Void) {
         if let storageOverride { body(storageOverride) }
-        else { SharedStorage.write(body) }
+        else { SharedStorage.writeAndWait(body) }
     }
 
     private func prepareAccount() async -> ServerRequestIdentity? {
@@ -119,7 +120,9 @@ actor WidgetSyncService {
             title: song.title,
             artist: song.artist ?? "",
             albumID: song.albumId,
-            coverArtFilename: DownloadService.coverStorageName(for: coverArtId, serverId: identity.serverID) + ".jpg"
+            coverArtFilename: DownloadService.coverStorageName(for: coverArtId, serverId: identity.serverID) + ".jpg",
+            serverID: identity.serverID.uuidString,
+            coverArtId: coverArtId
         )
 
         // Widget timeline reads `nowPlayingState` — must update here (not only on pause/resume).
@@ -151,6 +154,7 @@ actor WidgetSyncService {
         await syncDominantColors(forCoverArtIds: [coverArtId])
         // Always refresh Now Playing after a track change (bypass the 2s all-timelines throttle).
         WidgetCenter.shared.reloadTimelines(ofKind: WidgetKind.nowPlaying)
+        WidgetCenter.shared.reloadTimelines(ofKind: WidgetKind.recent)
         lastReloadDate = Date()
         Logger.widget.debug("onTrackStarted: updated now playing + recently played (\(items.count) items)")
     }
@@ -168,7 +172,9 @@ actor WidgetSyncService {
                 title: song.title,
                 artist: song.artist ?? "",
                 albumID: song.albumId,
-                coverArtFilename: DownloadService.coverStorageName(for: coverArtId, serverId: identity.serverID) + ".jpg"
+                coverArtFilename: DownloadService.coverStorageName(for: coverArtId, serverId: identity.serverID) + ".jpg",
+                serverID: identity.serverID.uuidString,
+                coverArtId: coverArtId
             )
         }
         let nowPlaying = SharedNowPlayingState(track: track, isPlaying: isPlaying, lastUpdated: Date())
@@ -229,16 +235,45 @@ actor WidgetSyncService {
     // MARK: - Full sync (cold start)
 
     func fullSync() async {
+        // AppBootGate can release before the persisted server identity is installed.
+        // Wait briefly in the background; if there is no account, do nothing.
+        for _ in 0..<20 where await MainActor.run(body: { serverState.activeServer == nil }) {
+            try? await Task.sleep(for: .milliseconds(150))
+        }
         await syncPinned()
 
-        if let items: [SharedTrackInfo] = SharedStorage.read({ defaults in
-            guard let data = defaults.data(forKey: SharedStorageKey.recentlyPlayedItems.rawValue) else { return nil }
-            return try? JSONDecoder().decode([SharedTrackInfo].self, from: data)
-        }) {
-            let ids = items.compactMap { $0.coverArtFilename.map { String($0.dropLast(4)) } }
-            await syncDominantColors(forCoverArtIds: ids)
+        let recent: [SharedTrackInfo] = SharedStorage.read({ defaults in
+            guard let data = defaults.data(forKey: SharedStorageKey.recentlyPlayedItems.rawValue) else { return [] }
+            return (try? JSONDecoder().decode([SharedTrackInfo].self, from: data)) ?? []
+        })
+        let nowPlaying: SharedTrackInfo? = SharedStorage.read({ defaults in
+            guard let data = defaults.data(forKey: SharedStorageKey.nowPlayingState.rawValue) else { return nil }
+            return (try? JSONDecoder().decode(SharedNowPlayingState.self, from: data))?.track
+        })
+
+        // After an app update/reinstall the App Group snapshot can outlive the bridged
+        // cover files. Rebuild them from the app's own cover files without starting a
+        // network request during launch.
+        for filename in Set(recent.prefix(6).compactMap(\.coverArtFilename)) {
+            do {
+                try await bridgeCoverFile(filename: filename)
+            } catch {
+                Logger.widget.debug("bridgeCoverFile failed: \(error, privacy: .public)")
+            }
+        }
+        let coverIDs = ([nowPlaying] + recent).compactMap { $0?.coverArtId }
+        for id in Array(Set(coverIDs)) {
+            try? await bridgeCoverArt(coverArtId: id, allowNetwork: false)
         }
 
+        let storedIDs = recent.compactMap { $0.coverArtFilename.map { String($0.dropLast(4)) } }
+        if !storedIDs.isEmpty {
+            await syncDominantColors(forCoverArtIds: storedIDs)
+        }
+
+        // New widget kinds and updated layouts need one refresh after the cold snapshot
+        // has been written. Individual track events still update only their own kind.
+        WidgetCenter.shared.reloadAllTimelines()
         Logger.widget.debug("fullSync complete")
     }
 
@@ -266,10 +301,43 @@ actor WidgetSyncService {
 
     // MARK: - Cover art bridge
 
+    /// Bridges a cover that is already present in the app's local cover directory.
+    /// Shared snapshots store the final filename, so this works for older rows that do
+    /// not contain a raw server cover id.
+    func bridgeCoverFile(filename: String) async throws {
+        let identity = await prepareAccount()
+        guard let identity else { return }
+        let generation = accountGeneration
+        guard let sharedDir = SharedStorage.coverArtCacheDirectory else {
+            throw WidgetSyncError.sharedContainerUnavailable
+        }
+        try SharedStorage.ensureDirectoriesExist()
+        let sharedURL = sharedDir.appendingPathComponent(filename)
+        guard !FileManager.default.fileExists(atPath: sharedURL.path) else { return }
+        let base = filename.replacingOccurrences(of: ".jpg", with: "")
+        let candidates = [base, base + "@original-v1", base + "@thumb"]
+        let coversDirectory = self.coversDirectory
+        let data = await Task.detached(priority: .utility) { () -> Data? in
+            for name in candidates {
+                let url = coversDirectory.appendingPathComponent(name)
+                if let data = try? Data(contentsOf: url), !data.isEmpty { return data }
+            }
+            return nil
+        }.value
+        guard let data, let image = PlatformImage(data: data) else { return }
+        let jpgData = await Task.detached(priority: .utility) {
+            image.resized(maxDimension: 600).jpgData(quality: 0.8)
+        }.value
+        guard let jpgData, await isCurrent(identity), generation == accountGeneration else { return }
+        try jpgData.write(to: sharedURL, options: .atomic)
+        lastBridgedCoverArtId = base
+    }
+
     /// Copies a cover from the app's local cache into the App Group shared container
     /// as a 600×600 JPG at 80% quality. Idempotent — no-op if the file already exists.
     func bridgeCoverArt(coverArtId: String, allowNetwork: Bool = true) async throws {
-        guard let identity = await prepareAccount() else { return }
+        let identity = await prepareAccount()
+        guard let identity else { return }
         let generation = accountGeneration
         guard let sharedDir = SharedStorage.coverArtCacheDirectory else {
             throw WidgetSyncError.sharedContainerUnavailable
@@ -279,6 +347,8 @@ actor WidgetSyncService {
         let storageID = DownloadService.coverStorageName(for: coverArtId, serverId: identity.serverID)
         let sharedURL = sharedDir.appendingPathComponent(storageID + ".jpg")
         let originalPath = coversDirectory.appendingPathComponent(DownloadService.coverStorageName(for: OriginalArtwork.storageID(coverArtId), serverId: identity.serverID)).path
+        let thumbPath = coversDirectory.appendingPathComponent(DownloadService.coverStorageName(for: "\(coverArtId)@thumb", serverId: identity.serverID)).path
+        let basePath = coversDirectory.appendingPathComponent(storageID).path
         let hasOriginal = FileManager.default.fileExists(atPath: originalPath)
         let needsOriginalUpgrade = hasOriginal && !bridgedOriginals.contains(storageID)
         let needsBridge = !FileManager.default.fileExists(atPath: sharedURL.path) || needsOriginalUpgrade
@@ -286,9 +356,28 @@ actor WidgetSyncService {
 
         // Same cover already bridged this session and file exists — skip heavy work.
         if sameAsLast, !needsBridge { return }
+        if !needsBridge { return }
 
         // The shared cache resolves permanent originals before RAM/tiered derivatives.
-        let sourceImage = await artworkCache.load(coverArtId: coverArtId, tier: .hero, allowNetwork: allowNetwork)
+        var sourceImage = await artworkCache.load(coverArtId: coverArtId, tier: .hero, allowNetwork: allowNetwork)
+
+        // A cold launch can ask for a widget cover before the artwork cache has decoded
+        // the original. Read the app-owned cover files directly; this is the same local
+        // artwork the player uses and avoids a network request.
+        if sourceImage == nil {
+            let paths = [originalPath, thumbPath, basePath]
+            let data: Data? = await Task.detached(priority: .utility) { () -> Data? in
+                for path in paths {
+                    if let data = try? Data(contentsOf: URL(fileURLWithPath: path)), !data.isEmpty {
+                        return data
+                    }
+                }
+                return nil
+            }.value
+            if let data {
+                sourceImage = PlatformImage(data: data)
+            }
+        }
 
         guard let image = sourceImage else {
             Logger.widget.debug("bridgeCoverArt: no image available for \(coverArtId, privacy: .public)")
@@ -333,7 +422,12 @@ actor WidgetSyncService {
             trailingReloadTask = nil
             lastReloadDate = Date()
             if storageOverride == nil {
-                writeShared { _ in WidgetCenter.shared.reloadTimelines(ofKind: WidgetKind.nowPlaying) }
+                writeShared { _ in
+                    WidgetCenter.shared.reloadTimelines(ofKind: WidgetKind.nowPlaying)
+                    // The Recently Played card's play/pause pill is interactive and
+                    // must flip with the current playback state as well.
+                    WidgetCenter.shared.reloadTimelines(ofKind: WidgetKind.recent)
+                }
             }
         } else if trailingReloadTask == nil {
             trailingReloadTask = Task { [weak self] in

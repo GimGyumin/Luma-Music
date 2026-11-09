@@ -126,7 +126,7 @@ extension PlayerService {
             cancelGaplessBridge()
             cancelPendingCacheDownload()
             cancelPendingPrefetch()
-            currentSource = source.playbackSong.map { replacement.withPlaybackSong($0) } ?? replacement
+            await replaceCurrentSource(source.playbackSong.map { replacement.withPlaybackSong($0) } ?? replacement)
             streamTimeOffset = 0
             lastObservedEngineProgress = systemEngine.progress
             progressStallMonitor = PlaybackStallMonitor()

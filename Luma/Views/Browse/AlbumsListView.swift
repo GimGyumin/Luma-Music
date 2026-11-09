@@ -37,10 +37,12 @@ struct AlbumsListView: View {
         Group {
             if let vm = viewModel {
                 content(vm)
+                    .transition(.opacity)
             } else {
                 LoadingStateView()
             }
         }
+        .lumaContentReveal(isReady: viewModel.map { !($0.isLoading && $0.albums.isEmpty) } ?? false)
         .navigationTitle(String(localized: "Albums", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale))
         .navigationBarTitleDisplayModeLarge()
         .lumaLibrarySearch(
@@ -64,7 +66,11 @@ struct AlbumsListView: View {
                     }
                 } label: {
                     Image(systemName: usesAlbumGrid ? "square.grid.2x2" : "list.bullet")
+                        .renderingMode(.original)
+                        .foregroundStyle(.primary)
                 }
+                .tint(.primary)
+                .foregroundStyle(.primary)
                 .accessibilityLabel("Album view and sorting")
             }
             ToolbarItem(placement: .primaryAction) {
@@ -76,10 +82,15 @@ struct AlbumsListView: View {
                     }
                 } label: {
                     Image(systemName: "ellipsis")
+                        .renderingMode(.original)
+                        .foregroundStyle(.primary)
                 }
+                .tint(.primary)
+                .foregroundStyle(.primary)
                 .accessibilityLabel("Filter albums")
             }
         }
+        .tint(.primary)
         .task(id: container?.serverState.isOnline) {
             Logger.boot.notice("🟢 AlbumsListView task fired — activeServer=\(String(describing: container?.serverState.activeServer?.baseURL), privacy: .public) isOnline=\(String(describing: container?.serverState.isOnline), privacy: .public)")
             guard let svc = container?.libraryService else {
@@ -91,7 +102,9 @@ struct AlbumsListView: View {
                 Logger.boot.notice("🟡 AlbumsListView: isOnline=false — skipping load")
                 return
             }
+            let renderTrace = DiagnosticsCenter.shared.begin(.libraryRender)
             await viewModel?.load()
+            renderTrace.finish(Task.isCancelled ? .cancelled : viewModel?.error == nil ? .success : .failure)
             // Detect changed album covers since last launch when the Albums page is opened.
             container?.albumCoverPreloadService.reconcileChangedCovers()
         }
@@ -126,8 +139,10 @@ struct AlbumsListView: View {
             )
         } else if usesAlbumGrid {
             albumsGrid(vm)
+                .transition(.opacity)
         } else {
             albumsList(vm)
+                .transition(.opacity)
         }
     }
 
@@ -237,7 +252,7 @@ struct AlbumsListView: View {
             case .albums, .compilations, .all:
                 return nil
             case .favorites:
-                return Set(favorites.lazy.filter { $0.serverId == serverId && $0.itemType == FavoriteType.album.rawValue }.map(\.itemId))
+                return FavoriteRecord.itemIDSet(from: favorites, itemType: .album, serverId: serverId)
             case .downloads:
                 let recordIds = downloadedAlbums.lazy.filter { $0.serverId == serverId }.map(\.albumId)
                 let trackIds = downloadedTracks.lazy.filter { $0.serverId == serverId }.compactMap(\.albumId)
@@ -286,7 +301,7 @@ struct AlbumsListView: View {
         Button(action: action) {
             Label(title, systemImage: systemImage)
                 .font(.headline)
-                .foregroundStyle(Color.lumaAccent)
+                .foregroundStyle(.primary)
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 12)
                 .lumaGlassCapsule()

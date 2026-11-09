@@ -57,6 +57,7 @@ extension PlayerService {
                     }
                     guard !Task.isCancelled, epoch == playbackEpoch, request == seekRequestGeneration else { return }
                     await pushPositionSnapshot(rate: paused ? 0 : nil)
+                    telemetry.finishSeek(.success)
                     return
                 }
             }
@@ -170,6 +171,7 @@ extension PlayerService {
 
     private func failSeek(target: Double, epoch: UInt64, request: UInt64) async {
         guard epoch == playbackEpoch, request == seekRequestGeneration else { return }
+        telemetry.finishSeek(.failure)
         let context = playbackContext
         seekState = .idle
         seekNeedsCommit = false

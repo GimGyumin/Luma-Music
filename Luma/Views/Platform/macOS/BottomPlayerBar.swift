@@ -55,11 +55,10 @@ struct BottomPlayerBar: View {
 
     /// Lossless / Hi-Res / Dolby badge for the mini bar (hidden when stream is lossy-transcoded or on expensive network).
     private var playbackQuality: AudioQualityKind? {
-        guard let playerState, !playerState.isLiveStream, let track = currentTrack else { return nil }
-        return AudioQualityClassifier.displayablePlaybackQuality(
-            for: track,
+        PlaybackQualityPresentation.quality(
+            for: playerState,
             isExpensive: container?.serverState.isExpensive == true,
-            isTranscoding: playerState.isDeliveringTranscodedAudio
+            usesAlternateTrack: false
         )
     }
 
@@ -312,6 +311,7 @@ struct BottomPlayerBar: View {
             .accessibilityValue(playerState?.isShuffled == true ? String(localized: "On", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale) : String(localized: "Off", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale))
 
             Button {
+                HapticFeedback.transport.trigger()
                 Task { try? await container?.playerService.skipToPrevious() }
             } label: {
                 Image(systemName: "backward.fill")
@@ -325,6 +325,7 @@ struct BottomPlayerBar: View {
             playPauseButton
 
             Button {
+                HapticFeedback.transport.trigger()
                 Task { try? await container?.playerService.skipToNext() }
             } label: {
                 Image(systemName: "forward.fill")
@@ -372,6 +373,7 @@ struct BottomPlayerBar: View {
                 .frame(width: 26, height: 26)
         } else {
             Button {
+                HapticFeedback.transport.trigger()
                 Task {
                     if isPlaying {
                         await container?.playerService.pause()

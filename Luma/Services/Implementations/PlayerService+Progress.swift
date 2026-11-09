@@ -16,20 +16,57 @@ import UIKit
 
 // Actor-isolated implementation; PlayerService remains the single playback owner.
 extension PlayerService {
+    /// Temporary device audit tracing; normal launches never set this variable.
+    func startPlaybackTrace(reason: String) {
+        guard Self.playbackTraceEnabled else { return }
+        let attempt = playbackEpoch
+        let sourceKind: String = {
+            guard let source = currentSource else { return "nil" }
+            return source.isLocal ? "local" : "remote"
+        }()
+        print("[PB-TRACE] start attempt=\(attempt) reason=\(reason) track=\(currentSource?.playbackSong?.id ?? "nil") source=\(sourceKind)")
+        Task { [weak self] in
+            guard let self else { return }
+            for tick in 0..<35 {
+                do { try await Task.sleep(for: .seconds(1)) } catch { return }
+                print(await self.playbackTraceSnapshot(attempt: attempt, tick: tick + 1))
+            }
+            print("[PB-TRACE] end attempt=\(attempt)")
+        }
+    }
+
+    private func playbackTraceSnapshot(attempt: UInt64, tick: Int) async -> String {
+        let ui = await MainActor.run {
+            (state.playbackState, state.position, state.currentTrack?.id)
+        }
+        let engineState = activeEngine.state
+        let progress = engineProgress()
+        let native = systemPlayback.isActive
+        let timeControl = native ? systemEngine.timeControlStatus.rawValue : -1
+        let buffered = native ? systemEngine.bufferedDuration : -1
+        let likely = native ? systemEngine.isLikelyToKeepUp : false
+        let streamState = engine.state
+        let streamProgress = engine.progress
+        let cache = cacheDownloadTask != nil
+        let auto = automaticDownloadWork.count
+        return "[PB-TRACE] attempt=\(attempt) t=\(tick) ui=\(ui.0) uiPos=\(String(format: "%.2f", ui.1)) track=\(ui.2 ?? "nil") engine=\(engineState) progress=\(String(format: "%.2f", progress)) native=\(native) tc=\(timeControl) buffered=\(String(format: "%.1f", buffered)) likely=\(likely) stream=\(streamState) streamProgress=\(String(format: "%.2f", streamProgress)) cache=\(cache) auto=\(auto)"
+    }
+
     /// Shared by explicit selections, native gapless handoffs and post-stall retries.
     /// A permanent transfer owns the copy only while it is actually scheduled/running.
     func scheduleEphemeralCache(song: DisplayableSong, source: MediaSource, serverId: UUID) {
-        guard cacheDownloadTask == nil,
-              LumaPerformance.budget.allowsAutomaticMediaDownloads,
-              !AudioQualityClassifier.shouldBypassEphemeralCache(source.playbackSong ?? song),
+        guard Self.isAutomaticCacheEnabled,
+              cacheDownloadTask == nil,
               case .stream(let streamURL, let headers, _, _, _) = source,
               !source.isJellyfinUniversal, streamURL.pathExtension.lowercased() != "m3u8" else { return }
         let songID = source.playbackSong?.id ?? song.id
         let key = "\(serverId.uuidString):\(songID)"
-        guard !automaticDownloadTasks.contains(key) else { return }
         let epoch = playbackEpoch
         let id = UUID()
         cacheDownloadID = id
+        if Self.playbackTraceEnabled {
+            print("[PB-CACHE] scheduled song=\(songID) attempt=\(epoch)")
+        }
         cacheDownloadTask = Task {
             defer {
                 if cacheDownloadID == id { cacheDownloadTask = nil; cacheDownloadID = nil }
@@ -37,15 +74,34 @@ extension PlayerService {
             let (format, revision) = await MainActor.run {
                 (cacheSettings.cacheFormat, (try? serverService.state.requestIdentity(for: serverId).revision) ?? 0)
             }
+            if let file = await cacheService.cachedURL(forSongId: songID, serverId: serverId) {
+                await cacheService.recordMetadata(song, serverId: serverId)
+                if epoch == playbackEpoch, !Task.isCancelled { systemEngine.provideSpectrumFile(file, forStream: streamURL) }
+                return
+            }
+            if let file = await downloadService.downloadedOriginalURL(forSongId: songID, serverId: serverId) {
+                if epoch == playbackEpoch, !Task.isCancelled { systemEngine.provideSpectrumFile(file, forStream: streamURL) }
+                return
+            }
+            guard LumaPerformance.budget.allowsAutomaticMediaDownloads,
+                  !AudioQualityClassifier.shouldBypassEphemeralCache(source.playbackSong ?? song),
+                  !automaticDownloadTasks.contains(key) else { return }
             let requestKey = "\(key):\(revision):\(format.rawValue)"
-            guard cacheDownloadRetry.permits(requestKey), await MainActor.run(body: {
+            if Self.playbackTraceEnabled {
+                print("[PB-CACHE] wait-start song=\(songID) attempt=\(epoch) format=\(format.rawValue)")
+            }
+            guard Self.isAutomaticCacheEnabled,
+                  cacheDownloadRetry.permits(requestKey), await MainActor.run(body: {
                 serverService.state.isOnline
                     && (!serverService.state.isLimitedNetwork || cacheSettings.cacheOverCellular)
                     && serverService.state.activeServer?.id == serverId
-            }), await cacheService.cachedURL(forSongId: songID, serverId: serverId) == nil,
+            }),
                !(await downloadService.isDownloaded(songId: songID, serverId: serverId)),
                await waitForEstablishedPlayback(of: songID, epoch: epoch),
                epoch == playbackEpoch, !Task.isCancelled else { return }
+            if Self.playbackTraceEnabled {
+                print("[PB-CACHE] wait-passed song=\(songID) attempt=\(epoch) progress=\(String(format: "%.2f", engineProgress()))")
+            }
             let url: URL?
             if format == .matchStream { url = streamURL }
             else {
@@ -53,7 +109,7 @@ extension PlayerService {
                 url = client?.streamURL(id: songID, maxBitRate: format.subsonicMaxBitRate,
                                         format: format == .flacOriginal ? "raw" : format.subsonicFormat)
             }
-            guard let url, epoch == playbackEpoch, !Task.isCancelled,
+            guard let url, Self.isAutomaticCacheEnabled, epoch == playbackEpoch, !Task.isCancelled,
                   LumaPerformance.budget.allowsAutomaticMediaDownloads,
                   !automaticDownloadTasks.contains(key),
                   !(await downloadService.isDownloading(songId: songID, serverId: serverId)),
@@ -63,10 +119,24 @@ extension PlayerService {
                         && serverService.state.activeServer?.id == serverId
                   }) else { return }
             do {
+                if Self.playbackTraceEnabled {
+                    print("[PB-CACHE] download-start song=\(songID) attempt=\(epoch)")
+                }
                 try await downloadAndCache(songId: songID, serverId: serverId, streamURL: url,
                                            customHeaders: headers, using: cacheSession)
+                await cacheService.recordMetadata(song, serverId: serverId)
+                if let file = await cacheService.cachedURL(forSongId: songID, serverId: serverId),
+                   epoch == playbackEpoch, !Task.isCancelled {
+                    systemEngine.provideSpectrumFile(file, forStream: streamURL)
+                }
                 cacheDownloadRetry.succeeded(requestKey)
+                if Self.playbackTraceEnabled {
+                    print("[PB-CACHE] download-done song=\(songID) attempt=\(epoch) progress=\(String(format: "%.2f", engineProgress()))")
+                }
             } catch {
+                if Self.playbackTraceEnabled {
+                    print("[PB-CACHE] download-failed song=\(songID) attempt=\(epoch) error=\(error)")
+                }
                 if !Task.isCancelled {
                     cacheDownloadRetry.failed(requestKey, error: error)
                     Logger.player.debug("Cache download failed for '\(songID, privacy: .public)': \(error, privacy: .public)")
@@ -198,6 +268,9 @@ extension PlayerService {
     /// Waits for a real advancing media clock rather than trusting an optimistic `.playing`
     /// callback. This keeps a background full-file transfer off the playback critical path.
     private func waitForEstablishedPlayback(of songID: String, epoch: UInt64) async -> Bool {
+        if Self.playbackTraceEnabled {
+            print("[PB-CACHE] stability-wait-start song=\(songID) attempt=\(epoch) progress=\(String(format: "%.2f", engineProgress()))")
+        }
         var stability = PlaybackPreparationStability()
         for _ in 0..<80 {
             guard epoch == playbackEpoch, !Task.isCancelled else { return false }
@@ -205,11 +278,18 @@ extension PlayerService {
                 (state.currentPlaybackTrack?.id ?? state.currentTrack?.id, state.playbackState, state.duration)
             }
             guard epoch == playbackEpoch, !Task.isCancelled, snapshot.0 == songID else { return false }
+            // AVPlayer exposes buffer ranges; AudioStreaming does not. Even with a
+            // native buffer, keep an optional full-file transfer out of the first
+            // startup window so it cannot compete with the opening stream.
+            let requiredStability: TimeInterval = systemPlayback.isActive ? 12 : 20
             if stability.observe(mediaTime: engineProgress(), now: ProcessInfo.processInfo.systemUptime,
-                                 isPlaying: snapshot.1 == .playing, requiredDuration: 5),
+                                 isPlaying: snapshot.1 == .playing, requiredDuration: requiredStability),
                !systemPlayback.isActive || PlaybackBufferPolicy.canPrepareNext(
                     isLocal: currentSource?.isLocal == true, bufferedAhead: systemEngine.bufferedDuration,
                     remaining: snapshot.2 - engineProgress()) {
+                if Self.playbackTraceEnabled {
+                    print("[PB-CACHE] stability-passed song=\(songID) attempt=\(epoch) progress=\(String(format: "%.2f", engineProgress())) buffered=\(String(format: "%.1f", systemEngine.bufferedDuration))")
+                }
                 return true
             }
             if snapshot.1 == .paused || snapshot.1 == .idle {
@@ -261,9 +341,10 @@ extension PlayerService {
                 let context = await self.playbackContext
                 let epoch = context.epoch
                 let trackID = await MainActor.run { self.state.currentTrack?.id }
-                let progress = await self.engineProgress()
+                guard let progress = await self.progressForPresentation(context: context) else { continue }
                 let audioDuration = await self.engineDuration()
                 let engineSeekable = await self.engineIsSeekable()
+                let engineIsProducing = await self.activeEngine.state == .playing
                 // Read once per tick: a hand-over may start or finish while this pass awaits.
                 let isHandingOver = await self.isTrackTransitionPending
                 guard !isHandingOver, epoch == (await self.playbackEpoch) else { continue }
@@ -283,7 +364,7 @@ extension PlayerService {
                 // A stream reconnect can reset its clock without ending the song. Recover
                 // before publishing zero, so neither the UI nor repeat-one treats it as EOF.
                 if !seekState.isSettling,
-                   await self.recoverUnexpectedProgressReset(progress: progress) { continue }
+                   await self.recoverUnexpectedProgressReset(progress: progress, handleTrackEnd: true) { continue }
                 let published = await self.commitPresentation(context) { state in
                     guard !Task.isCancelled, !isHandingOver, state.currentTrack?.id == trackID else { return false }
                     let cur = state.isLiveStream ? 0 : PlaybackDurationPolicy.resolve(
@@ -297,7 +378,13 @@ extension PlayerService {
                     }
                     if !seekState.isSettling, state.pendingSeekPosition == nil {
                         let clamped = cur > 0 ? min(progress, cur) : progress
-                        if state.position != clamped {
+                        let preserve = PlaybackPositionPolicy.shouldPreserveZeroReset(
+                            engineProgress: progress,
+                            previousPosition: state.position,
+                            playbackState: state.playbackState,
+                            engineIsProducing: engineIsProducing
+                        )
+                        if !preserve, state.position != clamped {
                             state.position = clamped
                         }
                     }
@@ -331,7 +418,25 @@ extension PlayerService {
         }
     }
 
-    func recoverUnexpectedProgressReset(progress: Double) async -> Bool {
+    func progressForPresentation(context: PlaybackContext) async -> Double? {
+        guard contextIsCurrent(context), !isTrackTransitionPending, !isHandlingEndOfTrack else { return nil }
+        if systemPlayback.isActive {
+            if let position = systemEngine.currentItemProgress { return streamTimeOffset + position }
+            // The last native item can drain while the app is suspended or its EOF
+            // callback is fenced by an earlier command. Never publish an empty queue as 0:00.
+            if let id = systemEngine.unacknowledgedEndID, transport.permitsAudio {
+                let generation = systemPlayback.generation
+                let time = systemEngine.progress
+                await Task {
+                    await handleSystemEngineEvent(.ended(generation, id, itemTime: time), expectedContext: context)
+                }.value
+            }
+            return nil
+        }
+        return engineProgress()
+    }
+
+    func recoverUnexpectedProgressReset(progress: Double, handleTrackEnd: Bool = false) async -> Bool {
         guard pendingRestoreInfo == nil, !isTrackTransitionPending, seekState == .idle,
               Self.didEngineProgressWrap(previous: lastObservedEngineProgress, current: progress) else { return false }
         let epoch = playbackEpoch
@@ -340,10 +445,14 @@ extension PlayerService {
         let commandID = transportCommandID
         let snapshot = await MainActor.run { (state.duration, state.playbackState.hasPlaybackIntent, state.isLiveStream) }
         guard epoch == playbackEpoch, request == seekRequestGeneration, commandID == transportCommandID,
-              !Task.isCancelled, snapshot.1, !snapshot.2,
-              !gaplessBridge.wasSelected,
-              !Self.isClockResetNearEnd(previous: previous, duration: snapshot.0) else { return false }
-        await recoverUnexpectedStreamReset(position: previous)
+              !Task.isCancelled, snapshot.1, !snapshot.2 else { return false }
+        if gaplessBridge.wasSelected || Self.isClockResetNearEnd(previous: previous, duration: snapshot.0) {
+            guard handleTrackEnd else { return false }
+            await finishTrackFromProgressTimer(context: playbackContext, position: previous,
+                                               engineConfirmed: gaplessBridge.wasSelected)
+        } else {
+            await recoverUnexpectedStreamReset(position: previous)
+        }
         return true
     }
 
@@ -435,7 +544,8 @@ extension PlayerService {
                 "[END-OF-TRACK] detected engine progress wrap (previous=\(previousProgress, format: .fixed(precision: 2))s current=\(progress, format: .fixed(precision: 2))s bridge=\(self.gaplessBridge.next != nil))"
             )
             endOfTrackStallStartedAt = nil
-            await handleEndOfTrack(engineConfirmed: gaplessBridge.next != nil)
+            await finishTrackFromProgressTimer(context: context, position: previousProgress,
+                                               engineConfirmed: gaplessBridge.next != nil)
             return
         }
 
@@ -458,7 +568,16 @@ extension PlayerService {
             "[END-OF-TRACK] stall watchdog fired near end (progress=\(progress, format: .fixed(precision: 2))s remaining=\(remaining, format: .fixed(precision: 2))s)"
         )
         endOfTrackStallStartedAt = nil
-        await handleEndOfTrack(engineConfirmed: false)
+        await finishTrackFromProgressTimer(context: context, position: progress, engineConfirmed: false)
+    }
+
+    private func finishTrackFromProgressTimer(context: PlaybackContext, position: Double, engineConfirmed: Bool) async {
+        // Starting the successor cancels the outgoing timer. The accepted EOF must
+        // outlive that timer, while a newer pause, stop or selection still wins.
+        await Task {
+            await handleEndOfTrack(engineConfirmed: engineConfirmed, expectedContext: context,
+                                   finishedProgress: position)
+        }.value
     }
 
     func stopProgressTimer() {

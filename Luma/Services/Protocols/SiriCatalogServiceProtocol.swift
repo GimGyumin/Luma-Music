@@ -21,6 +21,9 @@ protocol SiriCatalogServiceProtocol: AnyObject, Sendable {
     // MARK: - Entity lookups
 
     func songs(matching query: String, limit: Int) async -> [LumaSongEntity]
+    /// Genre/year/file-format search. Local-first, with `getSongsByGenre` and
+    /// `search3` used only as targeted fallbacks.
+    func songs(filteredBy query: LibrarySongQuery, limit: Int) async -> [LumaSongEntity]
     func song(id: LumaEntityID) async -> LumaSongEntity?
 
     func albums(matching query: String, limit: Int) async -> [LumaAlbumEntity]

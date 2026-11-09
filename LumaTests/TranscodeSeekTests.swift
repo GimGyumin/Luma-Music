@@ -76,6 +76,18 @@ struct TranscodeSeekTests {
 
 @MainActor
 struct TranscodeClockTests {
+    @Test func duplicateCallbackKeepsTheInFlightSeekGeneration() async throws {
+        let container = try AppContainer(inMemory: true, engine: FakePlaybackEngine())
+        let service = try #require(container.playerService as? PlayerService)
+        let song = DisplayableSong(id: "duplicate-seek", title: "Test", duration: 180)
+        container.playerState.currentTrack = song
+        container.playerState.duration = song.duration
+        let request = await service.armSettlingSeekForTest(115.543)
+        await service.seek(to: 115.543)
+        #expect(await service.seekRequestGeneration == request)
+        await service.stop()
+    }
+
     @Test func cancelledProgressTickCannotResetTheLatestScrubsEOFClock() async throws {
         let container = try AppContainer(inMemory: true, engine: FakePlaybackEngine())
         let service = try #require(container.playerService as? PlayerService)
@@ -106,8 +118,7 @@ struct TranscodeClockTests {
         // A finite, silent AAC file exercises actual native item replacement without a server.
         if encoding == "aac" {
             // FFmpeg-generated silence in ADTS, the progressive AAC container used by servers.
-            let fixture = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
-                .appendingPathComponent("Fixtures/SilentAAC.adts")
+            let fixture = LumaTestResources.fixture("Fixtures/SilentAAC.adts", sourceFile: #filePath)
             try FileManager.default.copyItem(at: fixture, to: url)
         } else {
             let file = try AVAudioFile(forWriting: url, settings: [
@@ -204,6 +215,11 @@ struct TranscodeClockTests {
 
 private extension PlayerService {
     func setPreviousEOFClockForTest(_ progress: Double) { lastObservedEngineProgress = progress }
+    func armSettlingSeekForTest(_ target: Double) -> UInt64 {
+        seekState = .settling(target: target, deadline: Date().addingTimeInterval(30))
+        return seekRequestGeneration
+    }
+
     func prepareOffsetScrubsForTest(url: URL) {
         currentSource = .stream(url, customHeaders: [:], supportsTranscodeOffset: true)
     }

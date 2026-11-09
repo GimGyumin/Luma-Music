@@ -39,6 +39,7 @@ struct PlaybackBufferPolicyTests {
         let normal = PlaybackBufferPolicy.startupBuffer(isLimited: false)
         let limited = PlaybackBufferPolicy.startupBuffer(isLimited: true)
         #expect(limited > normal)
+        #expect(normal <= 0.4)
         #expect(!PlaybackBufferPolicy.canStartPromptly(bufferedAhead: normal - 0.1, minimum: normal))
         #expect(PlaybackBufferPolicy.canStartPromptly(bufferedAhead: normal, minimum: normal))
         #expect(!PlaybackBufferPolicy.canStartPromptly(bufferedAhead: normal, minimum: limited))
@@ -58,6 +59,37 @@ struct PlaybackBufferPolicyTests {
         #expect(PlaybackBufferPolicy.forwardBuffer(isLocal: true, isLimited: true) == 0)
         #expect(PlaybackBufferPolicy.forwardBuffer(isLocal: false, isLimited: true)
             > PlaybackBufferPolicy.forwardBuffer(isLocal: false, isLimited: false))
+    }
+
+    @Test func restoredSeekIsRejectedOnceTheUserRequestsPlay() {
+        #expect(RestorationAdmissionPolicy.permits(trackMatches: true, playbackState: .paused, intent: nil))
+        #expect(RestorationAdmissionPolicy.permits(trackMatches: true, playbackState: .paused, intent: .pause))
+        #expect(!RestorationAdmissionPolicy.permits(trackMatches: true, playbackState: .paused, intent: .play))
+        #expect(!RestorationAdmissionPolicy.permits(trackMatches: true, playbackState: .loading, intent: nil))
+        #expect(!RestorationAdmissionPolicy.permits(trackMatches: false, playbackState: .paused, intent: nil))
+    }
+
+    @Test func pausedZeroClockNeverErasesSavedPosition() {
+        #expect(PlaybackPositionPolicy.shouldPreserveZeroReset(
+            engineProgress: 0, previousPosition: 120, playbackState: .paused,
+            engineIsProducing: false
+        ))
+        #expect(PlaybackPositionPolicy.shouldPreserveZeroReset(
+            engineProgress: 0, previousPosition: 120, playbackState: .recovering,
+            engineIsProducing: false
+        ))
+        #expect(!PlaybackPositionPolicy.shouldPreserveZeroReset(
+            engineProgress: 0, previousPosition: 120, playbackState: .playing,
+            engineIsProducing: true
+        ))
+        #expect(!PlaybackPositionPolicy.shouldPreserveZeroReset(
+            engineProgress: 0, previousPosition: 0, playbackState: .paused,
+            engineIsProducing: false
+        ))
+        #expect(!PlaybackPositionPolicy.shouldPreserveZeroReset(
+            engineProgress: 8, previousPosition: 120, playbackState: .paused,
+            engineIsProducing: false
+        ))
     }
 
     @Test func initialWaitRecoversWithoutAnotherStateChange() {

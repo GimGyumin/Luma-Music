@@ -5,31 +5,27 @@ import UIKit
 import AppKit
 #endif
 
-struct DeveloperSettingsView: View {
+/// Log rows embedded in the combined Advanced settings screen.
+struct DeveloperLogsSection: View {
     @State private var exporting = false
     @State private var exportedURL: URL?
     @State private var errorMessage: String?
     @State private var showShare = false
 
     var body: some View {
-        Form {
-            Section {
-                NavigationLink("Analytics Logs") { AnalyticsLogListView() }
-                SettingsActionRow("Export Logs", isBusy: exporting) {
-                    Task { await exportLogs() }
-                }
-                #if os(macOS)
-                if let exportedURL {
-                    ShareLink(item: exportedURL) { Label("Share Logs", systemImage: "square.and.arrow.up") }
-                }
-                #endif
-            } footer: {
-                Text("Exports available logs from this app session. Authentication values are removed.")
+        Section {
+            NavigationLink("Analytics Logs") { AnalyticsLogListView() }
+            SettingsActionRow("Export Logs", isBusy: exporting) {
+                Task { await exportLogs() }
             }
+            #if os(macOS)
+            if let exportedURL {
+                ShareLink(item: exportedURL) { Label("Share Logs", systemImage: "square.and.arrow.up") }
+            }
+            #endif
+        } footer: {
+            Text("Exports available logs from this app session. Authentication values are removed.")
         }
-        .formStyle(.grouped)
-        .modifier(SettingsSubpageStyle())
-        .navigationTitle(Text("Developer"))
         .alert("Log Export Failed", isPresented: Binding(get: { errorMessage != nil }, set: { if !$0 { errorMessage = nil } })) {
             Button("OK", role: .cancel) { errorMessage = nil }
         } message: { Text(errorMessage ?? "") }

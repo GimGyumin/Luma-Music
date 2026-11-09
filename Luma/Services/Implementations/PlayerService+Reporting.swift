@@ -23,8 +23,8 @@ extension PlayerService {
         playingNowTask = nil
         periodicPlaybackReportTask?.cancel()
         periodicPlaybackReportTask = nil
-        gaplessMetadataTask?.cancel()
-        gaplessMetadataTask = nil
+        trackMetadataTask?.cancel()
+        trackMetadataTask = nil
     }
 
     func checkScrobbleThreshold() async {
@@ -32,12 +32,13 @@ extension PlayerService {
         // so attributing it to the incoming one would scrobble the wrong song.
         guard !isTrackTransitionPending, !detector.fired else { return }
         let context = playbackContext
-        guard let song = await MainActor.run(body: { state.currentTrack }) else { return }
+        let (currentSong, currentAccount) = await MainActor.run { (state.currentTrack, serverService.state.activeServer) }
+        guard let song = currentSong, let account = currentAccount else { return }
         guard contextIsCurrent(context), !isTrackTransitionPending else { return }
-        fireScrobbleIfThresholdMet(song: song)
+        fireScrobbleIfThresholdMet(song: song, account: account)
     }
 
-    private func fireScrobbleIfThresholdMet(song: DisplayableSong) {
+    private func fireScrobbleIfThresholdMet(song: DisplayableSong, account: ServerSnapshot) {
         guard Self.isListeningHistoryEnabled else { return }
         let duration = song.duration
         let songId = currentSource?.playbackSong?.id ?? song.id
@@ -45,8 +46,9 @@ extension PlayerService {
         let accumulated = accumulatedPlayedSeconds + segmentContrib
         guard detector.check(duration: duration, accumulated: accumulated) else { return }
         let startDate = trackPlayStartDate ?? Date()
+        let session = accumulatorID
         Task { [libraryService] in
-            await libraryService.scrobble(songId: songId, submission: true)
+            await libraryService.submitListen(session: session, track: songId, date: startDate, account: account)
         }
         Task { [listenBrainzService] in
             await listenBrainzService.notifyScrobbleThreshold(song: song, startDate: startDate)
@@ -107,7 +109,7 @@ extension PlayerService {
         }
         guard let song = recordedTrack,
               let startDate else { return }
-        guard let serverId = await MainActor.run(body: { serverService.state.activeServer?.id }) else { return }
+        guard let serverId = await MainActor.run(body: { serverService.state.activeServer?.localReplayID }) else { return }
 
         guard durationListened >= 30 else {
             Logger.player.debug("[STATS] Skip — durationListened=\(durationListened)s < 30s")
@@ -118,6 +120,7 @@ extension PlayerService {
         recordedAccumulatorID = recordingID
         let trackDuration = song.duration
         let dto = PlaybackEventDTO(
+            id: recordingID,
             trackId: song.id,
             trackTitle: song.title,
             albumId: song.albumId,
@@ -129,7 +132,7 @@ extension PlayerService {
             durationListened: durationListened,
             trackDuration: trackDuration,
             wasCompleted: completed,
-            serverId: serverId.uuidString
+            serverId: serverId
         )
         // Persistence is ordered, but no longer holds up audio startup. The immutable DTO
         // keeps delayed writes attributed to the outgoing song, never the newly visible one.
@@ -149,6 +152,8 @@ extension PlayerService {
         customHeaders: [String: String],
         using session: URLSession
     ) async throws {
+        // A setting change may land while a transfer is already in flight.
+        guard Self.isAutomaticCacheEnabled else { throw CancellationError() }
         var request = URLRequest(url: streamURL)
         for (key, value) in customHeaders {
             request.setValue(value, forHTTPHeaderField: key)
@@ -170,6 +175,10 @@ extension PlayerService {
             try Task.checkCancellation()
             let ext = streamURL.pathExtension
             let mimeType = response.mimeType ?? (ext.isEmpty ? "audio/mpeg" : "audio/\(ext)")
+
+            // The user may have turned Automatic Downloads off while this
+            // transfer was in flight. Do not add a new cache entry after that.
+            guard Self.isAutomaticCacheEnabled else { throw CancellationError() }
 
             let cachedURL = try await cacheService.storeTransferred(
                 fileAt: tempURL,

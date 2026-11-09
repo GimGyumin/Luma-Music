@@ -10,6 +10,11 @@ import OSLog
 
 struct WrappedView: View {
     @Environment(\.appContainer) private var container
+    @Environment(\.scenePhase) private var scenePhase
+    @AppStorage(ReplayHistorySync.enabledKey) private var replayEnabled = true
+    @State private var firstYear: Int?
+    @State private var mirrorRevision: String?
+    @State private var syncStatus = ""
     @State private var selectedPeriod: WrappedPeriod = .currentMonth()
     @State private var data: WrappedData?
     @State private var isLoading = true
@@ -31,8 +36,10 @@ struct WrappedView: View {
         let now = Date()
         let year = calendar.component(.year, from: now)
         let month = calendar.component(.month, from: now)
-        var periods: [WrappedPeriod] = (1...month).map { .month(year: year, month: $0) }
-        periods.append(.year(year))
+        let displayedYear = selectedPeriod.calendarYear
+        let lastMonth = displayedYear == year ? month : 12
+        var periods = (1...lastMonth).map { WrappedPeriod.month(year: displayedYear, month: $0) }
+        periods += stride(from: year, through: min(year, firstYear ?? year), by: -1).map { WrappedPeriod.year($0) }
         return periods
     }
 
@@ -48,6 +55,20 @@ struct WrappedView: View {
             LazyVStack(alignment: .leading, spacing: LumaSpacing.xl) {
                 WrappedPeriodPicker(selectedPeriod: $selectedPeriod, availablePeriods: availablePeriods)
 
+                HStack {
+                    Text(syncStatus).font(.caption).foregroundStyle(.secondary)
+                    Spacer()
+                    Menu {
+                        Toggle("Navidrome Replay sync", isOn: $replayEnabled)
+                        Button("Sync now") { Task { await synchronize(force: true) } }.disabled(!replayEnabled)
+                        Button("Check past history") { Task { await synchronize(force: true, rescan: true) } }.disabled(!replayEnabled)
+                    } label: { Image(systemName: "arrow.triangle.2.circlepath") }
+                    .accessibilityLabel("Replay sync options")
+                }
+                ContextualGuideNote(
+                    guide: .replay,
+                    message: String(localized: "Replay uses local listening events; Navidrome history is only used when Replay sync is enabled. A recap appears after enough plays are recorded.", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale)
+                )
                 if isLoading {
                     ProgressView()
                         .frame(maxWidth: .infinity)
@@ -60,8 +81,33 @@ struct WrappedView: View {
                         action: .init(label: "Retry") { Task { await loadData() } }
                     )
                 } else if let d = data, d.totalTracksPlayed > 0 {
+                    if let date = d.serverSyncedAt {
+                        Text("Plays from Navidrome · listening time measured by Luma. Last synced \(date.formatted()).")
+                            .font(.caption).foregroundStyle(.secondary)
+                        if let unlinked = d.unlinkedLocalListens, unlinked > 0 {
+                            Text("\(unlinked) local listens without a confirmed match are preserved in local history.")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
                     WrappedStatHero(data: d)
                         .cascadeAppear(order: 0, trigger: appeared)
+                    if let daily = d.dailyPlays, !daily.isEmpty {
+                        DisclosureGroup("Listening activity (UTC)") {
+                            let monthly: Bool = { if case .year = d.period { return true }; return false }()
+                            let calendar = WrappedPeriod.serverCalendar
+                            let buckets = Dictionary(grouping: daily.keys) { date in
+                                monthly ? calendar.dateInterval(of: .month, for: date)?.start ?? date : date
+                            }
+                            ForEach(buckets.keys.sorted(), id: \.self) { date in
+                                let count = (buckets[date] ?? []).reduce(0) { $0 + (daily[$1] ?? 0) }
+                                HStack {
+                                    Text(date, format: Date.FormatStyle(date: .abbreviated, time: .omitted, timeZone: .gmt))
+                                    Spacer()
+                                    Text(count.plural("play", "plays"))
+                                }.font(.caption)
+                            }
+                        }
+                    }
                     WrappedTopArtistsSection(artists: d.topArtists)
                         .cascadeAppear(order: 1, trigger: appeared)
                     WrappedTopTracksSection(tracks: d.topTracks)
@@ -87,21 +133,39 @@ struct WrappedView: View {
             .padding(.top, LumaSpacing.l)
             .padding(.bottom, LumaSpacing.xl)
         }
-        .refreshable { await loadData() }
+        .refreshable { await synchronize(force: true) }
         .miniPlayerBottomMargin()
         .navigationTitle(String(localized: "Replay", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale))
-        .task(id: selectedPeriod) {
+        .task(id: "\(container?.serverState.activeServer?.localReplayID ?? "")|\(selectedPeriod)|\(replayEnabled)") {
+            data = nil
+            wrappedPlaylistId = nil
+            isLoading = true
             await loadData()
+        }
+        .task(id: "\(container?.serverState.activeServer?.replayProfile ?? "")|\(scenePhase == .active)|\(replayEnabled)") {
+            guard scenePhase == .active else { return }
+            syncStatus = ""
+            mirrorRevision = nil
+            if let c = container, let account = c.serverState.activeServer {
+                let date = await c.statsService.firstHistoryDate(for: account)
+                guard !Task.isCancelled else { return }
+                firstYear = date.map { Calendar.current.component(.year, from: $0) }
+            }
+            while !Task.isCancelled {
+                if !ProcessInfo.processInfo.isLowPowerModeEnabled || syncStatus.isEmpty { await synchronize(force: false) }
+                do { try await Task.sleep(for: .seconds(60)) } catch { return }
+            }
         }
         .background {
             if let container,
-               let serverId = container.serverState.activeServer?.id.uuidString {
+               let serverId = container.serverState.activeServer?.localReplayID {
                 PlaybackEventWatcher(serverId: serverId) {
                     scheduleQuietRefresh()
                 }
                 .modelContainer(container.listeningModelContainer)
             }
         }
+        .onChange(of: container?.libraryIndexService.lastIndexedAt) { _, _ in scheduleQuietRefresh() }
         .onDisappear {
             refreshDebounceTask?.cancel()
             refreshDebounceTask = nil
@@ -138,13 +202,28 @@ struct WrappedView: View {
         }
     }
 
+    private func synchronize(force: Bool, rescan: Bool = false) async {
+        guard let container, let account = container.serverState.activeServer else { return }
+        let status = await container.replayHistory.sync(force: force, rescan: rescan)
+        guard !Task.isCancelled, account == container.serverState.activeServer else { return }
+        syncStatus = status
+        let revision = try? await container.replayHistory.revision(for: account)
+        if !force && mirrorRevision == revision && data != nil { return }
+        let earliest = await container.statsService.firstHistoryDate(for: account)
+        guard !Task.isCancelled, account == container.serverState.activeServer else { return }
+        firstYear = earliest.map { Calendar.current.component(.year, from: $0) }
+        mirrorRevision = revision
+        await refreshData()
+    }
+
     private func refreshData() async {
         #if DEBUG
         guard !overrideWithFakeData else { return }
         #endif
         guard let container, let serverId = container.serverState.activeServer?.id.uuidString else { return }
+        let profile = container.serverState.activeServer?.localReplayID
         let result = await container.statsService.wrappedData(for: selectedPeriod, serverId: serverId, calendar: .current)
-        guard !Task.isCancelled else { return }
+        guard !Task.isCancelled, container.serverState.activeServer?.localReplayID == profile, result.period == selectedPeriod else { return }
         data = result
     }
 
@@ -175,6 +254,7 @@ struct WrappedView: View {
         appeared = false
         if isFirstPaint { isLoading = true }
         wrappedPlaylistId = nil
+        let profile = container.serverState.activeServer?.localReplayID
         let result = await container.statsService.wrappedData(
             for: selectedPeriod, serverId: serverId, calendar: .current
         )
@@ -182,6 +262,7 @@ struct WrappedView: View {
         if case .year(let y) = selectedPeriod {
             wrappedPlaylistId = await container.wrappedPlaylistService.playlistId(year: y, serverId: serverId)
         }
+        guard !Task.isCancelled, container.serverState.activeServer?.localReplayID == profile, result.period == selectedPeriod else { return }
         data = result
         isLoading = false
         appeared = true

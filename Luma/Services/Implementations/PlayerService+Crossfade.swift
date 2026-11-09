@@ -66,11 +66,16 @@ extension PlayerService {
     }
 
     private func prefetchNextTrack(nextSong: DisplayableSong, serverId: UUID) async {
-        guard !Task.isCancelled, gaplessBridge.next == nil else { return }
+        guard PlayerService.isAutomaticCacheEnabled,
+              !Task.isCancelled, gaplessBridge.next == nil else { return }
         let epoch = playbackEpoch
         let songId = nextSong.id
 
         if await cacheService.cachedURL(forSongId: songId, serverId: serverId) != nil {
+            await cacheService.recordMetadata(nextSong, serverId: serverId)
+            let hit = DiagnosticsCenter.shared.begin(.prefetch)
+            hit.increment(.cacheHits)
+            hit.finish(.success)
             Logger.player.debug("[PREFETCH] '\(songId, privacy: .public)' already cached")
             return
         }
@@ -89,6 +94,9 @@ extension PlayerService {
 
         // Use the same server/authentication/quality policy as foreground playback. A raw
         // Subsonic URL bypassed Jellyfin sessions and the listener's quality preference.
+        let prefetchTrace = DiagnosticsCenter.shared.begin(.prefetch)
+        var prefetchResult = DiagnosticsResult.failure
+        defer { prefetchTrace.finish(prefetchResult) }
         guard let source = try? await mediaResolver.resolve(songId: songId, serverId: serverId, song: nextSong),
               epoch == playbackEpoch, !Task.isCancelled, gaplessBridge.next == nil, !source.isLocal, !source.isLiveStream,
               source.url.pathExtension.lowercased() != "m3u8",
@@ -102,8 +110,11 @@ extension PlayerService {
                 customHeaders: source.customHeaders,
                 using: prefetchSession
             )
+            await cacheService.recordMetadata(nextSong, serverId: serverId)
+            prefetchResult = .success
             Logger.player.info("[PREFETCH] '\(songId, privacy: .public)' prefetch complete")
         } catch {
+            prefetchResult = DiagnosticsResult.classify(error)
             Logger.player.debug("[PREFETCH] '\(songId, privacy: .public)' prefetch failed: \(error, privacy: .public)")
         }
     }

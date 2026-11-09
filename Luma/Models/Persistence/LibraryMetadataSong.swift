@@ -24,6 +24,9 @@ final class LibraryMetadataSong {
     var albumName: String?
     var artistId: String?
     var genre: String?
+    /// Optional so existing stores migrate without a versioned schema.
+    var year: Int?
+    var audioFormat: String?
     var duration: TimeInterval
     var isrc: String?
     var displayComposer: String?
@@ -44,6 +47,8 @@ final class LibraryMetadataSong {
         self.albumName = song.albumName
         self.artistId = song.artistId
         self.genre = song.genre
+        self.year = song.year
+        self.audioFormat = song.audioFormat
         self.duration = song.duration
         self.isrc = song.isrc
         self.displayComposer = song.displayComposer
@@ -61,6 +66,8 @@ final class LibraryMetadataSong {
         self.albumName = song.albumName
         self.artistId = song.artistId
         self.genre = song.genre
+        self.year = song.year
+        self.audioFormat = song.audioFormat
         self.duration = song.duration
         self.isrc = song.isrc
         self.displayComposer = song.displayComposer
@@ -78,8 +85,10 @@ final class LibraryMetadataSong {
             albumName: albumName,
             artistId: artistId,
             genre: genre,
+            year: year,
             duration: duration,
             coverArtId: coverArtId,
+            audioFormat: audioFormat,
             isrc: isrc,
             displayComposer: displayComposer
         )

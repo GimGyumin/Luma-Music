@@ -18,6 +18,9 @@ final class LumaUITestsLaunchTests: XCTestCase {
 
     override func setUpWithError() throws {
         continueAfterFailure = false
+        #if os(macOS)
+        throw XCTSkip("Launch UI tests are exercised on iOS; the macOS host cannot boot this UI-test app.")
+        #endif
     }
 
     @MainActor

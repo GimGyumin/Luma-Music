@@ -6,6 +6,7 @@
 import SwiftUI
 import SwiftSonic
 import SwiftData
+import AppIntents
 import OSLog
 
 struct ArtistDetailView: View {
@@ -15,11 +16,19 @@ struct ArtistDetailView: View {
     @State private var viewModel: ArtistDetailViewModel?
     @State private var selectedOutOfLibraryArtist: SimilarArtistRecommendation?
     @Query private var artistFavoriteMatches: [FavoriteRecord]
-    @Environment(DominantColorExtractor.self) private var colorExtractor
+    @AppStorage("coverArtUploadVersion") private var coverVersion = 0
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var portrait: ArtistPortraitTreatment?
+    @State private var sharpPortrait: PlatformImage?
+    @State private var collapsed = false
+    private static let portraitCache: NSCache<NSString, ArtistPortraitTreatment> = {
+        let cache = NSCache<NSString, ArtistPortraitTreatment>()
+        cache.countLimit = 24
+        return cache
+    }()
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.colorSchemeContrast) private var colorSchemeContrast
-    @State private var dominantColor: Color = .clear
-    @State private var heroHeight: CGFloat = 540
+    private let heroHeight: CGFloat = 540
     @State private var showBiographySheet = false
     @State private var showPinLimitAlert = false
     /// Identity of this page instance: a repeated `[ARTIST-PAGE] task start` with a new id means the
@@ -50,14 +59,31 @@ struct ArtistDetailView: View {
     // MARK: Theming — cover extract → refined Apple Music atmosphere.
     private var atmosphere: AlbumAtmosphere {
         AlbumAtmosphere.from(
-            dominantColor: dominantColor,
+            dominantColor: portrait?.color ?? .clear,
             appearance: AlbumAtmosphere.appearance(
                 colorScheme: colorScheme,
                 increaseContrast: colorSchemeContrast == .increased
             )
         )
     }
-    private var theme: PlaylistTheme { atmosphere.heroTheme }
+    private var portraitKey: String {
+        let token = container?.artworkImageCache.palettePreparationToken(for: heroCoverArtId) ?? heroCoverArtId
+        return "\(artist.id)#\(coverVersion)#\(token)"
+    }
+    private var navigationScheme: ColorScheme? {
+        guard !collapsed, let portrait else { return atmosphere.preferredColorScheme }
+        return LumaColors.prefersLightControl(on: portrait.navigationColor) ? .dark : .light
+    }
+    /// Lets Siri AI resolve “this artist” while the artist page is on screen.
+    private var onscreenEntityIdentifier: EntityIdentifier? {
+        guard #available(iOS 27.0, macOS 27.0, *) else { return nil }
+        return OnscreenEntityAnnotation.artistIdentifier(
+            id: artist.id,
+            name: artist.name,
+            serverId: container?.serverState.activeServer?.id
+        )
+    }
+
     private var bodyColor: Color { atmosphere.isThemed ? atmosphere.pageColor : systemBackgroundColor }
     private var headerTextColor: Color { atmosphere.contentColor }
     private var headerSecondaryColor: Color { atmosphere.secondaryContentColor }
@@ -129,49 +155,47 @@ struct ArtistDetailView: View {
                                 .environment(\.colorScheme, atmosphere.preferredColorScheme ?? colorScheme)
                             }
                         }
-                        .chromeAppearance(atmosphere.preferredColorScheme)
+                        .onScrollGeometryChange(for: Bool.self) { geometry in
+                            geometry.contentOffset.y + geometry.contentInsets.top > heroHeight * 0.68
+                        } action: { _, value in collapsed = value }
+                        .chromeAppearance(navigationScheme)
                         .ignoresSafeArea(.container, edges: .top)
-                        .lumaSoftTopScrollEdge()
-                        .lumaStatusBarScrim(isLightPage: atmosphere.isLight)
-                        // One page tone for the whole page, matching the hero's terminal melt tone
-                        // (the same solid backdrop the album page uses) and animating the tone change
-                        // with the shared theme curve — a raw `.background(bodyColor)` let the hero's
-                        // melt and the body settle at different times, which read as a seam.
-                        .background { AlbumAtmosphereBackground(atmosphere: atmosphere) }
+                        .lumaSoftTopScrollEdge(isVisible: collapsed)
+                        .lumaStatusBarScrim(isLightPage: atmosphere.isLight, isEnabled: collapsed)
+                        // Use the same solid color as the final stop of the portrait mask.
+                        .background { bodyColor.ignoresSafeArea() }
                         .refreshable { await vm.reloadAll() }
                         .miniPlayerBottomMargin()
+                        .transition(.opacity)
                     }
                 }
             } else {
                 skeletonGrid
             }
         }
+        .lumaContentReveal(isReady: viewModel?.artist != nil)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background { AlbumAtmosphereBackground(atmosphere: atmosphere) }
+        .appEntityIdentifier(onscreenEntityIdentifier)
+        .background { bodyColor.ignoresSafeArea() }
         .overlay {
             if viewModel == nil || (viewModel?.artist == nil && viewModel?.error == nil) {
-                AlbumAtmosphereBackground(atmosphere: atmosphere)
+                bodyColor.ignoresSafeArea()
                     .overlay { ProgressView().tint(headerTextColor) }
             }
         }
-        .task(id: heroCoverArtId) {
-            // Resolve the tone even while the initial artist request is still covered.
-            let cached = colorExtractor.bottomStripColor(for: heroCoverArtId, image: nil)
-            if cached != .clear { dominantColor = cached }
-            else { await loadDominantColor(coverArtId: heroCoverArtId) }
-        }
+        .task(id: portraitKey) { await loadPortrait(key: portraitKey, coverID: heroCoverArtId) }
         .navigationTitle("")
         .navigationBarTitleDisplayModeInline()
         #if os(iOS)
-        .lumaImmersiveStatusBar(colorScheme: atmosphere.preferredColorScheme)
-        .toolbarColorScheme(atmosphere.preferredColorScheme, for: .navigationBar)
+        .lumaImmersiveStatusBar(colorScheme: navigationScheme, scrolledChromeProgress: collapsed ? 1 : 0,
+                                floatingOverArtwork: true)
         // Let NavigationStack retain its own interactive pop recognizers.
         .navigationBarBackButtonHidden(false)
         #endif
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 artistMoreMenu
-                    .tint(headerTextColor)
+                    .tint(navigationScheme.map { $0 == .dark ? Color.white : .black } ?? headerTextColor)
             }
         }
         .alert(String(localized: "Pin Limit Reached", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale), isPresented: $showPinLimitAlert) {
@@ -240,13 +264,8 @@ struct ArtistDetailView: View {
     private func artistHero(vm: ArtistDetailViewModel) -> some View {
         let albums = vm.artist?.album ?? []
         let count = albums.count
-        return ImmersiveCoverHero(
-            coverArtId: heroCoverArtId,
-            coverImage: nil,
-            theme: theme,
-            heroHeight: heroHeight,
-            meltTargetColor: bodyColor
-        ) {
+        return ZStack(alignment: .bottom) {
+            artistBackdrop
             VStack(spacing: LumaSpacing.s) {
                 Text(artist.name)
                     .font(.system(.title, design: .rounded, weight: .semibold))
@@ -270,16 +289,15 @@ struct ArtistDetailView: View {
                     .buttonStyle(.plain)
                     .accessibilityLabel(String(localized: "About", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale))
 
-                    // Big white round Play (= shuffle) — just the play glyph.
+                    // High-contrast Play disc with the glyph cut out of its center.
                     Button {
                         Task { await playAll() }
                     } label: {
                         Circle()
-                            .fill(.white)
+                            .fill(headerTextColor)
                             .frame(width: 66, height: 66)
                             .overlay {
-                                // The play glyph is KNOCKED OUT of the white disc (transparent — the hero shows
-                                // through it), centred.
+                                // Reveal the themed hero through the glyph.
                                 Image(systemName: "play.fill")
                                     .font(.system(size: 26, weight: .bold))
                                     .blendMode(.destinationOut)
@@ -327,24 +345,59 @@ struct ArtistDetailView: View {
                 }
             }
             .padding(.horizontal, LumaSpacing.l)
+            .padding(.bottom, LumaSpacing.l)
         }
+        .frame(minHeight: heroHeight, alignment: .bottom)
     }
 
-    private func loadDominantColor(coverArtId: String) async {
-        guard let image = await container?.artworkImageCache.load(coverArtId: coverArtId, tier: .hero) else { return }
-        // Artist heroes are frequently portraits: analyze the bottom region (transition
-        // band into the body) rather than the whole-image average, so a bright face doesn't
-        // become the page tone. Falls back to the whole-image dominant when a strip is
-        // unavailable (non-square / too small artwork).
-        let analysis = await Task.detached(priority: .utility) {
-            AlbumColorAnalyzer.analyze(from: image, bottomStrip: true)?.raw
-        }.value
-        guard let analysis, !Task.isCancelled else { return }
-        _ = colorExtractor.storeColor(packed: analysis.packedBackground, for: coverArtId)
-        _ = colorExtractor.storeBottomStripColor(packed: analysis.packedBackground, for: coverArtId)
-        withAnimation(LumaAnimation.theme) {
-            dominantColor = analysis.backgroundCandidate
+    private var artistBackdrop: some View {
+        GeometryReader { geo in
+            let y = geo.frame(in: .scrollView).minY
+            let stretch = max(0, y)
+            let height = geo.size.height + stretch
+            let progress = min(1, max(0, -y / max(1, geo.size.height * 0.72)))
+            let blend = progress * progress * (3 - 2 * progress)
+            let shift = reduceMotion ? 0 : min(max(0, -y) * 0.12, geo.size.height * 0.09)
+            ZStack {
+                if let sharpPortrait {
+                    Image(platformImage: sharpPortrait).resizable().scaledToFill()
+                        .frame(width: geo.size.width, height: height)
+                        .offset(y: shift)
+                    if let blurred = portrait?.blurred {
+                        Image(decorative: blurred, scale: 1).resizable().scaledToFill()
+                            .frame(width: geo.size.width, height: height)
+                            .offset(y: shift)
+                            .mask(LinearGradient(stops: [
+                                .init(color: .black.opacity(0.65 * blend), location: 0),
+                                .init(color: .black.opacity(0.65 * blend), location: 0.50 - 0.26 * blend),
+                                .init(color: .black, location: 0.83 - 0.15 * blend)
+                            ], startPoint: .top, endPoint: .bottom))
+                    }
+                }
+                LinearGradient(stops: [.init(color: bodyColor.opacity(0), location: 0.51 - 0.12 * blend),
+                                       .init(color: bodyColor, location: 0.82 - 0.06 * blend)],
+                               startPoint: .top, endPoint: .bottom)
+            }
+            .frame(width: geo.size.width, height: height)
+            .clipped()
+            .offset(y: -stretch)
         }
+        .accessibilityHidden(true)
+        .allowsHitTesting(false)
+    }
+
+    private func loadPortrait(key: String, coverID: String) async {
+        let cache = container?.artworkImageCache
+        portrait = Self.portraitCache.object(forKey: key as NSString)
+        sharpPortrait = cache?.cachedImage(for: coverID, tier: .hero)
+        let image = await cache?.load(coverArtId: coverID, tier: .hero)
+        guard !Task.isCancelled, key == portraitKey, let image else { return }
+        sharpPortrait = image
+        guard portrait == nil else { return }
+        let result = await Task.detached(priority: .utility) { AlbumColorAnalyzer.artistPortrait(from: image) }.value
+        guard !Task.isCancelled, key == portraitKey, let result else { return }
+        Self.portraitCache.setObject(result, forKey: key as NSString)
+        withAnimation(reduceMotion ? nil : LumaAnimation.theme) { portrait = result }
     }
 
     // MARK: - Body sections (Gate 2)
@@ -367,20 +420,23 @@ struct ArtistDetailView: View {
             sectionHeader("Latest Release")
             AlbumNavigationLink(album: album, namespace: albumZoomNamespace, sourceContext: "featured") { sourceID, namespace in
                 HStack(spacing: LumaSpacing.m) {
-                    CoverArtView(id: album.coverArt ?? album.id, size: 200, tier: .thumb)
-                        .frame(width: 88, height: 88)
+                    CoverArtView(id: album.coverArt ?? album.id, size: 260, tier: .hero)
+                        .frame(width: 120, height: 120)
                         .lumaMatchedTransitionSource(id: sourceID, in: namespace)
                         .clipShape(RoundedRectangle(cornerRadius: LumaCornerRadius.standard, style: .continuous))
                     VStack(alignment: .leading, spacing: 4) {
+                        if let date = ReleaseDateFormatting.displayDate(
+                            from: album.releaseDate ?? album.originalReleaseDate,
+                            fallbackYear: album.year
+                        ) {
+                            Text(verbatim: date)
+                                .font(.lumaCaption)
+                                .foregroundStyle(headerSecondaryColor)
+                        }
                         Text(album.name)
                             .font(.lumaCellTitle)
                             .foregroundStyle(headerTextColor)
                             .lineLimit(2)
-                        if let year = ReleaseDateFormatting.yearOnly(from: album.releaseDate ?? album.originalReleaseDate) ?? album.year {
-                            Text(verbatim: "\(year)")
-                                .font(.lumaCaption)
-                                .foregroundStyle(headerSecondaryColor)
-                        }
                         Text(LumaCountLabel.songs(album.songCount))
                             .font(.lumaCaption)
                             .foregroundStyle(headerSecondaryColor)
@@ -446,16 +502,9 @@ struct ArtistDetailView: View {
 
     /// Albums grouped by release type (Albums, Singles & EPs, Compilations, Live Album).
     private var albumsSections: some View {
-        ForEach(viewModel?.albumSections ?? [], id: \.0) { section, items in
+        ForEach((viewModel?.albumSections ?? []).filter { !$0.1.isEmpty }, id: \.0) { section, items in
             VStack(alignment: .leading, spacing: LumaSpacing.s) {
                 sectionHeader(section.rawValue)
-                if items.isEmpty {
-                    Text(String(localized: "No compilations in the library.", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale))
-                        .font(.subheadline)
-                        .foregroundStyle(headerSecondaryColor)
-                        .padding(.horizontal, LumaSpacing.l)
-                        .padding(.vertical, LumaSpacing.s)
-                }
                 ScrollView(.horizontal, showsIndicators: false) {
                     LazyHStack(alignment: .top, spacing: LumaSpacing.m) {
                         ForEach(items) { album in

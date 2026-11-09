@@ -14,10 +14,12 @@ nonisolated struct PinnedEntry: TimelineEntry {
 
     static var placeholder: PinnedEntry {
         let items = [
-            SharedPinnedItem(id: "p1", kind: .album,    title: "Album Title",    subtitle: "Artist", coverArtFilename: nil),
-            SharedPinnedItem(id: "p2", kind: .playlist, title: "My Playlist",    subtitle: "4 tracks", coverArtFilename: nil),
-            SharedPinnedItem(id: "p3", kind: .album,    title: "Another Album",  subtitle: "Artist", coverArtFilename: nil),
-            SharedPinnedItem(id: "p4", kind: .album,    title: "Fourth Item",    subtitle: "Artist", coverArtFilename: nil),
+            SharedPinnedItem(id: "p1", kind: .artist, title: "10CM", subtitle: nil, coverArtFilename: nil),
+            SharedPinnedItem(id: "p2", kind: .artist, title: "Michael Jackson", subtitle: nil, coverArtFilename: nil),
+            SharedPinnedItem(id: "p3", kind: .artist, title: "불빨간사춘기", subtitle: nil, coverArtFilename: nil),
+            SharedPinnedItem(id: "p4", kind: .album, title: "5.0 (Acoustic)", subtitle: "10CM", coverArtFilename: nil),
+            SharedPinnedItem(id: "p5", kind: .album, title: "Thriller 40", subtitle: "Michael Jackson", coverArtFilename: nil),
+            SharedPinnedItem(id: "p6", kind: .album, title: "Merry Go Round - EP", subtitle: "불빨간사춘기", coverArtFilename: nil),
         ]
         return PinnedEntry(date: Date(), items: items, coverImages: [:])
     }
@@ -33,7 +35,7 @@ struct PinnedProvider: TimelineProvider {
     }
 
     func getSnapshot(in context: Context, completion: @escaping (PinnedEntry) -> Void) {
-        completion(makeEntry())
+        completion(context.isPreview ? .placeholder : makeEntry())
     }
 
     func getTimeline(in context: Context, completion: @escaping (Timeline<PinnedEntry>) -> Void) {

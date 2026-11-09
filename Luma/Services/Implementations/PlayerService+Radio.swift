@@ -63,7 +63,7 @@ extension PlayerService {
         cancelAutoExtendFetch()
         liveStreamStallTask?.cancel()
         liveStreamStallTask = nil
-        currentSource = source
+        await replaceCurrentSource(source)
         pendingRestoreInfo = nil
 
         restorePauseTask?.cancel()
@@ -72,10 +72,6 @@ extension PlayerService {
             setEngineVolume(restoredVolume)
             isMutedForRestore = false
         }
-
-        #if os(iOS)
-        configureAudioSessionIfNeeded(preferMultichannel: false)
-        #endif
 
         guard await commitPresentation(context, { state in
             state.currentTrack = nil

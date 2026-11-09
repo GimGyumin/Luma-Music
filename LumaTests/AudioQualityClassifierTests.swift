@@ -1,5 +1,6 @@
 import Testing
 import Foundation
+import SwiftSonic
 @testable import Luma
 
 @Suite("AudioQualityClassifier")
@@ -14,6 +15,25 @@ struct AudioQualityClassifierTests {
         // reports transcoding (and a cellular network).
         #expect(AudioQualityClassifier.displayablePlaybackQuality(for: song, isExpensive: true, isTranscoding: false) == .multichannel(channels: 6, codec: nil))
         #expect(AudioQualityClassifier.displayablePlaybackQuality(for: song, isExpensive: false, isTranscoding: true) == .multichannel(channels: 6, codec: nil))
+    }
+
+    @Test("Playback quality presentation keeps alternate-track and live-stream surface rules")
+    @MainActor
+    func playbackQualityPresentation() throws {
+        let state = PlayerState()
+        state.currentTrack = DisplayableSong(id: "primary", title: "Music", audioFormat: "flac")
+        state.currentPlaybackTrack = DisplayableSong(id: "alternate", title: "Music", audioFormat: "flac", channelCount: 6)
+
+        #expect(PlaybackQualityPresentation.quality(for: state, isExpensive: false)
+            == AudioQualityClassifier.classify(state.currentPlaybackTrack!))
+        #expect(PlaybackQualityPresentation.quality(for: state, isExpensive: false, usesAlternateTrack: false)
+            == AudioQualityClassifier.classify(state.currentTrack!))
+        state.currentRadio = try JSONDecoder().decode(
+            InternetRadioStation.self,
+            from: Data(#"{"id":"radio","name":"Radio","streamUrl":"https://example.invalid/radio"}"#.utf8)
+        )
+        #expect(PlaybackQualityPresentation.quality(for: state, isExpensive: false) == nil)
+        #expect(PlaybackQualityPresentation.quality(for: state, isExpensive: false, allowsLiveStream: true) != nil)
     }
 
     @Test("Dolby surround gets a Dolby label even without Atmos metadata", arguments: [
@@ -48,6 +68,27 @@ struct AudioQualityClassifierTests {
         #expect(AudioQualityClassifier.usesAtmosSpatialization(song))
     }
 
+    @Test("An Atmos delivery label cannot turn an incompatible file into Atmos", arguments: ["mp3", "aac", "flac", "alac", "wav", "aiff", "opus", "ac3"])
+    func incompatibleAtmosLabels(_ format: String) {
+        let song = DisplayableSong(id: "stereo", title: "Song (Dolby Atmos)",
+            albumName: "Album (Dolby Atmos)", genre: "Dolby Atmos", audioFormat: format,
+            channelCount: 2, comment: "Converted from Dolby Atmos")
+        #expect(AudioQualityClassifier.classify(song) != .dolbyAtmos)
+        #expect(!AtmosVariantCatalogue.isAtmos(song))
+    }
+
+    @Test("Atmosphere and missing codec evidence cannot advertise Atmos")
+    func ambiguousAtmosLabels() {
+        for title in ["Dolby Atmosphere", "Atmospheric Music"] {
+            let song = DisplayableSong(id: "ambiguous", title: title, audioFormat: "m4a", contentType: "audio/mp4")
+            #expect(AudioQualityClassifier.classify(song) != .dolbyAtmos)
+        }
+        let unknown = DisplayableSong(id: "unknown", title: "Song", albumName: "Album (Dolby Atmos)")
+        #expect(AudioQualityClassifier.classify(unknown) != .dolbyAtmos)
+        let aac = DisplayableSong(id: "aac", title: "Song (Dolby Atmos)", audioFormat: "m4a", contentType: "audio/aac")
+        #expect(AudioQualityClassifier.classify(aac) != .dolbyAtmos)
+    }
+
     @Test("Channel layout uses Apple's 5.1 / 7.1 shorthand")
     func channelLayoutLabels() {
         #expect(AudioQualityKind.channelLayout(6) == "5.1")
@@ -66,7 +107,7 @@ struct AudioQualityClassifierTests {
 
     @Test("Album badge prefers Atmos, then Dolby, then surround, then lossless")
     func bestQualityRanking() {
-        let atmos = DisplayableSong(id: "atmos", title: "A", genre: "Dolby Atmos", channelCount: 6)
+        let atmos = DisplayableSong(id: "atmos", title: "A", genre: "Dolby Atmos", audioFormat: "eac3", channelCount: 6)
         let dolby = DisplayableSong(id: "dolby", title: "B", audioFormat: "eac3", channelCount: 6)
         let surround = DisplayableSong(id: "surround", title: "C", audioFormat: "flac", channelCount: 6)
         let lossless = DisplayableSong(id: "flac", title: "D", audioFormat: "flac", bitDepth: 16, samplingRate: 44_100)
@@ -77,7 +118,7 @@ struct AudioQualityClassifierTests {
 
     @Test("Album header keeps spatial and lossless masters visible together")
     func albumQualityBadges() {
-        let atmos = DisplayableSong(id: "atmos", title: "A", genre: "Dolby Atmos", channelCount: 6)
+        let atmos = DisplayableSong(id: "atmos", title: "A", genre: "Dolby Atmos", audioFormat: "eac3", channelCount: 6)
         let hiRes = DisplayableSong(
             id: "hires",
             title: "B",
@@ -163,6 +204,29 @@ struct AudioQualityClassifierTests {
         #expect(!AudioQualityClassifier.isDolbyAudio(song))
         let unknown = DisplayableSong(id: "unknown", title: "Music", audioFormat: "flac")
         #expect(!AudioQualityClassifier.shouldBypassEphemeralCache(unknown))
+    }
+
+    @Test func nativeLosslessSampleRateIsRequestedForOriginalSources() throws {
+        let hires = DisplayableSong(id: "hires", title: "Music", audioFormat: "flac",
+                                    bitDepth: 24, samplingRate: 96_000, channelCount: 2)
+        let raw = try #require(URL(string: "https://music.example.com/rest/stream?id=hires&format=raw"))
+        #expect(AudioQualityClassifier.nativePlaybackSampleRate(
+            for: hires, source: .stream(raw, customHeaders: [:])
+        ) == 96_000)
+        #expect(AudioQualityClassifier.nativePlaybackSampleRate(
+            for: hires, source: .downloaded(try #require(URL(string: "file:///tmp/hires.flac")))
+        ) == 96_000)
+
+        let transcode = try #require(URL(string: "https://music.example.com/rest/stream?id=hires&format=aac"))
+        #expect(AudioQualityClassifier.nativePlaybackSampleRate(
+            for: hires, source: .stream(transcode, customHeaders: [:])
+        ) == nil)
+
+        let lossy = DisplayableSong(id: "lossy", title: "Music", audioFormat: "mp3",
+                                    samplingRate: 44_100, channelCount: 2)
+        #expect(AudioQualityClassifier.nativePlaybackSampleRate(
+            for: lossy, source: .downloaded(try #require(URL(string: "file:///tmp/lossy.mp3")))
+        ) == nil)
     }
 
     @Test func cellularDolbyPolicyDoesNotClassifyAmbiguousMP4OrDTSAsDolby() {

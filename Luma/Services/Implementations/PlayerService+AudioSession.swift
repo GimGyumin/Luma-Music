@@ -18,7 +18,10 @@ import UIKit
 
 #if os(iOS)
 extension PlayerService {
-    func configureAudioSessionIfNeeded(preferMultichannel: Bool = true) {
+    func configureAudioSessionIfNeeded(
+        preferMultichannel: Bool = true,
+        preferredSampleRate: Double? = nil
+    ) {
         sessionActivationRetryTask?.cancel()
         sessionActivationRetryTask = nil
         do {
@@ -31,6 +34,26 @@ extension PlayerService {
                 try session.setSupportsMultichannelContent(true)
                 audioSessionConfigured = true
                 Logger.player.info("[SPATIAL] AVAudioSession configured — longFormAudio + multichannel")
+            }
+
+            // Lossless playback requests the master's native rate instead of silently
+            // inheriting the previous track's rate. The final rate still depends on the
+            // connected route (built-in speaker/AirPods usually cap at 48 kHz).
+            if let preferredSampleRate,
+               preferredSampleRate.isFinite,
+               preferredSampleRate >= 8_000,
+               preferredSampleRate != preferredAudioSessionSampleRate {
+                do {
+                    try session.setPreferredSampleRate(preferredSampleRate)
+                    preferredAudioSessionSampleRate = preferredSampleRate
+                    Logger.player.info(
+                        "[SAMPLE-RATE] requested=\(Int(preferredSampleRate), privacy: .public)Hz actual=\(Int(session.sampleRate), privacy: .public)Hz"
+                    )
+                } catch {
+                    Logger.player.warning(
+                        "[SAMPLE-RATE] request failed requested=\(Int(preferredSampleRate), privacy: .public)Hz — \(error.localizedDescription, privacy: .public)"
+                    )
+                }
             }
 
             if preferMultichannel {
@@ -60,6 +83,7 @@ extension PlayerService {
             } else {
                 // Category may need a hard reset after media-services reset.
                 audioSessionConfigured = false
+                preferredAudioSessionSampleRate = nil
                 Logger.player.error("Failed to configure AVAudioSession: \(error, privacy: .public)")
             }
         }
@@ -165,6 +189,7 @@ extension PlayerService {
                 "[INTERRUPTION] setActive(true) failed: \(error.localizedDescription, privacy: .public) — resetting category"
             )
             audioSessionConfigured = false
+            preferredAudioSessionSampleRate = nil
             configureAudioSessionIfNeeded(preferMultichannel: systemPlayback.isActive)
         }
 
@@ -236,6 +261,7 @@ extension PlayerService {
                 try AVAudioSession.sharedInstance().setActive(true)
             } catch {
                 audioSessionConfigured = false
+                preferredAudioSessionSampleRate = nil
                 configureAudioSessionIfNeeded(preferMultichannel: false)
             }
             engine.resume()
@@ -299,6 +325,7 @@ extension PlayerService {
             try AVAudioSession.sharedInstance().setActive(true)
         } catch {
             audioSessionConfigured = false
+            preferredAudioSessionSampleRate = nil
             configureAudioSessionIfNeeded(preferMultichannel: false)
         }
         engine.stop()
@@ -308,6 +335,7 @@ extension PlayerService {
 
     private func handleMediaServicesReset() async {
         audioSessionConfigured = false
+        preferredAudioSessionSampleRate = nil
         audioInterruptionActive = false
         interruptedWhilePlaying = false
         pendingScreenshotResume = false
@@ -474,6 +502,10 @@ extension PlayerService {
             .map { $0.portType.rawValue }
             .joined(separator: ",")
         Logger.player.info("[ROUTE] routeChange reason=\(reason.logDescription, privacy: .public) outputs=[\(outputs, privacy: .public)]")
+        // A new output route may support a different native rate. Re-request the
+        // current track's rate on the next engine start instead of reusing the
+        // previous route's cached decision.
+        preferredAudioSessionSampleRate = nil
 
         switch reason {
         case .oldDeviceUnavailable:
@@ -531,10 +563,15 @@ extension PlayerService {
         )
         guard await publishEngineRecovery(), epoch == playbackEpoch, !systemPlayback.isActive else { return }
         pendingRestoreInfo = (seekTime: position, pause: false)
+        let track = await MainActor.run { state.currentTrack }
         startEnginePlayback(
             url: source.url,
             headers: source.customHeaders,
-            useSystemPlayer: true
+            useSystemPlayer: true,
+            preferredSampleRate: AudioQualityClassifier.nativePlaybackSampleRate(
+                for: track ?? source.playbackSong,
+                source: source
+            )
         )
         startProgressTimer()
         await pushPositionSnapshot(rate: 1.0)

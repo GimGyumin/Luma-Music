@@ -31,8 +31,10 @@ nonisolated struct CostBoundedCache<Key: Hashable, Value> {
     }
 
     mutating func touch(_ key: Key) {
-        guard entries[key] != nil else { return }
-        accessOrder.removeAll { $0 == key }
+        // Every cached key occurs exactly once. Repeated view reads of the newest
+        // entry need no mutation; other hits move just the suffix after that key.
+        guard accessOrder.last != key, let index = accessOrder.firstIndex(of: key) else { return }
+        accessOrder.remove(at: index)
         accessOrder.append(key)
     }
 
@@ -53,7 +55,7 @@ nonisolated struct CostBoundedCache<Key: Hashable, Value> {
     mutating func removeValue(forKey key: Key) {
         guard let entry = entries.removeValue(forKey: key) else { return }
         totalCost -= entry.cost
-        accessOrder.removeAll { $0 == key }
+        if let index = accessOrder.firstIndex(of: key) { accessOrder.remove(at: index) }
     }
 
     mutating func removeAll() {

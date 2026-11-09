@@ -97,7 +97,12 @@ extension LyricsViewModel {
 
         // Line selection, instrumental gaps and word fill share the filtered clock.
         if karaokePlaybackMs != adjustedMs {
-            karaokeSampleHostTime = CACurrentMediaTime()
+            let now = CACurrentMediaTime()
+            let expected = LyricPresentationClock.time(sampleMs: karaokeFrameTimeMs,
+                sampledAt: karaokeSampleHostTime, now: now, advancing: isPlaying)
+            karaokeFrameTimeMs = LyricPresentationClock.reconcile(sampleMs: adjustedMs,
+                expectedMs: expected, seeking: amllSeeking)
+            karaokeSampleHostTime = now
             karaokePlaybackMs = adjustedMs
         }
 
@@ -152,7 +157,7 @@ extension LyricsViewModel {
     func presentationTimeMs(at hostTime: CFTimeInterval = CACurrentMediaTime()) -> Int {
         let advancing = isShown && isActive && isPlaying
             && lyricSeekTargetMs == nil && playerState.pendingSeekPosition == nil
-        return LyricPresentationClock.time(sampleMs: karaokePlaybackMs,
+        return LyricPresentationClock.time(sampleMs: karaokeFrameTimeMs,
             sampledAt: karaokeSampleHostTime, now: hostTime, advancing: advancing)
     }
 
@@ -163,6 +168,7 @@ extension LyricsViewModel {
         emphasizedLineIndices = []
         karaokeByteEnds = [:]
         karaokePlaybackMs = 0
+        karaokeFrameTimeMs = 0
     }
 
     nonisolated static func karaokeByteEnds(
@@ -341,7 +347,7 @@ extension LyricsViewModel {
     func synchronizeSeekClock(to seconds: TimeInterval) {
         guard seconds.isFinite else { return }
         amllForceSeek = true
-        let target = Int(max(0, seconds) * 1000)
+        let target = LyricTime.milliseconds(fromSeconds: max(0, seconds))
         lastPositionSampleMs = target
         lastPositionSampleAt = CACurrentMediaTime()
         lastDisplayedPositionMs = target
@@ -350,6 +356,7 @@ extension LyricsViewModel {
             let offset = lyricDocument.map { LyricTime.milliseconds(fromSeconds: $0.lyricOffset) } ?? 0
             karaokePlaybackMs = target - structured.offset + offset
         }
+        karaokeFrameTimeMs = karaokePlaybackMs
         karaokeSampleHostTime = CACurrentMediaTime()
         update(elapsedMs: target)
     }
@@ -395,6 +402,7 @@ extension LyricsViewModel {
 
         } else {
             followState = .followingPlayback
+            synchronizeSeekClock(to: playerState.pendingSeekPosition ?? playerState.position)
             scrollRestoreToken += 1
             reconcileTracking()
         }
@@ -440,7 +448,7 @@ extension LyricsViewModel {
     func startTimer() {
         // Always restart so a fresh track / resume after pause can't leave a dead task.
         stopTimer()
-        let observedMs = lyricSeekTargetMs ?? Int((playerState.pendingSeekPosition ?? playerState.position) * 1000)
+        let observedMs = lyricSeekTargetMs ?? LyricTime.milliseconds(fromSeconds: playerState.pendingSeekPosition ?? playerState.position)
         lastPositionSampleMs = observedMs
         lastPositionSampleAt = CACurrentMediaTime()
         // After a seek the engine still reports the pre-seek position for a few ticks.
@@ -477,7 +485,7 @@ extension LyricsViewModel {
     /// Accepts forward progress unconditionally; only filters out backward
     /// jumps that are clearly stale pre-seek artifacts.
     func interpolatedElapsedMs() -> Int {
-        if let target = lyricSeekTargetMs ?? playerState.pendingSeekPosition.map({ Int($0 * 1000) }) {
+        if let target = lyricSeekTargetMs ?? playerState.pendingSeekPosition.map({ LyricTime.milliseconds(fromSeconds: $0) }) {
             // File parsers and AVPlayer can publish a stale clock during repositioning.
             // Never scroll back to it, or extrapolate vocals while a seek is still pending.
             lastPositionSampleMs = target
@@ -485,7 +493,7 @@ extension LyricsViewModel {
             lastDisplayedPositionMs = target
             return target
         }
-        let nowMs = Int(playerState.position * 1000)
+        let nowMs = LyricTime.milliseconds(fromSeconds: playerState.position)
         let now = CACurrentMediaTime()
 
         if nowMs != lastPositionSampleMs {
@@ -517,6 +525,13 @@ extension LyricsViewModel {
 }
 
 nonisolated enum LyricPresentationClock {
+    /// Small transport quantization corrections settle across frames instead of snapping glyphs.
+    static func reconcile(sampleMs: Int, expectedMs: Int, seeking: Bool) -> Int {
+        let correction = sampleMs - expectedMs
+        guard !seeking, abs(correction) <= 100 else { return sampleMs }
+        return expectedMs + min(2, max(-2, correction))
+    }
+
     static func time(sampleMs: Int, sampledAt: Double, now: Double, advancing: Bool) -> Int {
         guard advancing, now.isFinite, sampledAt.isFinite else { return sampleMs }
         // Bound extrapolation if the main actor or audio sampling stalls.

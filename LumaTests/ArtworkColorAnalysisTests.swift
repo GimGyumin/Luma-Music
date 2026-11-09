@@ -39,6 +39,22 @@ struct ArtworkColorAnalysisTests {
     }
 
 
+    @Test(arguments: seeds)
+    func albumAppearancePoliciesPreserveIdentityAndContrast(seed: (name: String, color: Color)) {
+        let analysis = RawArtworkColorAnalysis(color: seed.color)
+        #expect(ArtworkColorTransformer.page(from: analysis).base == seed.color)
+        for highContrast in [false, true] {
+            for light in [nil, true, false] as [Bool?] {
+                let palette = ArtworkColorTransformer.page(from: analysis, increasedContrast: highContrast, systemLight: light)
+                if let light { #expect(palette.isLight == light) }
+                let ink: Color = palette.isLight ? .black : .white
+                let minimum = highContrast ? 7.0 : 4.5
+                #expect(contrast(ink, on: palette.base) >= minimum)
+                #expect(contrast(palette.text2, on: palette.base) >= minimum)
+            }
+        }
+    }
+
     nonisolated private static let seeds: [(name: String, color: Color)] = [
         ("pure-black", Color(red: 0.00, green: 0.00, blue: 0.00)),
         ("pure-white", Color(red: 1.00, green: 1.00, blue: 1.00)),

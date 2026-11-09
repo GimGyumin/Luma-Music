@@ -2,6 +2,14 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+    <key>FirebaseCrashlyticsCollectionEnabled</key>
+    <false/>
+    <key>firebase_performance_collection_enabled</key>
+    <false/>
+    <key>firebase_performance_instrumentation_enabled</key>
+    <false/>
+	<key>FirebaseAppDelegateProxyEnabled</key>
+	<false/>
 	<key>CFBundleLocalizations</key>
 	<array>
 		<string>en</string>
@@ -22,11 +30,12 @@
 	<array>
 		<string>app.luma.wrapped.monthly-update</string>
 		<string>app.luma.library.preparation</string>
+		<string>app.luma.cache.maintenance</string>
 	</array>
 	<key>CFBundleGetInfoString</key>
-	<string>Luma $(MARKETING_VERSION) (26A1001rc1), © 2026 Kyumin</string>
+	<string>Luma $(MARKETING_VERSION) (26A1001e), © 2026 Kyumin</string>
 	<key>LumaBuildIdentifier</key>
-	<string>26A1001rc1</string>
+	<string>26A1001e</string>
 	<key>NSHumanReadableCopyright</key>
 	<string>© 2026 Kyumin</string>
 	<key>CFBundleURLTypes</key>

@@ -205,7 +205,7 @@ struct RCAuditRegressionTests {
             identity: PlaybackCheckpointIdentity(accountID: config.id, trackID: track.id, queueIndex: 0, revision: "fixture"))
         let restore = Task { await player.restoreSession() }
         try await waitUntil { resolver.pending != nil }
-        let replacementURL = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("Fixtures/SilentMP3.mp3")
+        let replacementURL = LumaTestResources.fixture("Fixtures/SilentMP3.mp3", sourceFile: #filePath)
         if selectNewTrack {
             resolver.followUpSource = .downloaded(replacementURL)
             try await player.play(tracks: [DisplayableSong(id: "b", title: "B")], startIndex: 0)

@@ -24,10 +24,12 @@ struct ArtistListView: View {
         Group {
             if let vm = viewModel {
                 browseContent(vm)
+                    .transition(.opacity)
             } else {
                 LoadingStateView()
             }
         }
+        .lumaContentReveal(isReady: viewModel.map { !($0.isLoading && $0.indexes.isEmpty) } ?? false)
         .lumaContentWidth()
         .navigationTitle(String(localized: "Artists", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale))
         .navigationBarTitleDisplayModeLarge()
@@ -51,10 +53,15 @@ struct ArtistListView: View {
                     }
                 } label: {
                     Image(systemName: "line.3.horizontal.decrease")
+                        .renderingMode(.original)
+                        .foregroundStyle(.primary)
                 }
+                .tint(.primary)
+                .foregroundStyle(.primary)
                 .accessibilityLabel("Sort artists")
             }
         }
+        .tint(.primary)
         .task(id: container?.serverState.isOnline) {
             guard let svc = container?.libraryService else { return }
             if viewModel == nil { viewModel = ArtistListViewModel(libraryService: svc) }
@@ -122,6 +129,7 @@ struct ArtistListView: View {
                     proxy.scrollTo(letter, anchor: .top)
                 }
             }
+            .transition(.opacity)
         }
     }
 
@@ -133,9 +141,7 @@ struct ArtistListView: View {
             case .all:
                 return nil
             case .favorites:
-                return Set(favorites.lazy.filter {
-                    $0.serverId == serverId && $0.itemType == FavoriteType.artist.rawValue
-                }.map(\.itemId))
+                return FavoriteRecord.itemIDSet(from: favorites, itemType: .artist, serverId: serverId)
             case .downloads:
                 return Set(downloadedTracks.lazy.filter { $0.serverId == serverId }.compactMap(\.artistId))
             }

@@ -9,19 +9,16 @@ struct LoadingStateView: View {
     var message: String? = nil
 
     var body: some View {
-        VStack(spacing: LumaSpacing.m) {
-            ProgressView()
-                .controlSize(.large)
-                .tint(Color.lumaAccent)
-
-            if let message {
-                Text(message)
-                    .font(.lumaBody)
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .padding(LumaSpacing.xl)
+        // Library/recently-added/playlist loading screens intentionally use the
+        // page background instead of a spinner or skeleton shapes. The content
+        // appears in place once the first payload is ready.
+        #if canImport(UIKit)
+        Color(uiColor: .systemBackground)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        #else
+        Color(nsColor: .windowBackgroundColor)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        #endif
     }
 }
 

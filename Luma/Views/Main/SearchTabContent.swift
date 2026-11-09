@@ -9,6 +9,7 @@ struct SearchTabContent: View {
     @State private var localSearchQuery = ""
     @State private var viewModel: SearchViewModel?
     @State private var isSearchActive = false
+    @State private var requestedSearchFocus = false
     @FocusState private var searchFocused: Bool
     @State private var category: SearchCategory = .all
     @State private var downloadsOnly = false
@@ -28,7 +29,7 @@ struct SearchTabContent: View {
         "\(trimmedQuery)|\(serverId)|\(container?.serverState.isServerReachable != false)|\(downloadsOnly)|\(isOnline)|\(viewModel != nil)"
     }
 
-    var body: some View {
+    private var searchContent: some View {
         VStack(spacing: 0) {
             if isSearchActive { searchScope }
             if !searchFocused, !trimmedQuery.isEmpty { categoryPicker }
@@ -61,6 +62,10 @@ struct SearchTabContent: View {
             // into that same transaction also animates every row while the keyboard lays out.
             .transaction { $0.animation = nil }
         }
+    }
+
+    private var searchableContent: some View {
+        searchContent
         .navigationTitle(String(localized: "Search", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale))
         .lumaAccountProfileToolbar(isVisible: !isSearchActive)
         .searchable(text: searchQuery, isPresented: $isSearchActive,
@@ -91,10 +96,24 @@ struct SearchTabContent: View {
                 searchQuery.wrappedValue = query
             }
         }
+    }
+
+    var body: some View {
+        searchableContent
         .onReceive(NotificationCenter.default.publisher(for: .lumaFocusSearch)) { _ in
-            if !isSearchActive { isSearchActive = true }
-            if !searchFocused { searchFocused = true }
+            guard !searchFocused, !requestedSearchFocus else { return }
+            requestedSearchFocus = true
+            isSearchActive = true
         }
+        .task(id: requestedSearchFocus) {
+            guard requestedSearchFocus else { return }
+            // Let searchable install its presented field before requesting the keyboard.
+            await Task.yield()
+            guard !Task.isCancelled, isSearchActive else { return }
+            searchFocused = true
+            requestedSearchFocus = false
+        }
+        .onDisappear { requestedSearchFocus = false }
         .onReceive(NotificationCenter.default.publisher(for: .lumaSearchInApp)) { note in
             guard let query = note.userInfo?["query"] as? String else { return }
             searchQuery.wrappedValue = query
@@ -110,7 +129,10 @@ struct SearchTabContent: View {
         }
         .onChange(of: downloadsOnly) { _, _ in category = .all }
         .onChange(of: isSearchActive) { _, active in
-            if !active, trimmedQuery.isEmpty { category = .all }
+            if !active {
+                requestedSearchFocus = false
+                if trimmedQuery.isEmpty { category = .all }
+            }
         }
         .task(id: searchRunKey) { await runSearch() }
         .miniPlayerBottomMargin()

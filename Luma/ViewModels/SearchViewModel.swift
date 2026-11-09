@@ -157,6 +157,9 @@ final class SearchViewModel {
     }
 
     private func updateResultOrder() async {
+        let mergeTrace = DiagnosticsCenter.shared.begin(.searchMerge)
+        var mergeResult = DiagnosticsResult.cancelled
+        defer { mergeTrace.finish(Task.isCancelled ? .cancelled : mergeResult) }
         presentationGeneration &+= 1
         let generation = presentationGeneration
         let token = requestID
@@ -180,6 +183,7 @@ final class SearchViewModel {
         } onCancel: { worker.cancel() }
         guard token == requestID, generation == presentationGeneration, !Task.isCancelled else { return }
         rankedItems = rows
+        mergeResult = .success
     }
 
     func canLoadMore(_ category: SearchCategory) -> Bool {

@@ -25,14 +25,30 @@ enum SharedWidgetData {
         return Color(red: r, green: g, blue: b)
     }
 
-    /// Reads the latest recently played track from SharedStorage, or nil if empty.
-    static func latestRecentlyPlayed() -> SharedTrackInfo? {
+    /// Reads the latest now-playing snapshot, or nil when Luma has not played anything yet.
+    static func nowPlayingState() -> SharedNowPlayingState? {
         SharedStorage.read { defaults in
-            guard let data = defaults.data(forKey: SharedStorageKey.recentlyPlayedItems.rawValue),
-                  let items = try? JSONDecoder().decode([SharedTrackInfo].self, from: data) else {
+            guard let data = defaults.data(forKey: SharedStorageKey.nowPlayingState.rawValue) else {
                 return nil
             }
-            return items.first
+            return try? JSONDecoder().decode(SharedNowPlayingState.self, from: data)
+        }
+    }
+
+    /// Reads the latest recently played track from SharedStorage, or nil if empty.
+    static func latestRecentlyPlayed() -> SharedTrackInfo? {
+        recentlyPlayed(limit: 1).first
+    }
+
+    static func recentlyPlayed(limit: Int = 8) -> [SharedTrackInfo] {
+        SharedStorage.read { defaults in
+            guard limit > 0,
+                  let data = defaults.data(forKey: SharedStorageKey.recentlyPlayedItems.rawValue),
+                  let items = try? JSONDecoder().decode([SharedTrackInfo].self, from: data) else {
+                return []
+            }
+            var seen = Set<String>()
+            return items.filter { seen.insert($0.id).inserted }.prefix(limit).map { $0 }
         }
     }
 

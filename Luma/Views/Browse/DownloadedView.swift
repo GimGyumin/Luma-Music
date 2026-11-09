@@ -35,6 +35,7 @@ private struct DownloadedContent: View {
     @Query private var albums: [DownloadedAlbum]
     @Query private var playlists: [DownloadedPlaylist]
     @Query private var tracks: [DownloadedTrack]
+    @Query private var cachedTracks: [CachedTrack]
 
     init(serverId: UUID) {
         self.serverId = serverId
@@ -48,6 +49,7 @@ private struct DownloadedContent: View {
             sort: [SortDescriptor(\DownloadedPlaylist.name)]
         )
         _tracks = Query(filter: #Predicate<DownloadedTrack> { track in track.serverId == sid })
+        _cachedTracks = Query(filter: #Predicate<CachedTrack> { track in track.serverId == sid })
     }
 
     private var displayAlbums: [DownloadedAlbumDisplay] {
@@ -81,7 +83,7 @@ private struct DownloadedContent: View {
     }
 
     var body: some View {
-        if displayAlbums.isEmpty && playlists.isEmpty && tracks.isEmpty {
+        if displayAlbums.isEmpty && playlists.isEmpty && tracks.isEmpty && cachedTracks.isEmpty {
             EmptyStateView(
                 systemImage: "arrow.down.circle",
                 title: "Nothing downloaded",

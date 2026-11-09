@@ -30,4 +30,24 @@ final class FavoriteRecord {
         self.starredDate = starredDate
         self.serverId = serverId
     }
+
+    /// UI lists compare against the remote item ID, never the composite SwiftData key.
+    /// Building this once per list also avoids rebuilding a Set for every row.
+    static func itemIDSet(
+        from records: [FavoriteRecord],
+        itemType: FavoriteType,
+        serverId: UUID
+    ) -> Set<String> {
+        Set(records.lazy
+            .filter { $0.serverId == serverId && $0.itemType == itemType.rawValue }
+            .map(\.itemId))
+    }
+
+    /// Song-only convenience for album/playlist lists whose @Query is already
+    /// scoped to the active server and item type.
+    static func songIDSet(from records: [FavoriteRecord]) -> Set<String> {
+        Set(records.lazy
+            .filter { $0.itemType == FavoriteType.song.rawValue }
+            .map(\.itemId))
+    }
 }

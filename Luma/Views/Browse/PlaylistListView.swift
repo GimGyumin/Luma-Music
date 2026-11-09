@@ -16,6 +16,8 @@ struct PlaylistListView: View {
     @State private var showCreateSheet = false
     @State private var searchText = ""
     @State private var playlistFilter: PlaylistLibraryFilter
+    @State private var personalMixes: [PersonalMix] = []
+    @State private var recommendationsLoaded = false
     @AppStorage("luma.playlistSort") private var playlistSort: PlaylistSort = .title
     @Query private var downloadedPlaylists: [DownloadedPlaylist]
 
@@ -28,10 +30,12 @@ struct PlaylistListView: View {
         Group {
             if let vm = viewModel {
                 content(vm)
+                    .transition(.opacity)
             } else {
                 LoadingStateView()
             }
         }
+        .lumaContentReveal(isReady: viewModel.map { !($0.isLoading && $0.playlists.isEmpty) } ?? false)
         .lumaContentWidth()
         .navigationTitle(String(localized: "Playlists", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale))
         .navigationBarTitleDisplayModeLarge()
@@ -45,7 +49,7 @@ struct PlaylistListView: View {
                     showCreateSheet = true
                 } label: {
                     Image(systemName: "plus")
-                        .foregroundStyle(Color.lumaAccent)
+                        .foregroundStyle(.primary)
                 }
                 .disabled(container?.serverState.isOnline != true)
             }
@@ -58,7 +62,11 @@ struct PlaylistListView: View {
                     }
                 } label: {
                     Image(systemName: "line.3.horizontal.decrease")
+                        .renderingMode(.original)
+                        .foregroundStyle(.primary)
                 }
+                .tint(.primary)
+                .foregroundStyle(.primary)
                 .accessibilityLabel("Sort playlists")
             }
             ToolbarItem(placement: .primaryAction) {
@@ -70,9 +78,17 @@ struct PlaylistListView: View {
                     }
                 } label: {
                     Image(systemName: "ellipsis")
+                        .renderingMode(.original)
+                        .foregroundStyle(.primary)
                 }
+                .tint(.primary)
+                .foregroundStyle(.primary)
                 .accessibilityLabel("Filter playlists")
             }
+        }
+        .tint(.primary)
+        .task(id: container?.serverState.activeServer?.id) {
+            await loadRecommendations()
         }
         .sheet(isPresented: $showCreateSheet) {
             CreatePlaylistSheet { _ in
@@ -94,54 +110,101 @@ struct PlaylistListView: View {
 
     @ViewBuilder
     private func content(_ vm: PlaylistListViewModel) -> some View {
-        if vm.isLoading && vm.playlists.isEmpty {
-            LoadingStateView()
-        } else if container?.serverState.isOnline == false && vm.playlists.isEmpty {
-            if let serverId = container?.serverState.activeServer?.id {
-                OfflinePlaylistContent(serverId: serverId)
-            } else {
+        VStack(spacing: 0) {
+            recommendationShelves
+            if vm.isLoading && vm.playlists.isEmpty {
+                LoadingStateView()
+            } else if container?.serverState.isOnline == false && vm.playlists.isEmpty {
+                if let serverId = container?.serverState.activeServer?.id {
+                    OfflinePlaylistContent(serverId: serverId)
+                } else {
+                    EmptyStateView(
+                        systemImage: "wifi.slash",
+                        title: "You're Offline",
+                        subtitle: "Connect to your server to browse playlists."
+                    )
+                }
+            } else if let error = vm.error, vm.playlists.isEmpty {
                 EmptyStateView(
-                    systemImage: "wifi.slash",
-                    title: "You're Offline",
-                    subtitle: "Connect to your server to browse playlists."
+                    systemImage: "exclamationmark.triangle",
+                    title: "Unable to Load Playlists",
+                    subtitle: error.displayMessage,
+                    action: .init(label: "Retry") { Task { await vm.load() } }
                 )
+            } else if vm.playlists.isEmpty {
+                EmptyStateView(
+                    systemImage: "list.bullet",
+                    title: "No Playlists",
+                    subtitle: "Create playlists on your server to see them here."
+                )
+            } else {
+                playlistList(vm)
+                    .transition(.opacity)
             }
-        } else if let error = vm.error, vm.playlists.isEmpty {
-            EmptyStateView(
-                systemImage: "exclamationmark.triangle",
-                title: "Unable to Load Playlists",
-                subtitle: error.displayMessage,
-                action: .init(label: "Retry") { Task { await vm.load() } }
-            )
-        } else if vm.playlists.isEmpty {
-            EmptyStateView(
-                systemImage: "list.bullet",
-                title: "No Playlists",
-                subtitle: "Create playlists on your server to see them here."
-            )
-        } else {
-            let playlists = displayedPlaylists(vm.playlists)
-            List {
-                if playlists.isEmpty {
-                    ContentUnavailableView.search(text: searchText)
-                        .listRowSeparator(.hidden)
-                }
-
-                ForEach(playlists) { playlist in
-                    NavigationLink(value: HomeDestination.playlist(playlist)) {
-                        OnlinePlaylistRow(
-                            playlist: playlist,
-                            namespace: zoomNamespace,
-                            onActionCompleted: { Task { await vm.load() } }
-                        )
-                        .appEntityIdentifier(playlistEntityIdentifier(playlist))
-                    }
-                }
-            }
-            .listStyle(.plain)
-            .refreshable { await vm.load() }
-            .miniPlayerBottomMargin()
         }
+    }
+
+    /// Server playlists keep their own sort/filter behaviour. Luma mixes remain a
+    /// separate leading section in the Playlists tab.
+    private var recommendationShelves: some View {
+        PlaylistRecommendationsShelf(
+            mixes: personalMixes,
+            isLoading: !recommendationsLoaded
+        )
+    }
+
+    @ViewBuilder
+    private func playlistList(_ vm: PlaylistListViewModel) -> some View {
+        let playlists = displayedPlaylists(vm.playlists)
+        List {
+            if playlists.isEmpty {
+                ContentUnavailableView.search(text: searchText)
+                    .listRowSeparator(.hidden)
+            }
+
+            ForEach(playlists) { playlist in
+                NavigationLink(value: HomeDestination.playlist(playlist)) {
+                    OnlinePlaylistRow(
+                        playlist: playlist,
+                        namespace: zoomNamespace,
+                        onActionCompleted: { Task { await vm.load() } }
+                    )
+                    .appEntityIdentifier(playlistEntityIdentifier(playlist))
+                }
+            }
+        }
+        .listStyle(.plain)
+        .refreshable {
+            await vm.load()
+            await loadRecommendations(forceRefresh: true)
+        }
+        .miniPlayerBottomMargin()
+    }
+
+    @MainActor
+    private func loadRecommendations(forceRefresh: Bool = false) async {
+        guard let container, container.serverState.isOnline,
+              let serverID = container.serverState.activeServer?.id.uuidString else {
+            recommendationsLoaded = true
+            return
+        }
+        // PersonalMixService owns caching and refresh; opening this tab must not rebuild
+        // the recommendation graph on every appearance.
+        let mixesBinding = $personalMixes
+        let loaded = await container.personalMixService.mixes(
+            serverId: serverID,
+            forceRefresh: forceRefresh,
+            priorityKinds: [.heavyRotation, .essentials, .newMusic, .getUp, .chill, .focus]
+        ) { partial in
+            // Show each completed mix in the recommendation strip instead of
+            // holding the whole section until the last builder finishes.
+            mixesBinding.wrappedValue = PlaylistRecommendationPolicy.ordered(partial)
+        }
+        guard !Task.isCancelled,
+              container.serverState.activeServer?.id.uuidString == serverID else { return }
+        recommendationsLoaded = true
+        personalMixes = PlaylistRecommendationPolicy.ordered(loaded)
+        PersonalMixWidgetSnapshot.publish(loaded)
     }
 
     private func displayedPlaylists(_ playlists: [Playlist]) -> [Playlist] {

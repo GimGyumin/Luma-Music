@@ -9,8 +9,9 @@ import OSLog
 
 /// Cross-platform album link used by shelves, grids and lists.
 ///
-/// Album pages use the standard NavigationStack transition. The source ID remains
-/// available to labels but does not activate a matched navigation zoom.
+/// On iOS the value path carries `AlbumZoomDestination`, so the same source ID
+/// and namespace drive both push and interactive-pop transitions. macOS keeps
+/// its existing sidebar/detail navigation.
 struct AlbumNavigationLink<Label: View>: View {
     let album: AlbumID3
     let namespace: Namespace.ID

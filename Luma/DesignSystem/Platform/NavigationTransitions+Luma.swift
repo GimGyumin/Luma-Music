@@ -16,17 +16,33 @@ extension View {
     /// No-op when either parameter is nil or on macOS.
     @ViewBuilder
     func lumaMatchedTransitionSource(id: String?, in namespace: Namespace.ID?) -> some View {
-        #if os(iOS)
-        if let id, let namespace {
-            self.matchedTransitionSource(id: id, in: namespace)
-        } else {
-            self
-        }
-        #else
-        self
-        #endif
+        modifier(LumaMatchedTransitionSource(id: id, namespace: namespace))
     }
 
+}
+
+private struct LumaMatchedTransitionSource: ViewModifier {
+    let id: String?
+    let namespace: Namespace.ID?
+    @StateObject private var token: AlbumZoomSourceToken
+
+    init(id: String?, namespace: Namespace.ID?) {
+        self.id = id
+        self.namespace = namespace
+        _token = StateObject(wrappedValue: AlbumZoomSourceToken(id: id, namespace: namespace))
+    }
+
+    func body(content: Content) -> some View {
+        #if os(iOS)
+        if let id, let namespace {
+            content.matchedTransitionSource(id: id, in: namespace)
+        } else {
+            content
+        }
+        #else
+        content
+        #endif
+    }
 }
 
 private struct LumaZoomTransition: ViewModifier {

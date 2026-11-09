@@ -74,7 +74,12 @@ nonisolated enum AtmosAlbumPolicy {
             let (total, overflow) = $0.addingReportingOverflow(max(0, $1.duration ?? 0))
             return overflow ? Int.max : total
         }
-        let (totalDuration, overflow) = max(0, base.duration).addingReportingOverflow(extraDuration)
+        let retainedIDs = Set(songs.map(\.id))
+        let removedDuration = (base.song ?? []).filter { !retainedIDs.contains($0.id) }.reduce(0) {
+            let (total, overflow) = $0.addingReportingOverflow(max(0, $1.duration ?? 0))
+            return overflow ? Int.max : total
+        }
+        let (totalDuration, overflow) = max(0, max(0, base.duration) - removedDuration).addingReportingOverflow(extraDuration)
         return AlbumID3(id: base.id, name: base.name, songCount: songs.count,
                  duration: overflow ? Int.max : totalDuration,
                  artist: base.artist, artistId: base.artistId, coverArt: base.coverArt,
@@ -92,12 +97,14 @@ nonisolated enum AtmosAlbumPolicy {
 /// This intentionally strips only the delivery-format suffix, never Live/Remix/Edit tags.
 nonisolated struct AtmosVariantCatalogue: Sendable {
     let albums: [AlbumID3]
+    private let alternateReleaseIDs: Set<String>
     private let albumsByID: [String: AlbumID3]
     let albumPairs: [String: String]
     let songsByID: [String: DisplayableSong]
     private let buckets: [String: [DisplayableSong]]
+    private let albumBuckets: [String: [DisplayableSong]]
     let matches: [String: String]
-    static let matchingVersion = 3
+    static let matchingVersion = 6
     static let durationTolerance: TimeInterval = 5
 
     func coverArtID(forAlbumID id: String?) -> String? {
@@ -108,6 +115,10 @@ nonisolated struct AtmosVariantCatalogue: Sendable {
 
     init(songs: [DisplayableSong] = [], albums: [AlbumID3] = [], storedMatches: [String: String]? = nil) {
         self.albums = albums
+        let alternateReleaseIDs = Set(albums.filter { album in
+            album.releaseTypes?.contains { ["live", "remix", "karaoke", "instrumental"].contains($0.lowercased()) } == true
+        }.map(\.id))
+        self.alternateReleaseIDs = alternateReleaseIDs
         albumsByID = Dictionary(albums.map { ($0.id, $0) }, uniquingKeysWith: { _, fresh in fresh })
         albumPairs = AtmosAlbumPolicy.pairs(in: albums)
         let indexedSongs = Dictionary(songs.map { ($0.id, $0) }, uniquingKeysWith: { _, fresh in fresh })
@@ -115,15 +126,16 @@ nonisolated struct AtmosVariantCatalogue: Sendable {
         let atmosSongs = songs.filter(Self.isAtmos)
         let atmosIDs = Set(atmosSongs.map(\.id))
         buckets = Dictionary(grouping: atmosSongs, by: Self.key)
+        albumBuckets = Dictionary(grouping: atmosSongs, by: Self.albumTrackKey)
         if let storedMatches {
             self.matches = storedMatches.filter { originalID, candidateID in
                 guard let original = indexedSongs[originalID], let candidate = indexedSongs[candidateID] else { return false }
-                return Self.compatible(original, candidate)
+                return Self.compatible(original, candidate, alternateReleaseIDs: alternateReleaseIDs)
             }
         } else {
             var matches: [String: String] = [:]
             for song in songs where !atmosIDs.contains(song.id) {
-                if let candidate = Self.select(for: song, among: buckets[Self.key(song)] ?? [], pairs: albumPairs) {
+                if let candidate = Self.select(for: song, among: (buckets[Self.key(song)] ?? []) + (albumBuckets[Self.albumTrackKey(song)] ?? []), pairs: albumPairs, alternateReleaseIDs: alternateReleaseIDs) {
                     matches[song.id] = candidate.id
                 }
             }
@@ -147,24 +159,51 @@ nonisolated struct AtmosVariantCatalogue: Sendable {
         AtmosAlbumPolicy.normalized(song.artist ?? "") + "\u{1e}" + AtmosAlbumPolicy.normalized(trackTitle(song.title))
     }
 
-    static func compatible(_ original: DisplayableSong, _ candidate: DisplayableSong) -> Bool {
-        guard original.id != candidate.id, isAtmos(candidate), key(original) == key(candidate),
-              !AtmosAlbumPolicy.normalized(original.artist ?? "").isEmpty,
+    private static func albumTrackKey(_ song: DisplayableSong) -> String {
+        (song.albumId ?? "") + "\u{1e}" + AtmosAlbumPolicy.normalized(trackTitle(song.title))
+    }
+
+    static func compatible(_ original: DisplayableSong, _ candidate: DisplayableSong, alternateReleaseIDs: Set<String> = []) -> Bool {
+        let originalAlbumName = AtmosAlbumPolicy.normalized(AtmosAlbumPolicy.baseName(original.albumName ?? ""))
+        let candidateAlbumName = AtmosAlbumPolicy.normalized(AtmosAlbumPolicy.baseName(candidate.albumName ?? ""))
+        let sameAlbum = original.albumId?.isEmpty == false && original.albumId == candidate.albumId
+            && !originalAlbumName.isEmpty && originalAlbumName == candidateAlbumName
+        if sameAlbum {
+            // An intentional repeated occurrence on another disc/track keeps its row.
+            if let a = original.trackNumber, let b = candidate.trackNumber, a > 0, b > 0, a != b { return false }
+            if let a = original.discNumber, let b = candidate.discNumber, a > 0, b > 0, a != b { return false }
+        }
+        let sameArtistTitle = key(original) == key(candidate)
+            && !AtmosAlbumPolicy.normalized(original.artist ?? "").isEmpty
+        let sameSlot = original.trackNumber.map { $0 > 0 && $0 == candidate.trackNumber } == true
+            && (original.discNumber ?? 1) == (candidate.discNumber ?? 1)
+        let recording = normalizedRecordingID(original)
+        let sameRecording = !recording.isEmpty && recording == normalizedRecordingID(candidate)
+        let sameAlbumTitle = sameAlbum && albumTrackKey(original) == albumTrackKey(candidate)
+            && (sameArtistTitle || sameSlot || sameRecording)
+        guard original.id != candidate.id, isAtmos(candidate),
+              sameAlbumTitle || sameArtistTitle,
               !AtmosAlbumPolicy.normalized(trackTitle(original.title)).isEmpty else { return false }
         // Stereo and Atmos releases often have separate server artist/recording IDs.
         // Names and duration establish compatibility; recording IDs rank compatible files.
         guard original.duration.isFinite, candidate.duration.isFinite,
               original.duration > 0, candidate.duration > 0,
               abs(original.duration - candidate.duration) <= durationTolerance else { return false }
+        if !originalAlbumName.isEmpty && originalAlbumName == candidateAlbumName { return true }
+        // Separate performances can share both title and duration. For live or
+        // alternate releases, require a paired album name or the same recording.
+        if isAlternateRelease(originalAlbumName) || isAlternateRelease(candidateAlbumName)
+            || original.albumId.map(alternateReleaseIDs.contains) == true
+            || candidate.albumId.map(alternateReleaseIDs.contains) == true {
+            let id = normalizedRecordingID(original)
+            return !id.isEmpty && id == normalizedRecordingID(candidate)
+        }
         return true
     }
 
-    private static func recordingContext(_ song: DisplayableSong) -> Set<String> {
-        let album = AtmosAlbumPolicy.normalized(AtmosAlbumPolicy.baseName(song.albumName ?? ""))
-        var context = Set<String>()
-        if album.range(of: #"\blive\s+(at|in|from|on)\b|[\[(]\s*live\b|^live$|\s-\s*live$"#, options: .regularExpression) != nil { context.insert("live") }
-        if album.range(of: #"\b(remixes|remix album|instrumental|karaoke)\b"#, options: .regularExpression) != nil { context.insert("alternate") }
-        return context
+    private static func isAlternateRelease(_ album: String) -> Bool {
+        album.range(of: #"\b(live|concert|unplugged|remixes|remix|instrumental|karaoke)\b|라이브|콘서트"#,
+                    options: .regularExpression) != nil
     }
 
     func presented(_ values: [AlbumID3]) -> [AlbumID3] {
@@ -177,25 +216,22 @@ nonisolated struct AtmosVariantCatalogue: Sendable {
         }
     }
 
-    private static func select(for song: DisplayableSong, among candidates: [DisplayableSong], pairs: [String: String]) -> DisplayableSong? {
-        var candidates = candidates.filter { compatible(song, $0) }
+    private static func select(for song: DisplayableSong, among candidates: [DisplayableSong], pairs: [String: String], alternateReleaseIDs: Set<String>) -> DisplayableSong? {
+        var candidates = candidates.filter { compatible(song, $0, alternateReleaseIDs: alternateReleaseIDs) }
         let sameAlbum = candidates.filter { candidate in
             guard let album = candidate.albumId, let base = song.albumId else { return false }
-            return pairs[album] == base
+            return album == base || pairs[album] == base
         }
         if !sameAlbum.isEmpty { candidates = sameAlbum }
         let mbid = normalizedRecordingID(song)
         let exact = candidates.filter { !mbid.isEmpty && normalizedRecordingID($0) == mbid }
         if !exact.isEmpty { candidates = exact }
-        let context = recordingContext(song)
         let advisory = AtmosAlbumPolicy.normalized(song.explicitStatus ?? "")
         // Do not abandon an otherwise valid match because a collection duplicates it.
         // Keep the result independent of catalog order, including after app relaunch.
         return candidates.min {
             let left = abs($0.duration - song.duration), right = abs($1.duration - song.duration)
             if left != right { return left < right }
-            let leftContext = recordingContext($0) == context, rightContext = recordingContext($1) == context
-            if leftContext != rightContext { return leftContext }
             if !advisory.isEmpty {
                 let leftAdvisory = AtmosAlbumPolicy.normalized($0.explicitStatus ?? "") == advisory
                 let rightAdvisory = AtmosAlbumPolicy.normalized($1.explicitStatus ?? "") == advisory
@@ -213,7 +249,15 @@ nonisolated struct AtmosVariantCatalogue: Sendable {
     func preferred(for song: DisplayableSong) -> DisplayableSong? {
         if Self.isAtmos(song) { return nil }
         if songsByID[song.id] == song, let id = matches[song.id] { return songsByID[id] }
-        return Self.select(for: song, among: buckets[Self.key(song)] ?? [], pairs: albumPairs)
+        return Self.select(for: song, among: (buckets[Self.key(song)] ?? []) + (albumBuckets[Self.albumTrackKey(song)] ?? []), pairs: albumPairs, alternateReleaseIDs: alternateReleaseIDs)
+    }
+
+    /// Collapse format alternatives while preserving the order and IDs of the base tracks.
+    static func presentedSongs(_ songs: [DisplayableSong]) -> [DisplayableSong] {
+        let originals = songs.filter { !isAtmos($0) }
+        return songs.filter { candidate in
+            !isAtmos(candidate) || !originals.contains { compatible($0, candidate) }
+        }
     }
 
     func manualCandidates(for song: DisplayableSong) -> [DisplayableSong] {

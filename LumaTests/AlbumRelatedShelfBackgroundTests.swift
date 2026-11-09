@@ -55,7 +55,7 @@ struct AlbumRelatedShelfBackgroundTests {
             }
         }
         if start == 360 {
-            let url = URL(fileURLWithPath: "/tmp/luma-album-shelf-bottom.png")
+            let url = LumaTestResources.temporaryFile("luma-album-shelf-bottom.png")
             let destination = try #require(CGImageDestinationCreateWithURL(url as CFURL, "public.png" as CFString, 1, nil))
             CGImageDestinationAddImage(destination, image, nil)
             #expect(CGImageDestinationFinalize(destination))

@@ -96,7 +96,7 @@ struct WrappedStoryPlayerView: View {
         }
         .onChange(of: isPaused) { _, _ in reconcileTimer() }
         .onChange(of: scenePhase) { _, _ in reconcileTimer() }
-        .task { await loadWrappedData() }
+        .task(id: container?.serverState.activeServer?.localReplayID) { wrappedData = nil; await loadWrappedData() }
         #if os(iOS)
         .sheet(isPresented: $showShareSheet) {
             if let image = renderedImage { ShareSheet(items: [image]) }
@@ -108,11 +108,13 @@ struct WrappedStoryPlayerView: View {
     private func loadWrappedData() async {
         guard let container,
               let serverId = container.serverState.activeServer?.id.uuidString else { return }
-        wrappedData = await container.statsService.wrappedData(
+        let result = await container.statsService.wrappedData(
             for: .year(year),
             serverId: serverId,
             calendar: .current
         )
+        guard !Task.isCancelled else { return }
+        wrappedData = result
     }
 
     // MARK: - Overlay (progress bar + close button)

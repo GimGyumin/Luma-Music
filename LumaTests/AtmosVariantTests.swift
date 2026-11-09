@@ -21,6 +21,29 @@ struct AtmosVariantTests {
                  artistId: artist, coverArt: "cover-" + id, song: songs.map { $0.asSong() })
     }
 
+    @Test func sameAlbumFormatsShareOneRowButKeepTheirPlaybackIDs() {
+        let title = "We Are The World (feat. Al Jarreau, Anita Pointer)"
+        let original = song("stereo", title: title, album: "We Are The World - Single", albumID: "single", artist: "U.S.A. for Africa", duration: 420)
+        let alternate = song("spatial", title: title, album: "We Are The World - Single", albumID: "single", artist: "USA for Africa", duration: 420, comment: "Dolby Atmos")
+        let duplicate = song("spatial-copy", title: title, album: "We Are The World - Single", albumID: "single", artist: "USA for Africa", duration: 420, comment: "Dolby Atmos")
+        let catalogue = AtmosVariantCatalogue(songs: [alternate, original, duplicate])
+        #expect(catalogue.preferred(for: original)?.id == "spatial")
+        #expect(AtmosVariantCatalogue.presentedSongs([alternate, original, duplicate]).map(\.id) == [original.id])
+        #expect(catalogue.songsByID.count == 3)
+    }
+
+    @Test func repeatedAlbumOccurrencesAndDifferentVersionsKeepTheirRows() {
+        let original = song("s")
+        let repeated = DisplayableSong(id: "a", title: original.title, artist: original.artist,
+            albumId: original.albumId, albumName: original.albumName, duration: original.duration,
+            trackNumber: 2, audioFormat: "m4a", contentType: "audio/mp4", comment: "Dolby Atmos")
+        let live = song("live", title: "Billie Jean (Live)", comment: "Dolby Atmos")
+        let otherArtist = DisplayableSong(id: "other", title: original.title, artist: "Other Artist",
+            albumId: original.albumId, albumName: original.albumName, duration: original.duration,
+            audioFormat: "m4a", contentType: "audio/mp4", comment: "Dolby Atmos")
+        #expect(AtmosVariantCatalogue.presentedSongs([original, repeated, live, otherArtist]).map(\.id) == ["s", "a", "live", "other"])
+    }
+
     @Test func pairsOnlyExactSuffixSameArtistAndUniqueBase() {
         let base = album("s", name: "Dangerous")
         let atmos = album("a", name: "Dangerous (dOlBy AtMoS)  ")
@@ -125,10 +148,15 @@ struct AtmosVariantTests {
         #expect(!AtmosVariantCatalogue.compatible(song("s"), song("a", title: title, album: "The Essential (Dolby Atmos)")))
     }
 
-    @Test func artistMustMatchButAlbumLabelsCannotVetoMatchingTitleAndDuration() {
+    @Test func differentPerformancesCannotMatchByTitleAndDurationAlone() {
         #expect(!AtmosVariantCatalogue.compatible(song("s"), song("a", album: "The Essential (Dolby Atmos)", artist: "Other Artist")))
-        #expect(AtmosVariantCatalogue.compatible(song("s", album: "Live at Wembley"), song("a", album: "The Essential (Dolby Atmos)")))
-        #expect(AtmosVariantCatalogue.compatible(song("s"), song("a", album: "The Remixes (Dolby Atmos)")))
+        #expect(!AtmosVariantCatalogue.compatible(song("s", album: "Live at Wembley"), song("a", album: "The Essential (Dolby Atmos)")))
+        #expect(!AtmosVariantCatalogue.compatible(song("s"), song("a", album: "The Remixes (Dolby Atmos)")))
+        let live = song("live", album: "Live at Wembley")
+        let studio = song("studio", album: "The Essential (Dolby Atmos)")
+        let concert = song("concert", album: "Live at Wembley (Dolby Atmos)")
+        #expect(AtmosVariantCatalogue(songs: [live, studio, concert]).preferred(for: live) == concert)
+        #expect(AtmosVariantCatalogue(songs: [live, studio], storedMatches: [live.id: studio.id]).preferred(for: live) == nil)
         let original = song("s")
         let contextMatch = song("z", album: "The Essential (Dolby Atmos)")
         let differentContext = song("a", album: "The Remixes (Dolby Atmos)")
@@ -177,6 +205,38 @@ struct AtmosVariantTests {
             serverState: server.state, streamingSettings: settings, libraryIndex: index)
         return Fixture(root: root, defaults: defaults, suite: suite, model: model, server: server,
                        downloads: downloads, index: index, settings: settings, resolver: resolver, sid: sid)
+    }
+
+    @Test func albumBadgeIgnoresPlaybackToggleAndRespectsSourceAvailability() async throws {
+        let f = try await fixture(); defer { f.clean() }
+        let vm = AlbumDetailViewModel(albumId: "stereo", libraryService: SearchLibraryStub(),
+            downloadService: f.downloads, toastService: ToastService(), serverState: f.server.state,
+            libraryIndex: f.index, streamingSettings: f.settings)
+        let original = song("s")
+        vm.songs = [original]
+        f.settings.preferDolbyAtmos = false
+        #expect(vm.audioQualities.contains(.dolbyAtmos))
+        #expect(vm.atmosAlternativeIDs(for: [original]) == ["a"])
+        let stereoSource = try await f.resolver.resolve(songId: original.id, serverId: f.sid, song: original)
+        #expect(stereoSource.playbackSong == nil)
+        f.settings.preferDolbyAtmos = true
+        #expect(vm.audioQualities.contains(.dolbyAtmos))
+        f.settings.preferDolbyAtmos = false
+        #expect(vm.audioQualities.contains(.dolbyAtmos))
+        f.index.setManualAtmosSelection("", for: original, serverId: f.sid)
+        #expect(!vm.audioQualities.contains(.dolbyAtmos))
+        f.index.setManualAtmosSelection(nil, for: original, serverId: f.sid)
+        #expect(vm.audioQualities.contains(.dolbyAtmos))
+        let live = song("live", album: "Live at Wembley")
+        #expect(!vm.audioQualities(for: [live]).contains(.dolbyAtmos))
+        f.server.state.isCellularConnection = true
+        f.settings.allowDolbyAtmosOverCellular = false
+        #expect(!vm.audioQualities.contains(.dolbyAtmos))
+        f.settings.allowDolbyAtmosOverCellular = true
+        #expect(vm.audioQualities.contains(.dolbyAtmos))
+        f.server.state.isOnline = false
+        await vm.refreshLocalAtmosAvailability(for: [original])
+        #expect(!vm.audioQualities.contains(.dolbyAtmos))
     }
 
     @Test func oldMatchingIndexRebuildsWithTheNewDurationTolerance() async throws {
@@ -278,6 +338,16 @@ struct AtmosVariantTests {
         let local = try await f.resolver.resolve(songId: "s", serverId: f.sid, song: song("s"))
         #expect(local.isLocal)
         #expect(local.playbackSong?.id == "a")
+        let vm = AlbumDetailViewModel(albumId: "stereo", libraryService: SearchLibraryStub(),
+            downloadService: f.downloads, toastService: ToastService(), serverState: f.server.state,
+            libraryIndex: f.index, streamingSettings: f.settings)
+        vm.songs = [song("s")]
+        f.server.state.isOnline = false
+        await vm.refreshLocalAtmosAvailability(for: vm.songs)
+        #expect(vm.audioQualities.contains(.dolbyAtmos))
+        try FileManager.default.removeItem(at: f.root.appendingPathComponent("downloads/a.m4a"))
+        await vm.refreshLocalAtmosAvailability(for: vm.songs)
+        #expect(!vm.audioQualities.contains(.dolbyAtmos))
     }
 
     @Test func albumDetailWarmsAStandaloneAtmosCollectionWithoutAddingItsTracks() async throws {
@@ -371,6 +441,31 @@ struct AtmosVariantTests {
         #expect(DisplayableSong(from: song("s", mbid: "r").asSong()).musicBrainzRecordingID == "r")
     }
 
+    @Test func albumDetailCollapsesSameAlbumFormatsAndCorrectsTotals() async throws {
+        let f = try await fixture(); defer { f.clean() }
+        let title = "We Are The World (feat. Al Jarreau, Anita Pointer)"
+        let original = song("stereo", title: title, album: "We Are The World - Single", albumID: "single", artist: "U.S.A. for Africa", duration: 420)
+        let alternate = song("spatial", title: title, album: "We Are The World - Single", albumID: "single", artist: "USA for Africa", duration: 420, comment: "Dolby Atmos")
+        let base = AlbumID3(id: "single", name: original.albumName!, songCount: 2, duration: 840,
+            artist: original.artist, artistId: "artist-single", coverArt: "single-cover",
+            song: [original.asSong(), alternate.asSong()])
+        func response<T: Encodable>(_ value: T, key: String) throws -> Data {
+            let object = try JSONSerialization.jsonObject(with: JSONEncoder().encode(value))
+            return try JSONSerialization.data(withJSONObject: ["subsonic-response": ["status": "ok", "version": "1.16.1", key: object]])
+        }
+        let artist = ArtistID3(id: "artist-single", name: "U.S.A. for Africa", album: [base])
+        f.server.musicClient = SwiftSonicClient(configuration: ServerConfiguration(serverURL: URL(string: "https://music.example.invalid")!, username: "u", password: "p"),
+            transport: AtmosAlbumTransport(responses: ["single": try response(base, key: "album"), "artist": try response(artist, key: "artist")]), retryPolicy: .none)
+        let library = LibraryService(serverService: f.server, modelContainer: f.model, downloadService: f.downloads,
+            statsService: StatsService(modelContainer: f.model), libraryIndex: f.index)
+        let detail = try await library.displayAlbum(id: "single")
+        #expect(detail.song?.map(\.id) == [original.id])
+        #expect(detail.songCount == 1)
+        #expect(detail.duration == 420)
+        #expect(try await library.album(id: "single").song?.count == 2)
+        #expect(f.index.preferredAtmosSong(for: original, serverId: f.sid)?.id == alternate.id)
+    }
+
     @Test func detailCombinesUnequalAlbumsAndWarmsImmediatePlaybackWithoutFullIndex() async throws {
         let f = try await fixture(); defer { f.clean() }
         f.index.clear()
@@ -414,7 +509,7 @@ struct AtmosVariantTests {
             gaplessSettings: container.gaplessSettings, toastService: container.toastService, statsService: container.statsService,
             listenBrainzService: container.listenBrainzService, engine: engine)
         container.playerState.queue = [original]
-        let file = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("Fixtures/SilentMP3.mp3")
+        let file = LumaTestResources.fixture("Fixtures/SilentMP3.mp3", sourceFile: #filePath)
         await player.startPlayback(song: original, source: .downloaded(file, playbackSong: alternate),
                                    serverId: f.sid, epoch: 0, preservePlayingState: false)
         #expect(container.playerState.currentTrack == original)

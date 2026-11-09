@@ -9,6 +9,9 @@ extension AlbumDetailContentView {
     func resolveDominantColor(coverArtId: String) async {
         guard !Task.isCancelled, viewModel?.acceptsPresentationUpdates != false,
               albumCoverId == coverArtId else { return }
+        let identity = paletteIdentity
+        let changed = paletteRequestID != nil && paletteRequestID != identity
+        paletteRequestID = identity
         artworkPreference = artworkImageCache.artworkPreference(for: albumId)
         // Preparation owns image decoding and edge analysis. The page reads a
         // finished snapshot when one is current. A palette from an older analyzer
@@ -19,15 +22,16 @@ extension AlbumDetailContentView {
             applyAlbumPalette(palette, coverArtId: coverArtId)
             return
         }
-        if let palette = ColorCache.palette(for: coverArtId) {
-            dominantColor = colorExtractor.colorOverride(for: coverArtId) ?? palette.background
+        if changed {
+            artworkAnalysis = nil
+            dominantColor = .clear
         }
         if await AlbumCoverPreloadService.prepareTheme(
             for: coverArtId,
             artworkImageCache: artworkImageCache,
-            dominantColorExtractor: colorExtractor
+            dominantColorExtractor: colorExtractor, allowNetwork: isOnline
         ), !Task.isCancelled, viewModel?.acceptsPresentationUpdates != false,
-           albumCoverId == coverArtId,
+           paletteIdentity == identity, albumCoverId == coverArtId,
            let palette = artworkImageCache.preparedPalette(for: coverArtId) {
             applyAlbumPalette(palette, coverArtId: coverArtId)
         }

@@ -44,8 +44,10 @@ nonisolated private final class SeekHTTPFixtureServer: @unchecked Sendable {
         self.rejectsStreams = rejectsStreams
         self.mediaDuration = mediaDuration
         self.losslessData = losslessData
-        let fixture = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
-            .appendingPathComponent(codec == "aac" ? "Fixtures/SilentAAC.adts" : "Fixtures/SilentMP3.mp3")
+        let fixture = LumaTestResources.fixture(
+            codec == "aac" ? "Fixtures/SilentAAC.adts" : "Fixtures/SilentMP3.mp3",
+            sourceFile: #filePath
+        )
         let bytes = [UInt8](try Data(contentsOf: fixture))
         var frames: [Data] = []
         var cursor = 0

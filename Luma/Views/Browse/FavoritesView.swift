@@ -11,15 +11,20 @@ struct FavoritesView: View {
     @Environment(\.appContainer) private var container
     @State private var viewModel: FavoritesViewModel?
     @State private var songToAddToPlaylist: DisplayableSong?
+    @Namespace private var albumZoomNamespace
 
     var body: some View {
         Group {
             if let vm = viewModel {
                 content(vm)
+                    .transition(.opacity)
             } else {
                 LoadingStateView()
             }
         }
+        .lumaContentReveal(isReady: viewModel.map {
+            !($0.isLoading && $0.songs.isEmpty && $0.albums.isEmpty && $0.artists.isEmpty)
+        } ?? false)
         .lumaContentWidth()
         .navigationTitle(String(localized: "Favorites", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale))
         .navigationBarTitleDisplayModeInline()
@@ -61,6 +66,7 @@ struct FavoritesView: View {
             .sheet(item: $songToAddToPlaylist) { song in
                 AddToPlaylistSheet(song: song)
             }
+            .transition(.opacity)
         }
     }
 
@@ -78,7 +84,9 @@ struct FavoritesView: View {
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 10)
                     }
-                    .lumaAccentGlassButton()
+                    .buttonStyle(.bordered)
+                    .tint(.white)
+                    .foregroundStyle(.white)
 
                     Button {
                         Task {
@@ -93,7 +101,8 @@ struct FavoritesView: View {
                             .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.bordered)
-                    .tint(Color.lumaAccent)
+                    .tint(.white)
+                    .foregroundStyle(.white)
                 }
                 .listRowSeparator(.hidden)
                 .listRowBackground(Color.clear)
@@ -124,13 +133,15 @@ struct FavoritesView: View {
         if !albums.isEmpty {
             Section("Albums") {
                 ForEach(albums) { album in
-                    NavigationLink(value: HomeDestination.album(album)) {
+                    AlbumNavigationLink(album: album, namespace: albumZoomNamespace) { sourceID, namespace in
                         AlbumRow(
                             albumId: album.id,
                             name: album.name,
                             artist: album.artist,
                             year: album.year,
-                            coverArtId: album.coverArt
+                            coverArtId: album.coverArt,
+                            zoomSourceId: sourceID,
+                            zoomNamespace: namespace
                         )
                     }
                 }

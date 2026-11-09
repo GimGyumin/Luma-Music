@@ -9,9 +9,8 @@ import SwiftUI
 
 /// Image facts, kept separately from the user's presentation preference and page theme.
 nonisolated struct ArtworkEdgeAnalysis: Codable, Equatable, Sendable {
-    // v10 also lets a muted bottom boundary veto a saturated interior field.
-    // The continuation and track-list canvas must describe the same edge.
-    static let currentVersion = 10
+    // v11 preserves bright lower fields and regenerates the cover-first page seed.
+    static let currentVersion = 11
     let version: Int
     let packedBackground: Int
     let uniformity: Double
@@ -306,7 +305,11 @@ nonisolated enum ArtworkEdgeAnalyzer {
         }
         let hueDistance = abs(lowerHSV.h - Double(lowerDominant) / 24)
         let boundaryDisagrees = lowerDominant < 24 && min(hueDistance, 1 - hueDistance) > 0.125
-        if Double(darkBorder.count) / Double(sides[1].count) >= 0.65 {
+        if lowerWeight == 0, uniformity >= 0.90, lowerHSV.v >= 0.86 {
+            // Subtle shading can disqualify an almost-white sleeve from a seamless hero.
+            // Its empty shadow histogram still describes a bright lower canvas.
+            content = lower.r << 16 | lower.g << 8 | lower.b
+        } else if Double(darkBorder.count) / Double(sides[1].count) >= 0.65 {
             // A black sleeve border is part of the artwork, not a missing color.
             // Interior gold/skin/red must not replace this boundary with brown.
             let border = median(darkBorder)

@@ -233,6 +233,9 @@ final class LumaNativeSearch: NSObject, CSSearchableIndexDelegate {
               !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
         let token = revision
         guard !needsReconciliation else { return nil }
+        let trace = DiagnosticsCenter.shared.begin(.spotlightQuery)
+        var traceResult = DiagnosticsResult.cancelled
+        defer { trace.finish(Task.isCancelled ? .cancelled : traceResult) }
         do {
             let worker = Task.detached(priority: .userInitiated) {
                 try await SpotlightQueryAdapter.search(text, scope: scope, limit: limit)
@@ -265,8 +268,10 @@ final class LumaNativeSearch: NSObject, CSSearchableIndexDelegate {
             Logger.siri.info(
                 "[SPOTLIGHT] query returned total=\(keys.count, privacy: .public) songs=\(hits.songs.count, privacy: .public) albums=\(hits.albums.count, privacy: .public) artists=\(hits.artists.count, privacy: .public) playlists=\(hits.playlists.count, privacy: .public)"
             )
+            traceResult = .success
             return hits
         } catch {
+            traceResult = DiagnosticsResult.classify(error)
             Logger.siri.error("[SPOTLIGHT] query failed error=\(error.localizedDescription, privacy: .public)")
             return nil
         }

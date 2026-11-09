@@ -4,6 +4,7 @@
 // See LICENSE file in the project root for full license information.
 
 import CoreGraphics
+import Accelerate
 import Foundation
 import SwiftUI
 
@@ -58,6 +59,45 @@ nonisolated enum AlbumColorAnalyzer {
     private static let kMeansIterations = 10
 
     // MARK: - Public API
+
+    /// Analyze the sides of a portrait, where the photographic backdrop is usually visible.
+    /// A garment at the bottom center should not become the color of the entire page.
+    static func artistPortrait(from image: PlatformImage) -> ArtistPortraitTreatment? {
+        guard let cg = cgImage(from: image), let raster = Raster.make(from: cg, size: 56) else { return nil }
+        var samples: [Sample] = []
+        var topSum = RGB.black
+        var topCount = 0
+        for y in 0..<raster.size {
+            for x in 0..<raster.size {
+                guard let rgb = raster.rgb(x: x, y: y) else { continue }
+                let side = min(x, raster.size - 1 - x)
+                guard side < 10 || y < 5 else { continue }
+                if y < 12 && side < 12 {
+                    topSum = topSum + rgb
+                    topCount += 1
+                }
+                let weight = (side < 7 ? 2.0 : 1.0) * (y < raster.size * 2 / 3 ? 1.0 : 0.45)
+                samples.append(Sample(lab: rgb.lab, rgb: rgb, edgeWeight: weight, isBorder: true))
+            }
+        }
+        let clusters = KMeans.run(samples: samples, k: min(6, samples.count), iterations: 6)
+        // Give neighboring shades of the same backdrop a vote together.
+        func support(_ candidate: Cluster) -> Double {
+            clusters.reduce(0.0) { score, other in
+                score + Double(other.count) * other.edgeWeight
+                    * exp(-LAB.distance2(candidate.lab, other.lab) / 200)
+            } * (Skin.isSkinTone(candidate.rgb) ? 0.7 : 1.0)
+        }
+        guard let winner = clusters.max(by: { support($0) < support($1) }) else { return nil }
+        var hsb = winner.rgb.hsb
+        let lightness = winner.rgb.oklab.L
+        let midtone = max(0, 1 - abs(lightness - 0.54) / 0.31)
+        hsb.b *= 1 - 0.25 * midtone
+        hsb.s = min(0.80, hsb.s)
+        let top = topCount > 0 ? topSum / Double(topCount) : winner.rgb
+        return ArtistPortraitTreatment(color: RGB(hsb: hsb).color, navigationColor: top.color,
+                                      blurred: ArtistPortraitTreatment.blur(cg))
+    }
 
     static func generateArtworkPalette(from image: CGImage) -> ArtworkPalette {
         guard let resolution = resolve(image: image) else {
@@ -181,9 +221,7 @@ nonisolated enum AlbumColorAnalyzer {
         }
 
         let isMultiColor = SceneFlags.isMultiColor(samples: samples)
-        let light = page.relativeLuminance > 0.55
-        let final: RGB = (!light && !Contrast.whiteTextOK(on: page)) ? .black : page
-        return pack(raw: final, secondary: winner.rgb, neutral: neutralized(final), borderConfidence: border.borderConfidence, skin: skinInfluence, isMultiColor: isMultiColor)
+        return pack(raw: page, secondary: winner.rgb, neutral: neutralized(page), borderConfidence: border.borderConfidence, skin: skinInfluence, isMultiColor: isMultiColor)
     }
 
     private static func pack(
@@ -310,6 +348,39 @@ private nonisolated struct Raster {
             Double(pixels[i + 1]) / 255.0,
             Double(pixels[i + 2]) / 255.0
         )
+    }
+}
+
+/// Only the low-resolution blurred layer is cached. The sharp hero uses the existing image cache.
+nonisolated final class ArtistPortraitTreatment: Sendable {
+    let color: Color
+    let navigationColor: Color
+    let blurred: CGImage?
+
+    init(color: Color, navigationColor: Color, blurred: CGImage?) {
+        self.color = color
+        self.navigationColor = navigationColor
+        self.blurred = blurred
+    }
+
+    fileprivate static func blur(_ image: CGImage) -> CGImage? {
+        let scale = min(1, 256 / CGFloat(max(image.width, image.height)))
+        let width = max(1, Int((CGFloat(image.width) * scale).rounded()))
+        let height = max(1, Int((CGFloat(image.height) * scale).rounded()))
+        func bitmap() -> CGContext? {
+            CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: width * 4,
+                      space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+        }
+        guard let source = bitmap(), let result = bitmap() else { return nil }
+        source.interpolationQuality = .high
+        source.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+        var src = vImage_Buffer(data: source.data, height: UInt(height), width: UInt(width), rowBytes: source.bytesPerRow)
+        var dst = vImage_Buffer(data: result.data, height: UInt(height), width: UInt(width), rowBytes: result.bytesPerRow)
+        let kernel = UInt32(max(width, height) / 12) | 1
+        guard vImageTentConvolve_ARGB8888(&src, &dst, nil, 0, 0, kernel, kernel, nil,
+                                          vImage_Flags(kvImageEdgeExtend)) == kvImageNoError else { return nil }
+        return result.makeImage()
     }
 }
 
@@ -649,13 +720,6 @@ private nonisolated enum Skin {
         let hsb = rgb.hsb
         let warm = hsb.h < 0.12 || hsb.h > 0.92
         return warm && hsb.s > 0.12 && hsb.s < 0.65 && hsb.b > 0.18 && hsb.b < 0.78
-    }
-}
-
-private nonisolated enum Contrast {
-    static func whiteTextOK(on rgb: RGB) -> Bool {
-        let bg = rgb.relativeLuminance
-        return (max(1.0, bg) + 0.05) / (min(1.0, bg) + 0.05) >= 4.5
     }
 }
 

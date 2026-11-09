@@ -88,10 +88,6 @@ struct PlaylistSongRows: View {
     @Query private var downloadedTracks: [DownloadedTrack]
     @Query private var allFavorites: [FavoriteRecord]
 
-    private var favoriteSongIds: Set<String> {
-        Set(allFavorites.map(\.id))
-    }
-
     init(songs: [DisplayableSong], serverId: UUID, downloadingIds: Set<String> = [], titleColor: Color = .primary, secondaryColor: Color = .secondary, onTap: @escaping (Int) -> Void, onDownload: ((String) -> Void)? = nil, onRemoveDownload: ((String) -> Void)? = nil, onRemove: ((Int) -> Void)? = nil, onReorder: ((IndexSet, Int) -> Void)? = nil, onContextRemove: ((Int) -> Void)? = nil, onAddToPlaylist: ((DisplayableSong) -> Void)? = nil, rowBackground: Color? = nil) {
         self.songs = songs
         self.downloadingIds = downloadingIds
@@ -106,21 +102,29 @@ struct PlaylistSongRows: View {
         self.onAddToPlaylist = onAddToPlaylist
         self.rowBackground = rowBackground
         let sid = serverId
+        let type = FavoriteType.song.rawValue
         _downloadedTracks = Query(
             filter: #Predicate<DownloadedTrack> { track in
                 track.serverId == sid
             }
         )
-    }
-
-    private var downloadedSongIds: Set<String> {
-        Set(downloadedTracks.map(\.songId))
+        // Only song favorites for this server can affect the star in this list.
+        // Previously every favorite of every type/server was observed and each
+        // row rebuilt a Set from all of them.
+        _allFavorites = Query(
+            filter: #Predicate<FavoriteRecord> { favorite in
+                favorite.serverId == sid && favorite.itemType == type
+            }
+        )
     }
 
     var body: some View {
+        let downloadedSongIDs = Set(downloadedTracks.map(\.songId))
+        let favoriteSongIDs = FavoriteRecord.songIDSet(from: allFavorites)
         if let removeAction = onRemove {
             ForEach(Array(songs.enumerated()), id: \.element.id) { index, song in
-                makeRow(index: index, song: song)
+                makeRow(index: index, song: song, downloadedSongIDs: downloadedSongIDs,
+                        favoriteSongIDs: favoriteSongIDs)
                     .listRowBackground(rowBackground)
             }
             .onDelete { indexSet in
@@ -131,25 +135,28 @@ struct PlaylistSongRows: View {
             }
         } else {
             ForEach(Array(songs.enumerated()), id: \.element.id) { index, song in
-                makeRow(index: index, song: song)
+                makeRow(index: index, song: song, downloadedSongIDs: downloadedSongIDs,
+                        favoriteSongIDs: favoriteSongIDs)
                     .listRowBackground(rowBackground)
             }
         }
     }
 
     @ViewBuilder
-    private func makeRow(index: Int, song: DisplayableSong) -> some View {
-        let liveDownloaded = downloadedSongIds.contains(song.id)
+    private func makeRow(
+        index: Int,
+        song: DisplayableSong,
+        downloadedSongIDs: Set<String>,
+        favoriteSongIDs: Set<String>
+    ) -> some View {
+        let liveDownloaded = downloadedSongIDs.contains(song.id)
         let liveSong = song.withDownloaded(liveDownloaded)
         let isDownloading = downloadingIds.contains(song.id)
         let downloadAction: (() -> Void)? = (liveDownloaded || isDownloading) ? nil : onDownload.map { action in { action(song.id) } }
         let removeAction: (() -> Void)? = liveDownloaded ? onRemoveDownload.map { action in { action(song.id) } } : nil
-        Button { onTap(index) } label: {
-            SongRow(song: liveSong, index: index + 1, showCoverArt: true, isFavorite: favoriteSongIds.contains("song:\(song.id)"), titleColor: titleColor, secondaryColor: secondaryColor, onDownload: downloadAction, onRemoveDownload: removeAction, isDownloading: isDownloading, onRemoveFromPlaylist: onContextRemove.map { remove in { remove(index) } }, onAddToPlaylist: onAddToPlaylist)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .listRowBackground(Color.clear)
+        SongRow(song: liveSong, index: index + 1, showCoverArt: true, isFavorite: favoriteSongIDs.contains(song.id), titleColor: titleColor, secondaryColor: secondaryColor, onDownload: downloadAction, onRemoveDownload: removeAction, isDownloading: isDownloading, onRemoveFromPlaylist: onContextRemove.map { remove in { remove(index) } }, onAddToPlaylist: onAddToPlaylist, onPlay: { onTap(index) })
+            .contentShape(Rectangle())
+            .listRowBackground(Color.clear)
         #if os(macOS)
         .listRowSeparator(.hidden)
         #endif

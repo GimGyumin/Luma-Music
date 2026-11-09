@@ -12,6 +12,8 @@ struct CacheSectionView: View {
     @State private var usedBytes: Int64 = 0
     @State private var trackCount: Int = 0
     @State private var isClearing: Bool = false
+    @State private var isMaintaining = false
+    @State private var lastCleanupDate: Date?
 
     private var cacheSettings: CacheSettings? { container?.cacheSettings }
 
@@ -85,7 +87,44 @@ struct CacheSectionView: View {
                         SettingsIcon(systemImage: "antenna.radiowaves.left.and.right", color: .blue)
                     }
                 }
+
+                Toggle(isOn: Binding(
+                    get: { cacheSettings.autoCleanupEnabled },
+                    set: { cacheSettings.autoCleanupEnabled = $0 }
+                )) {
+                    Label {
+                        Text("Clean up old streaming cache")
+                    } icon: {
+                        SettingsIcon(systemImage: "clock.arrow.circlepath", color: .orange)
+                    }
+                }
+
+                LabeledContent {
+                    Text(lastCleanupLabel)
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                } label: {
+                    Label {
+                        Text("Last cleanup")
+                    } icon: {
+                        SettingsIcon(systemImage: "checkmark.circle", color: .green)
+                    }
+                }
             }
+
+            Button {
+                Task { await cleanUpNow() }
+            } label: {
+                if isMaintaining {
+                    HStack(spacing: LumaSpacing.s) {
+                        ProgressView().scaleEffect(0.8)
+                        Text("Cleaning…")
+                    }
+                } else {
+                    SettingsRowLabel(title: "Clean up now", systemImage: "sparkles", color: .orange)
+                }
+            }
+            .disabled(isMaintaining || (usedBytes == 0 && trackCount == 0))
 
             Button(role: .destructive) {
                 Task { await clearCache() }
@@ -104,10 +143,17 @@ struct CacheSectionView: View {
         } header: {
             SettingsSectionHeader("Automatic music storage")
         } footer: {
-            Text(String(localized: "Automatic storage reuses recently played music. The oldest unprotected tracks are removed when this limit is reached. Saved music shares the same storage and is protected from automatic cleanup.", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale))
+            VStack(alignment: .leading, spacing: 5) {
+                Text(String(localized: "Automatic storage reuses recently played music while Automatic Downloads is on. The oldest unprotected tracks are removed when this limit is reached. Saved music shares the same storage and is protected from automatic cleanup. Smart cleanup only removes old, re-downloadable streaming files and never removes offline downloads or the current playback buffer.", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale))
+                ContextualGuideNote(
+                    guide: .streamingCache,
+                    message: String(localized: "The cache can be cleared at any time. Offline downloads and playlists are kept separately.", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale)
+                )
+            }
         }
         .task {
             await refreshUsage()
+            lastCleanupDate = await container?.cacheService.lastMaintenanceDate
         }
         .onChange(of: cacheSettings?.maxCacheMegabytes) { _, newValue in
             guard let newValue else { return }
@@ -137,6 +183,32 @@ struct CacheSectionView: View {
         let count = await container.cacheService.trackCount
         usedBytes = bytes
         trackCount = count
+    }
+
+    private var lastCleanupLabel: String {
+        guard let date = lastCleanupDate else {
+            return String(localized: "Never", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale)
+        }
+        return date.formatted(date: .abbreviated, time: .shortened)
+    }
+
+    private func cleanUpNow() async {
+        guard let container else { return }
+        isMaintaining = true
+        defer { isMaintaining = false }
+        let result = await container.cacheService.performMaintenance(
+            policy: .manual,
+            reason: .manual
+        )
+        lastCleanupDate = result.finishedAt
+        let size = ByteCountFormatter.string(fromByteCount: result.freedBytes, countStyle: .file)
+        await refreshUsage()
+        if result.removedCount > 0 {
+            container.toastService.showConfirmation(
+                String(localized: "Cleaned up \(size) of streaming cache.",
+                       bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale)
+            )
+        }
     }
 
     private func clearCache() async {

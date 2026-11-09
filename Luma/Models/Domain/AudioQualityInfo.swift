@@ -173,6 +173,19 @@ nonisolated enum AudioQualityClassifier {
         }
     }
 
+    /// Native sample rate to request from `AVAudioSession` for a lossless source.
+    /// Lossy transcodes are excluded: their delivered rate is the server's encode
+    /// rate, not the source master's rate.
+    static func nativePlaybackSampleRate(for song: DisplayableSong?, source: MediaSource) -> Double? {
+        guard let song, !source.isLiveStream, !isLossyTranscodeStream(source) else { return nil }
+        switch classify(song) {
+        case .lossless(_, let sampleRate, _), .hiResLossless(_, let sampleRate, _):
+            return sampleRate > 0 ? Double(sampleRate) : nil
+        default:
+            return nil
+        }
+    }
+
     /// Atmos / JOC should use mono+stereo+multichannel spatialization; discrete surround beds should not.
     static func usesAtmosSpatialization(_ song: DisplayableSong) -> Bool {
         isDolbyAtmos(song)
@@ -246,7 +259,18 @@ nonisolated enum AudioQualityClassifier {
     }
 
     private static func isDolbyAtmos(_ song: DisplayableSong) -> Bool {
-        song.isOriginalAudio != false && (AtmosAlbumPolicy.isAtmos(song.albumName) || metadataSuggestsAtmos(song))
+        guard song.isOriginalAudio != false else { return false }
+        let suffix = normalizedSuffix(song)
+        let contentType = song.contentType?.lowercased() ?? ""
+        // A delivery label cannot add Atmos objects to a stereo/PCM conversion.
+        // MP4 is a container, so preserve explicitly tagged original MP4 releases.
+        let supportedSuffixes: Set<String> = ["m4a", "mp4", "m4b", "ec3", "eac3", "thd", "mlp", "truehd", "mka", "mkv", "ac4"]
+        let supportedType = ["mp4", "m4a", "ec-3", "ec3", "eac3", "true-hd", "truehd", "mlp", "matroska", "ac-4"]
+            .contains { contentType.contains($0) }
+        guard suffix.isEmpty ? supportedType : supportedSuffixes.contains(suffix) else { return false }
+        let incompatibleTypes = ["mpeg", "aac", "flac", "alac", "wav", "aiff", "opus", "vorbis"]
+        guard !incompatibleTypes.contains(where: { contentType.contains($0) }) else { return false }
+        return metadataSuggestsAtmos(song)
     }
 
     /// Dolby Digital (AC-3), Dolby Digital Plus (E-AC-3) and Dolby TrueHD (MLP)
@@ -302,9 +326,6 @@ nonisolated enum AudioQualityClassifier {
         let haystack = [song.title, song.albumName, song.genre, song.comment]
             .compactMap { $0?.lowercased() }
             .joined(separator: " ")
-        if haystack.contains("dolby atmos") {
-            return true
-        }
         // Avoid matching unrelated words like "atmosphere".
         if haystack.range(of: #"\batmos\b"#, options: .regularExpression) != nil {
             return true

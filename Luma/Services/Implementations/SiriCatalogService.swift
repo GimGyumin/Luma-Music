@@ -145,6 +145,57 @@ final class SiriCatalogService: SiriCatalogServiceProtocol {
         return entities
     }
 
+    /// Genre/year/file-format search over the already-prepared library index and
+    /// the persistent metadata cache. Only a genre request asks the server for a
+    /// bounded `getSongsByGenre` page; no full-library download is performed.
+    func songs(filteredBy query: LibrarySongQuery, limit: Int) async -> [LumaSongEntity] {
+        guard query.hasCriteria else { return [] }
+        guard let serverId = await resolveServerId() else { return [] }
+        let revision = serverState.accountRevision
+        let capped = max(1, min(limit, 100))
+
+        libraryIndex.ensureIndexed(using: libraryService)
+        var candidates: [DisplayableSong] = libraryIndex.searchableSnapshot?.songs ?? []
+        candidates += metadataStore.filtered(query, serverId: serverId, limit: capped * 8)
+
+        if let genre = query.genre, serverState.isOnline, serverState.isServerReachable {
+            if let remote = try? await libraryService.songsByGenre(genre, count: max(100, capped * 4)) {
+                guard serverState.activeServer?.id == serverId, serverState.accountRevision == revision else { return [] }
+                metadataStore.upsert(remote, serverId: serverId)
+                candidates += remote
+            }
+        }
+
+        if let text = query.text, !text.isEmpty, serverState.isOnline, serverState.isServerReachable,
+           let remote = await remoteSearch(text, serverId: serverId)?.song {
+            guard serverState.activeServer?.id == serverId, serverState.accountRevision == revision else { return [] }
+            let mapped = remote.map { DisplayableSong(from: $0) }
+            metadataStore.upsert(mapped, serverId: serverId)
+            candidates += mapped
+        }
+
+        guard serverState.activeServer?.id == serverId, serverState.accountRevision == revision else { return [] }
+        var seen = Set<String>()
+        var matches: [DisplayableSong] = []
+        for song in candidates where query.matches(song) {
+            guard seen.insert(song.id).inserted else { continue }
+            matches.append(song)
+        }
+        if let text = query.text, !text.isEmpty {
+            matches.sort { lhs, rhs in
+                let left = SiriSongSearchRanker.score(lhs, query: text)
+                let right = SiriSongSearchRanker.score(rhs, query: text)
+                if left != right { return left > right }
+                return lhs.title.localizedCaseInsensitiveCompare(rhs.title) == .orderedAscending
+            }
+        } else {
+            matches.sort { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
+        }
+        return matches.prefix(capped).map {
+            LumaSongEntity(song: $0, serverId: serverId, loadRelations: true)
+        }
+    }
+
     func song(id: LumaEntityID) async -> LumaSongEntity? {
         guard await isActive(id) else { return nil }
         let revision = serverState.accountRevision

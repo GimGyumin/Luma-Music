@@ -21,11 +21,11 @@ struct MiniPlayerWindowView: View {
     private var noTrack: Bool { currentTrack == nil }
 
     private var playbackQuality: AudioQualityKind? {
-        guard let playerState, let track = currentTrack else { return nil }
-        return AudioQualityClassifier.displayablePlaybackQuality(
-            for: track,
+        PlaybackQualityPresentation.quality(
+            for: playerState,
             isExpensive: container?.serverState.isExpensive == true,
-            isTranscoding: playerState.isDeliveringTranscodedAudio
+            usesAlternateTrack: false,
+            allowsLiveStream: true
         )
     }
 
@@ -129,6 +129,7 @@ struct MiniPlayerWindowView: View {
     private var controls: some View {
         HStack(spacing: 6) {
             Button {
+                HapticFeedback.transport.trigger()
                 Task { try? await container?.playerService.skipToPrevious() }
             } label: {
                 Image(systemName: "backward.fill")
@@ -142,6 +143,7 @@ struct MiniPlayerWindowView: View {
             playPauseButton
 
             Button {
+                HapticFeedback.transport.trigger()
                 Task { try? await container?.playerService.skipToNext() }
             } label: {
                 Image(systemName: "forward.fill")
@@ -164,6 +166,7 @@ struct MiniPlayerWindowView: View {
                 .frame(width: 24, height: 24)
         } else {
             Button {
+                HapticFeedback.transport.trigger()
                 Task {
                     if isPlaying {
                         await container?.playerService.pause()

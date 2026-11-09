@@ -28,6 +28,19 @@ struct AlbumDetailMacOS: View {
 
     @Environment(\.appContainer) private var container
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.colorSchemeContrast) private var colorSchemeContrast
+    @AppStorage("luma.visuals.albumFollowsAppearance") private var followsAppearance = false
+    @AppStorage("coverArtUploadVersion") private var coverArtUploadVersion = 0
+    @State private var seed: Color = .clear
+    @State private var artworkRevision = 0
+
+    private var theme: AlbumAtmosphere {
+        AlbumAtmosphere.from(dominantColor: seed, colorScheme: colorScheme,
+            increaseContrast: colorSchemeContrast == .increased, respectSystemAppearance: followsAppearance)
+    }
+    private var coverID: String { vm?.coverArtId ?? coverArtId ?? albumId }
+    private var themeID: String { "\(coverID):\(coverArtUploadVersion):\(artworkRevision):\(container?.serverState.accountRevision ?? 0)" }
     @State private var vm: AlbumDetailViewModel?
     @State private var songToAddToPlaylist: DisplayableSong?
     @State private var showDeleteDownloadAlert = false
@@ -41,14 +54,30 @@ struct AlbumDetailMacOS: View {
 
     var body: some View {
         Group {
-            if let vm {
+            if let vm, vm.isPrimaryContentReady || !vm.isLoading {
                 albumContent(vm)
             } else {
-                LoadingStateView()
+                AlbumAtmosphereBackground(atmosphere: theme)
             }
         }
         .navigationBarBackButtonHidden(true)
+        .background(AlbumAtmosphereBackground(atmosphere: theme))
         .toolbar { albumToolbar }
+        .environment(\.colorScheme, theme.preferredColorScheme ?? colorScheme)
+        .onReceive(NotificationCenter.default.publisher(for: OriginalArtwork.didInstall)) { note in
+            if note.object as? String == coverID { artworkRevision &+= 1 }
+        }
+        .task(id: themeID) {
+            guard let container else { return }
+            let identity = themeID, id = coverID
+            let cache = container.artworkImageCache
+            seed = container.dominantColorExtractor.colorOverride(for: id) ?? cache.preparedPalette(for: id)?.background ?? .clear
+            if await AlbumCoverPreloadService.prepareTheme(for: id, artworkImageCache: cache,
+                dominantColorExtractor: container.dominantColorExtractor, allowNetwork: container.serverState.isOnline),
+               !Task.isCancelled, themeID == identity, let palette = cache.preparedPalette(for: id) {
+                seed = container.dominantColorExtractor.colorOverride(for: id) ?? palette.background
+            }
+        }
         .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
         .alert("Remove downloaded album?", isPresented: $showDeleteDownloadAlert) {
             Button("Remove", role: .destructive) { Task { await vm?.deleteDownload() } }
@@ -81,10 +110,12 @@ struct AlbumDetailMacOS: View {
                     downloadService: c.downloadService,
                     toastService: c.toastService,
                     serverState: c.serverState,
-                    libraryIndex: c.libraryIndexService
+                    libraryIndex: c.libraryIndexService,
+                    streamingSettings: c.streamingSettings
                 )
             }
             await vm?.load()
+            if let vm { await vm.refreshLocalAtmosAvailability(for: vm.songs) }
             await vm?.loadMoreAlbumsByArtist()
         }
     }
@@ -145,13 +176,7 @@ struct AlbumDetailMacOS: View {
                 .listRowBackground(Color.clear)
             }
 
-            if vm.isLoading && songs.isEmpty {
-                ProgressView()
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 60)
-                    .listRowSeparator(.hidden)
-                    .listRowBackground(Color.clear)
-            } else if songs.isEmpty, let error = vm.error {
+            if songs.isEmpty, let error = vm.error {
                 EmptyStateView(
                     systemImage: "exclamationmark.triangle",
                     title: "Unable to Load Album",
@@ -167,6 +192,7 @@ struct AlbumDetailMacOS: View {
                     serverId: serverId,
                     albumArtist: vm.artistName,
                     downloadingIds: vm.downloadingIds,
+                    titleColor: theme.contentColor, secondaryColor: theme.text2,
                     onTap: { index in
                         Task { try? await container?.playerService.play(tracks: songs, startIndex: index) }
                     },

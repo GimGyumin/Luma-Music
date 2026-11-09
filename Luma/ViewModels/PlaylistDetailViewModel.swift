@@ -27,7 +27,12 @@ final class PlaylistDetailViewModel {
     var isGenerated: Bool { generatedSource != nil }
     var updatedAt: Date? { generatedUpdatedAt ?? playlistDetail?.changed }
     private let generatedLoader: (@MainActor (Bool) async -> GeneratedPlaylistSnapshot?)?
-    private var loadGeneration = 0
+    @ObservationIgnored private var loadGeneration = 0
+    @ObservationIgnored private var needsPresentationReload = false
+    @ObservationIgnored private var presentationSuspended = false
+    /// Palette and foreground tasks read this to avoid publishing while the page is
+    /// shrinking into its zoom source after an interactive pop.
+    var acceptsPresentationUpdates: Bool { !presentationSuspended }
     private struct Occurrence { let id: UUID; let songID: String }
     @ObservationIgnored private var occurrences: [Occurrence] = []
     private struct Edit { let id: UUID; let task: Task<Void, Never> }
@@ -59,8 +64,28 @@ final class PlaylistDetailViewModel {
         self.generatedLoader = generatedLoader
     }
 
+    /// Called at willDisappear, before the zoom snapshot is taken. Leave the
+    /// already-published page content untouched; only invalidate in-flight loads.
+    func suspendPendingLoad() {
+        presentationSuspended = true
+        needsPresentationReload = needsPresentationReload || isLoading
+        loadGeneration &+= 1
+    }
+
+    func resumePendingLoadIfNeeded() async {
+        guard !Task.isCancelled else { return }
+        presentationSuspended = false
+        guard needsPresentationReload else { return }
+        await load()
+    }
+
     func load(forceRefresh: Bool = false) async {
         guard !Task.isCancelled else { return }
+        guard !presentationSuspended else {
+            needsPresentationReload = true
+            return
+        }
+        needsPresentationReload = false
         loadGeneration += 1
         let generation = loadGeneration
         isLoading = true

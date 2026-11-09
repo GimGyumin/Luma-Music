@@ -253,6 +253,11 @@ extension AlbumDetailContentView {
         .padding(.top, LumaSpacing.xxxl)
         .padding(.bottom, ownsBottomInset ? LumaSpacing.l : LumaSpacing.s)
         .frame(maxWidth: .infinity, alignment: .leading)
+        .background {
+            // Match the bottom “More by” shelf so both related-music blocks read
+            // as one continuous album-page footer.
+            AlbumRelatedShelfFill(baseColor: relatedShelfBaseColor, isLight: relatedShelfIsLight)
+        }
     }
 
     func moreByArtistSection(vm: AlbumDetailViewModel) -> some View {
@@ -276,8 +281,9 @@ extension AlbumDetailContentView {
         .padding(.bottom, LumaSpacing.l)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background {
-            // Keep the album's own hue; lower this shelf by roughly one tone.
-            AlbumRelatedShelfFill(baseColor: relatedShelfBaseColor)
+            // Keep the album's own hue; separate the shelf by a light-aware tone
+            // instead of a fixed black wash (white covers turned mid-grey at 25%).
+            AlbumRelatedShelfFill(baseColor: relatedShelfBaseColor, isLight: relatedShelfIsLight)
         }
         .anchorPreference(key: AlbumRelatedShelfBoundsKey.self, value: .bounds) { $0 }
     }
@@ -298,44 +304,37 @@ extension AlbumDetailContentView {
 
     private func moreByArtistAlbums(vm: AlbumDetailViewModel) -> some View {
         VStack(spacing: 0) {
-            if vm.isLoadingMoreAlbums && vm.moreAlbumsByArtist.isEmpty {
-                ProgressView()
-                    .tint(headerSecondaryColor)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, LumaSpacing.l)
-            } else {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    LazyHStack(alignment: .top, spacing: LumaSpacing.m) {
-                        ForEach(vm.moreAlbumsByArtist) { album in
-                            AlbumNavigationLink(album: album, namespace: relatedAlbumZoomNamespace, sourceContext: "more") { sourceID, namespace in
-                                VStack(alignment: .leading, spacing: LumaSpacing.xs) {
-                                    CoverArtView(id: album.coverArt ?? album.id, size: 320)
-                                        .frame(width: 148, height: 148)
-                                        .lumaMatchedTransitionSource(id: sourceID, in: namespace)
-                                        .clipShape(
-                                            RoundedRectangle(
-                                                cornerRadius: LumaCornerRadius.standard,
-                                                style: .continuous
-                                            )
+            ScrollView(.horizontal, showsIndicators: false) {
+                LazyHStack(alignment: .top, spacing: LumaSpacing.m) {
+                    ForEach(vm.moreAlbumsByArtist) { album in
+                        AlbumNavigationLink(album: album, namespace: relatedAlbumZoomNamespace, sourceContext: "more") { sourceID, namespace in
+                            VStack(alignment: .leading, spacing: LumaSpacing.xs) {
+                                CoverArtView(id: album.coverArt ?? album.id, size: 320)
+                                    .frame(width: 148, height: 148)
+                                    .lumaMatchedTransitionSource(id: sourceID, in: namespace)
+                                    .clipShape(
+                                        RoundedRectangle(
+                                            cornerRadius: LumaCornerRadius.standard,
+                                            style: .continuous
                                         )
-                                    Text(album.name)
-                                        .font(.system(size: 17, weight: .semibold))
-                                        .foregroundStyle(headerTextColor)
-                                        .lineLimit(2)
-                                    if let year = album.year {
-                                        Text(verbatim: "\(year)")
-                                            .font(.system(size: 15, weight: .regular))
-                                            .foregroundStyle(headerSecondaryColor)
-                                    }
+                                    )
+                                Text(album.name)
+                                    .font(.system(size: 17, weight: .semibold))
+                                    .foregroundStyle(headerTextColor)
+                                    .lineLimit(2)
+                                if let year = album.year {
+                                    Text(verbatim: "\(year)")
+                                        .font(.system(size: 15, weight: .regular))
+                                        .foregroundStyle(headerSecondaryColor)
                                 }
-                                .frame(width: 148, alignment: .leading)
                             }
-                            .buttonStyle(.plain)
-                            .albumLongPressMenu(album)
+                            .frame(width: 148, alignment: .leading)
                         }
+                        .buttonStyle(.plain)
+                        .albumLongPressMenu(album)
                     }
-                    .padding(.horizontal, LumaSpacing.l)
                 }
+                .padding(.horizontal, LumaSpacing.l)
             }
 
             // Keep the mini-player scroll room within this shelf's darker background.

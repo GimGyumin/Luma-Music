@@ -31,6 +31,11 @@ struct HomeView: View {
     @Namespace private var pinnedZoomNamespace
     @Namespace private var recentlyAddedZoomNamespace
     @Namespace private var playlistZoomNamespace
+    @Namespace private var favoritesZoomNamespace
+    /// Owned by the Home page, not by each downloaded card. LazyVGrid can rebuild a
+    /// card while its album detail is pushed; a per-card namespace then no longer
+    /// matches the namespace stored in the navigation route on pop.
+    @Namespace private var downloadsZoomNamespace
     /// When false (Pad / Library stack parent), destinations are registered once above.
     @Environment(\.registersHomeDestinations) private var registersHomeDestinations
     @State private var viewModel: HomeViewModel?
@@ -42,6 +47,9 @@ struct HomeView: View {
     // Local mutable copy for smooth drag-to-reorder; synced from @Query on count changes.
     @State private var localPinnedItems: [PinnedItem] = []
     @State private var offlineSongIDs = Set<String>()
+    @State private var offlineAvailability: [String: Bool] = [:]
+    @State private var offlineAvailabilityReady = false
+    @State private var offlineAvailabilityRefresh = 0
     @State private var dropTargetId: String?
     @ScaledMetric(relativeTo: .caption) private var favoriteShelfTextHeight: CGFloat = 58
     private let recentColumns = [
@@ -93,8 +101,22 @@ struct HomeView: View {
     }
 
     private func isAvailableOffline(_ item: PinnedItem) -> Bool {
+        // The first frame keeps the legacy synchronous answer; subsequent
+        // evaluations use the task-owned snapshot below instead of fetching
+        // SwiftData from a view computed property on every body pass.
+        if offlineAvailabilityReady {
+            return offlineAvailability[item.id] ?? false
+        }
+        return computeOfflineAvailability(item)
+    }
+
+    private func computeOfflineAvailability(
+        _ item: PinnedItem,
+        downloadedSongIDs: Set<String>? = nil
+    ) -> Bool {
         let itemId = item.itemId
         let sid = item.serverId
+        let songIDs = downloadedSongIDs ?? offlineSongIDs
         switch PinnedItemType(rawValue: item.itemType) {
         case .album:
             let descriptor = FetchDescriptor<DownloadedAlbum>(
@@ -107,12 +129,12 @@ struct HomeView: View {
             )
             return (try? modelContext.fetch(descriptor).first) != nil
         case .song:
-            return offlineSongIDs.contains(itemId)
+            return songIDs.contains(itemId)
         case .artist:
             let descriptor = FetchDescriptor<DownloadedTrack>(
                 predicate: #Predicate { $0.artistId == itemId && $0.serverId == sid }
             )
-            return ((try? modelContext.fetch(descriptor)) ?? []).contains { offlineSongIDs.contains($0.songId) }
+            return ((try? modelContext.fetch(descriptor)) ?? []).contains { songIDs.contains($0.songId) }
         case .none:
             return false
         }
@@ -163,6 +185,7 @@ struct HomeView: View {
                             Image(systemName: "text.badge.plus")
                                 .font(.body.weight(.semibold))
                         }
+                        .tint(.white)
                         .disabled(!isOnline)
                         .accessibilityLabel(String(localized: "New Playlist", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale))
 
@@ -181,6 +204,7 @@ struct HomeView: View {
                             Image(systemName: "ellipsis")
                                 .font(.body.weight(.semibold))
                         }
+                        .tint(.white)
                         .accessibilityLabel(String(localized: "More", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale))
                     }
 
@@ -196,6 +220,7 @@ struct HomeView: View {
                             Image(systemName: "person.crop.circle.fill")
                                 .font(.title2)
                                 .symbolRenderingMode(.hierarchical)
+                                .foregroundStyle(.white)
                         }
                         .accessibilityLabel(String(localized: "Account", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale))
                     }
@@ -223,12 +248,31 @@ struct HomeView: View {
         ))
         #endif
         .onAppear { localPinnedItems = allPinnedItems }
-        .task(id: "offline-\(container?.serverState.accountRevision ?? 0)-\(isOnline)") {
+        .task(id: "offline-\(container?.serverState.accountRevision ?? 0)-\(isOnline)-\(localPinnedItems.map(\.id).joined(separator: ","))-\(offlineAvailabilityRefresh)") {
             guard let container, let sid = container.serverState.activeServer?.id,
-                  let identity = try? container.serverState.requestIdentity(for: sid) else { offlineSongIDs = []; return }
+                  let identity = try? container.serverState.requestIdentity(for: sid) else {
+                offlineSongIDs = []
+                offlineAvailability = [:]
+                offlineAvailabilityReady = false
+                return
+            }
             let ids = await container.downloadService.downloadedSongIds(serverId: sid)
             guard container.serverState.requestIsCurrent(identity), !Task.isCancelled else { return }
+            let items = localPinnedItems.filter { $0.serverId == sid }
+            var next: [String: Bool] = [:]
+            for item in items {
+                next[item.id] = computeOfflineAvailability(item, downloadedSongIDs: ids)
+            }
+            guard container.serverState.requestIsCurrent(identity), !Task.isCancelled else { return }
             offlineSongIDs = ids
+            offlineAvailability = next
+            offlineAvailabilityReady = true
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .lumaDownloadCompleted)) { _ in
+            offlineAvailabilityRefresh &+= 1
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .lumaOfflineMetadataChanged)) { _ in
+            offlineAvailabilityRefresh &+= 1
         }
         .onChange(of: allPinnedItems.count) { _, _ in localPinnedItems = allPinnedItems }
         .onChange(of: visiblePinnedItems.isEmpty) { _, isEmpty in
@@ -274,13 +318,14 @@ struct HomeView: View {
             if !vm.starredAlbums.isEmpty {
                 favoritesHorizontalShelf(title: String(localized: "Albums", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale)) {
                     ForEach(vm.starredAlbums) { album in
-                        NavigationLink(value: HomeDestination.album(album)) {
+                        AlbumNavigationLink(album: album, namespace: favoritesZoomNamespace) { sourceID, namespace in
                             LibraryFavoriteTile(
                                 title: album.name,
                                 subtitle: album.artist,
                                 coverArtId: album.coverArt ?? album.id,
                                 shape: .rounded
                             )
+                            .lumaMatchedTransitionSource(id: sourceID, in: namespace)
                         }
                         .buttonStyle(.plain)
                         .albumLongPressMenu(album)
@@ -556,9 +601,7 @@ struct HomeView: View {
                     Text("Recently Added")
                         .font(.lumaSectionTitle)
                     if vm.isLoading && vm.recentAlbums.isEmpty {
-                        LazyVGrid(columns: recentColumns, spacing: LumaSpacing.m) {
-                            ForEach(0..<6, id: \.self) { _ in SkeletonAlbumCard() }
-                        }
+                        EmptyView()
                     } else {
                         LazyVGrid(columns: recentColumns, spacing: LumaSpacing.m) {
                             ForEach(vm.recentAlbums) { album in
@@ -568,8 +611,10 @@ struct HomeView: View {
                                 .buttonStyle(.plain)
                             }
                         }
+                        .transition(.opacity)
                     }
                 }
+                .lumaContentReveal(isReady: !vm.recentAlbums.isEmpty)
             }
         } else {
             VStack(alignment: .leading, spacing: LumaSpacing.s) {
@@ -587,7 +632,7 @@ struct HomeView: View {
                             let dest: HomeDestination = item.type == .album
                                 ? .albumById(id: item.itemId, name: item.name, subtitle: item.subtitle, coverArtId: item.coverArtId)
                                 : .playlistById(id: item.itemId, name: item.name, coverArtId: item.coverArtId)
-                            HomeDownloadedItemCard(item: item, destination: dest)
+                            HomeDownloadedItemCard(item: item, destination: dest, namespace: downloadsZoomNamespace)
                         }
                     }
                 }
@@ -871,14 +916,14 @@ private struct HomeLibraryRowLabel: View {
 private struct HomeDownloadedItemCard: View {
     let item: DownloadedItem
     let destination: HomeDestination
+    let namespace: Namespace.ID
     @Environment(\.appContainer) private var container
     @Environment(\.modelContext) private var modelContext
     @Environment(ArtworkImageCache.self) private var artworkImageCache
     @State private var coverImage: PlatformImage?
-    @Namespace private var albumZoomNamespace
 
     var body: some View {
-        NavigationLink(value: destination.albumZoom(sourceID: item.id, namespace: albumZoomNamespace)) {
+        NavigationLink(value: destination.albumZoom(sourceID: item.id, namespace: namespace)) {
             VStack(alignment: .leading, spacing: LumaSpacing.xs) {
                 GeometryReader { geo in
                     if item.type == .playlist {
@@ -890,7 +935,7 @@ private struct HomeDownloadedItemCard: View {
                     }
                 }
                 .aspectRatio(1, contentMode: .fit)
-                .lumaMatchedTransitionSource(id: item.id, in: albumZoomNamespace)
+                .lumaMatchedTransitionSource(id: item.id, in: namespace)
                 Text(item.name)
                     .font(.lumaCaption)
                     .fontWeight(.semibold)

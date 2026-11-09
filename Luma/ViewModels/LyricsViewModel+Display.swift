@@ -159,10 +159,9 @@ extension LyricsViewModel {
             return
         }
 
-
-        let seconds = max(0, TimeInterval(start + structured.offset) / 1000
-            - (lyricDocument?.lyricOffset ?? 0))
-        let targetMs = Int(seconds * 1000)
+        let offsetMs = lyricDocument.map { LyricTime.milliseconds(fromSeconds: $0.lyricOffset) } ?? 0
+        let targetMs = max(0, start + structured.offset - offsetMs)
+        let seconds = TimeInterval(targetMs) / 1000
         lyricSeekGeneration &+= 1
         let generation = lyricSeekGeneration
         let trackID = playerState.currentTrack?.id

@@ -41,12 +41,14 @@ struct RootViewMacOS: View {
                     }
             }
             .navigationSplitViewStyle(.balanced)
+            .environment(\.playbackVisualsPresented, !isShowingFullPlayer)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
 
             if showLyricsSidePanel {
                 HStack(spacing: 0) {
                     Divider()
                     MacLyricsSidePanel()
+                        .environment(\.playbackVisualsPresented, !isShowingFullPlayer)
                         .safeAreaInset(edge: .bottom) {
                             Color.clear.frame(height: 120)
                         }

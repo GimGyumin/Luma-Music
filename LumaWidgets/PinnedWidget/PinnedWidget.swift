@@ -13,9 +13,12 @@ struct PinnedWidget: Widget {
         StaticConfiguration(kind: kind, provider: PinnedProvider()) { entry in
             PinnedWidgetView(entry: entry)
         }
-        .configurationDisplayName("Pins")
-        .description("Quick access to albums and playlists you’ve pinned.")
-        .supportedFamilies([.systemMedium, .systemLarge])
+        .configurationDisplayName(Text(WidgetChrome.text(korean: "고정", english: "Pinned")))
+        .description(Text(WidgetChrome.text(
+            korean: "고정한 항목에 빠르게 접근합니다.",
+            english: "Quick access to the albums, playlists and artists you've pinned."
+        )))
+        .supportedFamilies([.systemSmall, .systemMedium, .systemLarge])
     }
 }
 
@@ -27,6 +30,8 @@ struct PinnedWidgetView: View {
         switch family {
         case .systemLarge:
             PinnedLargeView(entry: entry)
+        case .systemSmall:
+            PinnedSmallView(entry: entry)
         default:
             PinnedMediumView(entry: entry)
         }

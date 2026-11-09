@@ -5,41 +5,68 @@
 
 import SwiftUI
 
-/// Reads coalesced PCM energy only while visible. No synthetic repeating waveform.
+extension EnvironmentValues {
+    /// A retained tab or panel can still be mounted behind another surface.
+    @Entry var playbackVisualsPresented = true
+}
+
+/// Heights are published by the shared PCM analyzer. A separate, quieter playback animation bridges missing samples.
 struct NowPlayingBarsIndicator: View {
     let isPlaying: Bool
+    var isBuffering = false
+    @Environment(\.playbackVisualsPresented) private var surfacePresented
+    @State private var intersectsViewport = false
+    @State private var heldLevels = Array(repeating: CGFloat.zero, count: 4)
 
-    @Environment(\.lumaPlayingAccent) private var playingAccent
-    @Environment(\.scenePhase) private var scenePhase
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var governor = PerformanceGovernor.shared
     @State private var isVisible = false
     @State private var isListening = false
     @State private var meter = PlaybackBeatMeter.shared
 
-    private var wantsMotion: Bool {
-        isVisible && isPlaying && scenePhase == .active && !reduceMotion && governor.budget.allowsBeatVisuals
+    private var wantsSamples: Bool {
+        isVisible && intersectsViewport && surfacePresented && isPlaying && !reduceMotion && governor.budget.allowsBeatVisuals
     }
 
     var body: some View {
-        HStack(alignment: .bottom, spacing: 1.5) {
-            ForEach(0..<4, id: \.self) { index in
-                RoundedRectangle(cornerRadius: 1)
-                    .fill(playingAccent)
-                    .frame(width: 2.5, height: wantsMotion ? 2 + 12 * meter.bands[index] : 3)
+        let levels = wantsSamples ? (meter.visualizationFallbackActive ? meter.fallbackBands : meter.bands)
+                                 : (isBuffering && !reduceMotion ? heldLevels : Self.rest)
+        HStack(alignment: .center, spacing: 1.5) {
+            ForEach(Array(levels.enumerated()), id: \.offset) { _, level in
+                Capsule()
+                    .fill(.white)
+                    .frame(width: 2.5, height: NowPlayingBarMotion.height(sample: level))
             }
         }
-        .frame(width: 16, height: 14, alignment: .bottom)
-        .animation(wantsMotion ? .linear(duration: LumaPerformance.beatPublishInterval) : nil, value: meter.bands)
+        .frame(width: 16, height: 14, alignment: .center)
+        .animation(wantsSamples ? .linear(duration: governor.budget.beatPublishInterval) : nil, value: levels)
+        .onGeometryChange(for: Bool.self) { proxy in
+            let bounds = CGRect(origin: .zero, size: proxy.size)
+            guard !bounds.isEmpty else { return false }
+            return proxy.bounds(of: .scrollView).map { bounds.intersects($0) } ?? true
+        } action: { intersectsViewport = $0 }
         .accessibilityLabel(isPlaying ? "Now Playing" : "Paused")
         .onAppear { isVisible = true; updateListening() }
         .onDisappear { isVisible = false; updateListening() }
-        .onChange(of: wantsMotion) { _, _ in updateListening() }
+        .onChange(of: wantsSamples) { _, _ in updateListening() }
     }
 
+    private static let rest = Array(repeating: CGFloat.zero, count: 4)
+
     private func updateListening() {
-        guard wantsMotion != isListening else { return }
-        isListening = wantsMotion
-        if isListening { meter.retainUIListening() } else { meter.releaseUIListening() }
+        guard wantsSamples != isListening else { return }
+        isListening = wantsSamples
+        if isListening {
+            meter.retainUIListening(waveform: true)
+        } else {
+            if isBuffering { heldLevels = meter.visualizationFallbackActive ? meter.fallbackBands : meter.bands }
+            meter.releaseUIListening(waveform: true)
+        }
+    }
+}
+
+nonisolated enum NowPlayingBarMotion {
+    static func height(sample: CGFloat) -> CGFloat {
+        2.5 + 11.5 * min(1, max(0, sample))
     }
 }

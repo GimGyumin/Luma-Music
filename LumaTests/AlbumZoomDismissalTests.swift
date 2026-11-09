@@ -93,6 +93,43 @@ struct AlbumZoomDismissalTests {
         #expect(!page.view.isHidden)
     }
 
+    @Test func committedSwipeBlocksALateAppearanceWhileTheZoomIsSettling() async {
+        let page = UIViewController()
+        let navigation = AlbumTestNavigationController(rootViewController: page)
+        let observer = AlbumPresentationController()
+        page.addChild(observer)
+        page.view.addSubview(observer.view)
+        observer.didMove(toParent: page)
+        var returns = 0
+        observer.onReturn = { returns += 1 }
+        observer.viewWillAppear(false)
+        observer.viewDidAppear(false)
+        await nextMainTurn()
+        returns = 0
+
+        let transition = AlbumTestTransitionCoordinator()
+        navigation.suppliedCoordinator = transition
+        observer.viewWillDisappear(true)
+        transition.endInteraction(isCancelled: false)
+
+        // SwiftUI can deliver a stale appearance from the outgoing snapshot before the
+        // path update and transition completion. It must not resume album loading.
+        observer.viewWillAppear(true)
+        observer.viewDidAppear(true)
+        await nextMainTurn()
+        #expect(returns == 0)
+        #expect(!page.view.isUserInteractionEnabled)
+        #expect(!page.view.isHidden)
+
+        transition.finish()
+        observer.viewWillAppear(true)
+        observer.viewDidAppear(true)
+        await nextMainTurn()
+        #expect(returns == 0)
+        #expect(!page.view.isUserInteractionEnabled)
+        #expect(!page.view.isHidden)
+    }
+
     @Test func pushOverKeepsThePageAliveForItsReturn() async {
         let root = UIViewController(), page = UIViewController(), artist = UIViewController()
         let navigation = AlbumTestNavigationController(rootViewController: root)

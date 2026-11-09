@@ -137,10 +137,20 @@ nonisolated struct PerformanceBudget: Equatable, Sendable {
         isAppActive && !reduceMotion && !isConstrained
     }
 
-    /// Live audio-reactive visuals add a mixer tap plus per-frame SwiftUI invalidation on top of
-    /// decorative motion, so they share the gate (and stop entirely under memory pressure).
+    var allowsLyricScrollMotion: Bool {
+        isAppActive && !reduceMotion && !thermalPressure.requiresBackOff
+    }
+
+    /// Visible playback indicators retain audio analysis in Low Power Mode at a lower cadence.
+    /// Memory pressure, serious heat and accessibility motion preferences stop the work.
     var allowsBeatVisuals: Bool {
-        allowsDecorativeMotion && !isMemoryPressured
+        allowsLyricScrollMotion && !isMemoryPressured
+    }
+
+    /// A second streaming decoder is discretionary. Live PCM and local-file
+    /// visualization can still serve visible indicators on a constrained device.
+    var allowsAuxiliaryStreamingDecoder: Bool {
+        allowsBeatVisuals && !isLowPowerMode && thermalPressure == .nominal
     }
 
     // MARK: Chrome
@@ -211,12 +221,11 @@ nonisolated struct PerformanceBudget: Equatable, Sendable {
         isConstrained || thermalPressure == .fair ? 1.0 / 8.0 : 1.0 / 12.0
     }
 
-    var artworkFramesPerSecond: Int { thermalPressure == .nominal ? 15 : 8 }
+    var artworkFramesPerSecond: Int { thermalPressure == .nominal && !isLowPowerMode ? 30 : 15 }
 
-    /// Warm devices keep lyrics timing and audio unchanged, but stop continuously
-    /// recomposing the decorative artwork field. Cover transitions remain available.
+    /// Visible artwork drops to 15 fps at fair thermal pressure.
     var allowsArtworkMotion: Bool {
-        allowsDecorativeMotion && thermalPressure == .nominal && !isMemoryPressured
+        allowsDecorativeMotion && !isMemoryPressured
     }
 
     /// Essential transport checks continue while screen-off, with coalesced wakeups.
@@ -226,7 +235,7 @@ nonisolated struct PerformanceBudget: Equatable, Sendable {
 
     /// Only visible list indicators read this meter. No player/lyrics parent observes it.
     var beatPublishInterval: TimeInterval {
-        isConstrained ? 0.40 : (thermalPressure == .fair ? 0.10 : 0.05)
+        isConstrained ? 1.0 / 15 : (thermalPressure == .fair ? 1.0 / 20 : 1.0 / 30)
     }
 
     /// Word fill needs a smooth clock; line-only lyrics do not need frame-rate invalidation.

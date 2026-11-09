@@ -184,6 +184,52 @@ struct PlaylistDetailOfflineTests {
         )
     }
 
+    @Test("suspending a presentation invalidates an in-flight load and resumes with a fresh request")
+    func suspendedLoadDoesNotPublishAndResumesCleanly() async {
+        let state = ServerState()
+        state.isOnline = true
+        state.activeServer = ServerSnapshot(from: ServerConfig(
+            displayName: "Test", baseURL: "https://example.invalid", username: "u"
+        ))
+        let library = PDLibraryStub()
+        var requests: [CheckedContinuation<PlaylistWithSongs, any Error>] = []
+        library.playlistLoader = {
+            try await withCheckedThrowingContinuation { requests.append($0) }
+        }
+        let vm = PlaylistDetailViewModel(
+            playlistId: "playlist-1",
+            libraryService: library,
+            downloadService: PDDownloadStub(),
+            playlistService: PDPlaylistStub(),
+            toastService: ToastService(),
+            serverState: state
+        )
+
+        let first = Task { await vm.load() }
+        while requests.count < 1 { await Task.yield() }
+        vm.suspendPendingLoad()
+        #expect(!vm.acceptsPresentationUpdates)
+
+        // The server finishes after the swipe started. The late response must not
+        // repaint the shrinking page.
+        requests[0].resume(returning: PlaylistWithSongs(
+            id: "playlist-1", name: "Stale", songCount: 0, duration: 0
+        ))
+        await first.value
+        #expect(vm.name.isEmpty)
+        #expect(vm.songs.isEmpty)
+
+        let resumed = Task { await vm.resumePendingLoadIfNeeded() }
+        while requests.count < 2 { await Task.yield() }
+        requests[1].resume(returning: PlaylistWithSongs(
+            id: "playlist-1", name: "Fresh", songCount: 0, duration: 0
+        ))
+        await resumed.value
+        #expect(vm.acceptsPresentationUpdates)
+        #expect(vm.name == "Fresh")
+        #expect(!vm.isLoading)
+    }
+
     @Test("downloaded playlist falls back to local when the server call fails (stale isOnline)")
     func downloadedPlaylistFallsBackOnServerFailure() async {
         let vm = makeVM(playlistData: downloadedPlaylist, isOnline: true)

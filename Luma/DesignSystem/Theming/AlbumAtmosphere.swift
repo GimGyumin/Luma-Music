@@ -85,12 +85,11 @@ struct AlbumAtmosphere: Equatable, Sendable {
 
     static func from(
         analysis: RawArtworkColorAnalysis,
-        appearance: AlbumAppearance
+        appearance: AlbumAppearance,
+        respectSystemAppearance: Bool = false
     ) -> AlbumAtmosphere {
-        // Content-first (Apple Music 26.4): the page background is the artwork's own color
-        // — system Light/Dark appearance does NOT transform it. Only text contrast is
-        // adjusted by the increased-contrast accessibility flag.
-        let palette = ArtworkColorTransformer.page(from: analysis, increasedContrast: appearance.increaseContrast)
+        let palette = ArtworkColorTransformer.page(from: analysis, increasedContrast: appearance.increaseContrast,
+            systemLight: respectSystemAppearance ? appearance.isLight : nil)
 
         return AlbumAtmosphere(
             sourceColor: analysis.backgroundCandidate,
@@ -109,13 +108,14 @@ struct AlbumAtmosphere: Equatable, Sendable {
     static func from(
         dominantColor: Color,
         colorScheme: ColorScheme,
-        increaseContrast: Bool
+        increaseContrast: Bool,
+        respectSystemAppearance: Bool = false
     ) -> AlbumAtmosphere {
         guard dominantColor != .clear else { return .unthemed }
-        // `colorScheme` is intentionally unused for the background — content decides color.
         return from(
             analysis: RawArtworkColorAnalysis(color: dominantColor),
-            appearance: AlbumAppearance(isLight: false, increaseContrast: increaseContrast)
+            appearance: .from(colorScheme: colorScheme, increaseContrast: increaseContrast),
+            respectSystemAppearance: respectSystemAppearance
         )
     }
 

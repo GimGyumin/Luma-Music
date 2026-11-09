@@ -52,6 +52,9 @@ nonisolated struct DisplayableSong: Identifiable, Hashable, Sendable, Codable {
     let contributingArtists: [ArtistID3]?
     let albumArtists: [ArtistID3]?
     let genre: String?
+    /// Release year. Used by Siri/library filters; optional because offline
+    /// downloads and older persisted queues may not carry one.
+    let year: Int?
     let duration: TimeInterval
     let trackNumber: Int?
     /// OpenSubsonic disc number (1-based). Nil when the server omits it.
@@ -146,6 +149,7 @@ nonisolated struct DisplayableSong: Identifiable, Hashable, Sendable, Codable {
         contributingArtists: [ArtistID3]? = nil,
         albumArtists: [ArtistID3]? = nil,
         genre: String? = nil,
+        year: Int? = nil,
         duration: TimeInterval = 0,
         trackNumber: Int? = nil,
         discNumber: Int? = nil,
@@ -181,6 +185,7 @@ nonisolated struct DisplayableSong: Identifiable, Hashable, Sendable, Codable {
         self.contributingArtists = contributingArtists
         self.albumArtists = albumArtists
         self.genre = genre
+        self.year = year
         self.duration = duration
         self.trackNumber = trackNumber
         self.discNumber = discNumber
@@ -220,6 +225,7 @@ extension DisplayableSong {
         self.contributingArtists = song.artists
         self.albumArtists = song.albumArtists
         self.genre = song.genres?.first?.name ?? song.genre
+        self.year = song.year
         self.duration = song.duration.map(TimeInterval.init) ?? 0
         self.trackNumber = song.track
         self.discNumber = song.discNumber
@@ -259,6 +265,7 @@ extension DisplayableSong {
         self.contributingArtists = nil
         self.albumArtists = nil
         self.genre = track.genre
+        self.year = nil
         self.duration = track.durationSeconds.map(TimeInterval.init) ?? 0
         self.trackNumber = track.trackNumber
         self.discNumber = track.discNumber
@@ -286,6 +293,47 @@ extension DisplayableSong {
         self.movementLabel = nil
     }
 
+    /// Streaming-cache entry. Cached tracks are playable from disk but are not
+    /// permanent downloads, so `isDownloaded` stays false.
+    nonisolated init(from track: CachedTrack) {
+        let fallbackTitle = track.title?.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.id = track.songId
+        self.title = (fallbackTitle?.isEmpty == false ? fallbackTitle : nil) ?? track.songId
+        self.artist = track.artist
+        self.albumId = track.albumId
+        self.albumName = track.album
+        self.artistId = track.artistId
+        self.contributingArtists = nil
+        self.albumArtists = nil
+        self.genre = track.genre
+        self.year = track.year
+        self.duration = track.durationSeconds.map(TimeInterval.init) ?? 0
+        self.trackNumber = track.trackNumber
+        self.discNumber = track.discNumber
+        self.isDownloaded = false
+        self.coverArtId = track.coverArtId
+        self.audioFormat = track.audioFormat
+        self.contentType = track.mimeType
+        self.bitRate = nil
+        self.bitDepth = nil
+        self.samplingRate = nil
+        self.channelCount = nil
+        self.comment = nil
+        self.explicitStatus = nil
+        self.replayGainTrackGain = nil
+        self.replayGainTrackPeak = nil
+        self.replayGainAlbumGain = nil
+        self.replayGainAlbumPeak = nil
+        self.replayGainBaseGain = nil
+        self.replayGainFallbackGain = nil
+        self.isrc = nil
+        self.musicBrainzRecordingID = nil
+        self.isOriginalAudio = nil
+        self.displayComposer = nil
+        self.workName = nil
+        self.movementLabel = nil
+    }
+
     /// A copy with `isDownloaded` flipped — the 16 fields are otherwise identical. Rebuilding it by hand (as 10
     /// sites did) risks silently dropping a newly-added optional field; this can't.
     func withDownloaded(_ flag: Bool) -> DisplayableSong {
@@ -304,7 +352,7 @@ extension DisplayableSong {
             album: albumName,
             artist: artist,
             track: trackNumber,
-            year: nil,
+            year: year,
             genre: genre,
             coverArt: coverArtId,
             size: nil,

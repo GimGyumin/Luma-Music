@@ -27,7 +27,10 @@ nonisolated enum PlaybackBufferPolicy {
 
     /// A one-time startup cushion for finite progressive streams. Normal underruns still
     /// use AVFoundation's automatic stall recovery and the larger forward-buffer target.
-    static func startupBuffer(isLimited: Bool) -> TimeInterval { isLimited ? 2 : 1 }
+    /// Keep the full 1s cushion on metered/constrained links; on unmetered Wi-Fi 0.35s
+    /// removes a noticeable first-audio delay while the later 10s target still protects
+    /// playback from ordinary jitter.
+    static func startupBuffer(isLimited: Bool) -> TimeInterval { isLimited ? 1 : 0.35 }
 
     static func canPrepareNext(isLocal: Bool, bufferedAhead: Double, remaining: Double) -> Bool {
         isLocal || (bufferedAhead.isFinite && remaining.isFinite && remaining > 0
@@ -47,6 +50,31 @@ nonisolated enum PlaybackBufferPolicy {
                   range.start <= position, position < end else { return result }
             return max(result, end - position)
         }
+    }
+}
+
+/// Guards a restored seek from being injected into a live/user-started attempt.
+/// The source swap is asynchronous, so the transport intent is as important as the
+/// visible state: a Play tap can arrive before SwiftUI publishes `.loading`.
+nonisolated enum RestorationAdmissionPolicy {
+    static func permits(trackMatches: Bool, playbackState: PlaybackState,
+                        intent: PlaybackIntent?) -> Bool {
+        trackMatches && playbackState == .paused && intent != .play
+    }
+}
+
+/// Position samples that must not erase a real paused/restored clock.
+nonisolated enum PlaybackPositionPolicy {
+    /// Engine teardown and stream resets report 0 before a new item is scheduled.
+    /// While the transport is paused/loading/recovering that zero is not a user seek;
+    /// a real seek or a new track commits its position explicitly elsewhere.
+    static func shouldPreserveZeroReset(engineProgress: Double, previousPosition: Double,
+                                       playbackState: PlaybackState,
+                                       engineIsProducing: Bool) -> Bool {
+        engineProgress.isFinite && engineProgress <= 0.01
+            && previousPosition > 1
+            && !engineIsProducing
+            && playbackState != .playing
     }
 }
 

@@ -39,7 +39,13 @@ struct NativeSearchSettingsSection: View {
         } header: {
             Text("System Search")
         } footer: {
-            Text("Shares music titles, artists, albums and playlist metadata with on-device system search. Audio, lyrics, server credentials and listening history are excluded. Turning this off removes Luma’s search index.")
+            VStack(alignment: .leading, spacing: 5) {
+                Text("Shares music titles, artists, albums and playlist metadata with on-device system search. Audio, lyrics, server credentials and listening history are excluded. Turning this off removes Luma’s search index.")
+                ContextualGuideNote(
+                    guide: .siriShortcuts,
+                    message: String(localized: "Spotlight indexing also makes Luma songs available to Siri and Shortcuts after the first index finishes.", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale)
+                )
+            }
         }
     }
 }

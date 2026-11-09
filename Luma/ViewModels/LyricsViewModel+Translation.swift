@@ -12,9 +12,13 @@ import QuartzCore
 extension LyricsViewModel {
     // MARK: Translation Core
 
+    var hidesEnglishTranslation: Bool {
+        hasEnglishOnlyLyrics && (AppLanguage.current == .english || LyricsTranslationSettings.shared.targetLanguage == "en")
+    }
+
     /// True when at least one lyric line still needs translation into the user’s target language.
     var needsTranslation: Bool {
-        guard case .loaded(let structured) = state else { return false }
+        guard !hidesEnglishTranslation, case .loaded(let structured) = state else { return false }
         // Show button if translations already exist (TTML / server / cached) — for toggle.
         if selectedServerTranslationLang != nil { return true }
         if translatedLyrics.contains(where: { !$0.translatedText.isEmpty && $0.translatedText != $0.originalText }) { return true }
@@ -32,7 +36,7 @@ extension LyricsViewModel {
 
     func translateCurrentLyrics() async {
         await refreshTranslationSettingsIfNeeded()
-        guard case .loaded(let structured) = state else { return }
+        guard !hidesEnglishTranslation, case .loaded(let structured) = state else { return }
         // Already have translations (TTML / server / cached API) — just toggle visibility.
         if selectedServerTranslationLang != nil || translatedLyrics.contains(where: { !$0.translatedText.isEmpty && $0.translatedText != $0.originalText }) {
             if areTranslationsVisible {

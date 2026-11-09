@@ -12,9 +12,10 @@ import SwiftUI
 struct DownloadedMusicManagementView: View {
     @Environment(\.appContainer) private var container
     @Query private var downloadedTracks: [DownloadedTrack]
+    @Query private var cachedTracks: [CachedTrack]
 
     private var tracks: [ManagedDownloadTrack] {
-        downloadedTracks.map(ManagedDownloadTrack.init).sorted(by: ManagedDownloadTrack.areInDefaultOrder)
+        ManagedDownloadLibrary.merged(downloaded: downloadedTracks, cached: cachedTracks)
     }
 
     private var artists: [ManagedDownloadArtist] {
@@ -98,10 +99,15 @@ struct DownloadedMusicManagementView: View {
     }
 
     private func delete(_ tracks: [ManagedDownloadTrack]) {
-        guard let downloadService = container?.downloadService else { return }
+        guard let downloadService = container?.downloadService,
+              let cacheService = container?.cacheService else { return }
         Task {
             for track in tracks {
-                try? await downloadService.remove(songId: track.songId, serverId: track.serverId)
+                if track.isCached {
+                    await cacheService.invalidate(songId: track.songId, serverId: track.serverId)
+                } else {
+                    try? await downloadService.remove(songId: track.songId, serverId: track.serverId)
+                }
             }
         }
     }
@@ -110,14 +116,13 @@ struct DownloadedMusicManagementView: View {
 private struct DownloadedArtistManagementView: View {
     @Environment(\.appContainer) private var container
     @Query private var downloadedTracks: [DownloadedTrack]
+    @Query private var cachedTracks: [CachedTrack]
     let artistID: String
     let title: String
 
     private var tracks: [ManagedDownloadTrack] {
-        downloadedTracks
-            .map(ManagedDownloadTrack.init)
+        ManagedDownloadLibrary.merged(downloaded: downloadedTracks, cached: cachedTracks)
             .filter { ManagedDownloadLibrary.artistKey($0) == artistID }
-            .sorted(by: ManagedDownloadTrack.areInDefaultOrder)
     }
 
     private var albums: [ManagedDownloadAlbum] {
@@ -169,10 +174,15 @@ private struct DownloadedArtistManagementView: View {
     }
 
     private func delete(_ tracks: [ManagedDownloadTrack]) {
-        guard let downloadService = container?.downloadService else { return }
+        guard let downloadService = container?.downloadService,
+              let cacheService = container?.cacheService else { return }
         Task {
             for track in tracks {
-                try? await downloadService.remove(songId: track.songId, serverId: track.serverId)
+                if track.isCached {
+                    await cacheService.invalidate(songId: track.songId, serverId: track.serverId)
+                } else {
+                    try? await downloadService.remove(songId: track.songId, serverId: track.serverId)
+                }
             }
         }
     }
@@ -181,14 +191,13 @@ private struct DownloadedArtistManagementView: View {
 private struct DownloadedSongsManagementView: View {
     @Environment(\.appContainer) private var container
     @Query private var downloadedTracks: [DownloadedTrack]
+    @Query private var cachedTracks: [CachedTrack]
     let title: String
     let trackIDs: Set<String>?
 
     private var tracks: [ManagedDownloadTrack] {
-        downloadedTracks
-            .map(ManagedDownloadTrack.init)
+        ManagedDownloadLibrary.merged(downloaded: downloadedTracks, cached: cachedTracks)
             .filter { trackIDs?.contains($0.id) ?? true }
-            .sorted(by: ManagedDownloadTrack.areInDefaultOrder)
     }
 
     var body: some View {
@@ -202,7 +211,10 @@ private struct DownloadedSongsManagementView: View {
                         title: track.title,
                         subtitle: track.artist,
                         byteCount: track.fileSize,
-                        showsChevron: false
+                        showsChevron: false,
+                        badge: track.isCached
+                            ? String(localized: "Cached", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale)
+                            : nil
                     )
                 }
                 .onDelete { offsets in
@@ -229,10 +241,15 @@ private struct DownloadedSongsManagementView: View {
     }
 
     private func delete(_ tracks: [ManagedDownloadTrack]) {
-        guard let downloadService = container?.downloadService else { return }
+        guard let downloadService = container?.downloadService,
+              let cacheService = container?.cacheService else { return }
         Task {
             for track in tracks {
-                try? await downloadService.remove(songId: track.songId, serverId: track.serverId)
+                if track.isCached {
+                    await cacheService.invalidate(songId: track.songId, serverId: track.serverId)
+                } else {
+                    try? await downloadService.remove(songId: track.songId, serverId: track.serverId)
+                }
             }
         }
     }
@@ -276,6 +293,7 @@ private struct DownloadedMusicArtworkRow: View {
     let subtitle: String?
     let byteCount: Int64
     var showsChevron = true
+    var badge: String? = nil
 
     var body: some View {
         HStack(spacing: 12) {
@@ -298,6 +316,14 @@ private struct DownloadedMusicArtworkRow: View {
             }
 
             Spacer(minLength: 8)
+            if let badge {
+                Text(badge)
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(.quaternary, in: Capsule())
+            }
             Text(ManagedDownloadLibrary.formatted(byteCount))
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
@@ -327,6 +353,7 @@ nonisolated private struct ManagedDownloadTrack: Identifiable, Hashable {
     let trackNumber: Int?
     let coverArtId: String?
     let fileSize: Int64
+    let isCached: Bool
 
     var id: String { "\(serverId.uuidString):\(songId)" }
 
@@ -343,6 +370,23 @@ nonisolated private struct ManagedDownloadTrack: Identifiable, Hashable {
         trackNumber = track.trackNumber
         coverArtId = track.coverArtId
         fileSize = track.fileSize
+        isCached = false
+    }
+
+    init(_ track: CachedTrack) {
+        songId = track.songId
+        serverId = track.serverId
+        albumId = track.albumId
+        title = track.title?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty ?? track.songId
+        artist = track.artist?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+            ?? String(localized: "Unknown Artist", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale)
+        artistId = track.artistId
+        album = track.album?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+            ?? String(localized: "Unknown Album", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale)
+        trackNumber = track.trackNumber
+        coverArtId = track.coverArtId
+        fileSize = track.fileSize
+        isCached = true
     }
 
     static func areInDefaultOrder(_ lhs: Self, _ rhs: Self) -> Bool {
@@ -375,6 +419,16 @@ nonisolated private struct ManagedDownloadArtist: Identifiable {
 }
 
 nonisolated private enum ManagedDownloadLibrary {
+    /// Downloaded entries win over a cached copy of the same song; cached-only
+    /// tracks are appended so the Downloads surfaces reflect everything that is
+    /// actually playable from local storage.
+    static func merged(downloaded: [DownloadedTrack], cached: [CachedTrack]) -> [ManagedDownloadTrack] {
+        var result = downloaded.map(ManagedDownloadTrack.init)
+        let downloadedIDs = Set(result.map(\.id))
+        result += cached.map(ManagedDownloadTrack.init).filter { !downloadedIDs.contains($0.id) }
+        return result.sorted(by: ManagedDownloadTrack.areInDefaultOrder)
+    }
+
     static func artists(from tracks: [ManagedDownloadTrack]) -> [ManagedDownloadArtist] {
         Dictionary(grouping: tracks, by: artistKey)
             .map { key, group in

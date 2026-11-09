@@ -9,7 +9,8 @@ import Foundation
 ///
 /// PersistentModel instances (PlaybackEvent) must never cross actor boundaries —
 /// this DTO carries the same data as a safe Sendable struct.
-nonisolated struct PlaybackEventDTO: Sendable {
+nonisolated struct PlaybackEventDTO: Sendable, Codable {
+    var id = UUID()
     let trackId: String
     let trackTitle: String
     let albumId: String?

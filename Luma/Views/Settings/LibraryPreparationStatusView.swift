@@ -106,7 +106,7 @@ struct LibraryPreparationStatusView: View {
                                 .font(.subheadline).foregroundStyle(.secondary)
                                 .padding(.top, 8)
                         }
-                        .tint(.blue)
+                        .tint(LumaColors.controlAccent)
                     }
                 }
                 .padding(22)

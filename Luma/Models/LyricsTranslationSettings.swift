@@ -129,6 +129,12 @@ final class LyricsTranslationSettings: ObservableObject {
         LyricsLanguage.normalizedLanguageCode(raw)
     }
 
+    private static func configuredTargetLanguage(in defaults: UserDefaults) -> String {
+        guard let target = defaults.string(forKey: "targetLanguage")?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !target.isEmpty else { return defaultTargetLanguage }
+        return normalizedLanguageCode(target)
+    }
+
     /// Apple Translation hangs when source == target. Prefer a useful fallback (ko for English lyrics).
     nonisolated static func resolvedTargetLanguage(preferred: String, source: String) -> String {
         let sourceCode = LyricsLanguage.normalizedLanguageCode(source)
@@ -158,22 +164,7 @@ final class LyricsTranslationSettings: ObservableObject {
             self.provider = .apple
         }
 
-        // Follow the app/system language for first launch / empty values. One-time migrate "en" when device UI is Korean
-        // (legacy Settings text field / defaults often left English lyrics translating en→en forever).
-        let storedTarget = defaults.string(forKey: "targetLanguage")
-        let prefersKorean = Locale.preferredLanguages.first?.lowercased().hasPrefix("ko") == true
-        if storedTarget == nil || storedTarget?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == true {
-            self.targetLanguage = Self.defaultTargetLanguage
-            defaults.set(Self.defaultTargetLanguage, forKey: "targetLanguage")
-        } else if prefersKorean,
-                  Self.normalizedLanguageCode(storedTarget) == "en",
-                  defaults.bool(forKey: "luma.didMigrateTargetLanguageToKo") == false {
-            self.targetLanguage = "ko"
-            defaults.set("ko", forKey: "targetLanguage")
-            defaults.set(true, forKey: "luma.didMigrateTargetLanguageToKo")
-        } else {
-            self.targetLanguage = Self.normalizedLanguageCode(storedTarget)
-        }
+        self.targetLanguage = Self.configuredTargetLanguage(in: defaults)
         self.openAIAPIKey = SensitiveSettingsStore
             .migratedString(forKey: Self.openAIAPIKeyKey, defaults: defaults)
             .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -199,7 +190,7 @@ final class LyricsTranslationSettings: ObservableObject {
         let auto = defaults.bool(forKey: "isAutoTranslateEnabled")
         if isAutoTranslateEnabled != auto { isAutoTranslateEnabled = auto }
 
-        let target = Self.normalizedLanguageCode(defaults.string(forKey: "targetLanguage"))
+        let target = Self.configuredTargetLanguage(in: defaults)
         if targetLanguage != target { targetLanguage = target }
 
         let strategy = TranslationStrategyPreference(

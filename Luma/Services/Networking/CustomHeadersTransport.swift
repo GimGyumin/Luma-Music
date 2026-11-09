@@ -66,13 +66,20 @@ struct CustomHeadersTransport: HTTPTransport, Sendable {
         let requestID = String(UUID().uuidString.prefix(8))
         let endpoint = NetworkRequestDiagnostics.endpoint(for: request.url)
         let started = ContinuousClock.now
+        let trace = DiagnosticsCenter.shared.begin(.apiRequest)
+        var traceResult = DiagnosticsResult.failure
+        defer { trace.finish(traceResult) }
         Logger.httpTransport.info("[HTTP] run=\(RuntimeDiagnostics.sessionID, privacy: .public) session=\(diagnosticSessionID, privacy: .public) request=\(requestID, privacy: .public) endpoint=\(endpoint, privacy: .public) event=start")
         do {
             let result = try await base.data(for: enriched)
             let elapsed = RuntimeDiagnostics.milliseconds(started.duration(to: .now))
+            traceResult = result.1.statusCode >= 400 ? .failure : .success
+            if traceResult == .failure { trace.increment(.failedRequests) }
             Logger.httpTransport.info("[HTTP] run=\(RuntimeDiagnostics.sessionID, privacy: .public) session=\(diagnosticSessionID, privacy: .public) request=\(requestID, privacy: .public) endpoint=\(endpoint, privacy: .public) event=complete status=\(result.1.statusCode, privacy: .public) duration_ms=\(elapsed, privacy: .public) bytes=\(result.0.count, privacy: .public)")
             return result
         } catch {
+            traceResult = DiagnosticsResult.classify(error)
+            if traceResult == .failure { trace.increment(.failedRequests) }
             let elapsed = RuntimeDiagnostics.milliseconds(started.duration(to: .now))
             let outcome = NetworkRequestDiagnostics.outcome(for: error)
             let domain = NetworkRequestDiagnostics.domain(for: error)

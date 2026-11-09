@@ -20,7 +20,12 @@ extension PlayerService {
 
     func pause() async {
         recordPlaybackDiagnostic(event: "pause", source: "transport")
+        if Self.playbackTraceEnabled {
+            let snapshot = await MainActor.run { (state.playbackState, state.position, state.currentTrack?.id) }
+            print("[PB-STATE] pause request attempt=\(playbackEpoch) state=\(snapshot.0) position=\(String(format: "%.2f", snapshot.1)) track=\(snapshot.2 ?? "nil")")
+        }
         guard stopBarrierCount == 0 else { return }
+        telemetry.cancelPending()
         transport.intent = .pause
         #if os(iOS)
         sessionActivationRetryTask?.cancel()
@@ -100,9 +105,14 @@ extension PlayerService {
 
     func resume() async {
         let expected = playbackContext
+        if Self.playbackTraceEnabled {
+            let snapshot = await MainActor.run { (state.playbackState, state.position, state.currentTrack?.id) }
+            print("[PB-STATE] resume request attempt=\(playbackEpoch) state=\(snapshot.0) position=\(String(format: "%.2f", snapshot.1)) track=\(snapshot.2 ?? "nil") source=\(currentSource != nil) engine=\(activeEngine.state)")
+        }
         guard await permitsNewTransportCommand(), contextIsCurrent(expected), stopBarrierCount == 0 else { return }
         let hasSelection = await MainActor.run { state.currentTrack != nil }
         guard hasSelection, contextIsCurrent(expected), stopBarrierCount == 0 else { return }
+        playbackRequestStartedAt = Date()
         clearInterruptionForExplicitPlayback()
         transport.intent = .play
         transport.terminalContext = nil
@@ -134,6 +144,16 @@ extension PlayerService {
                              request: seekRequestGeneration, intendsToPlay: true)
         }
         guard commandID == transportCommandID, epoch == playbackEpoch, !Task.isCancelled else { return }
+        // A long suspension can leave the engine in `.paused` with its internal clock
+        // reset to 0 while the UI/session still holds the real position. Resuming that
+        // empty clock would restart the song; reopen/seek the saved position instead.
+        let engineLostItsPausedClock = !systemPlayback.isActive && engine.state == .paused
+            && savedPosition > 1 && engineProgress() < 0.5
+        let nativeLostItsPausedClock = systemPlayback.isActive && systemEngine.state == .paused
+            && savedPosition > 1 && systemEngine.progress < 0.5
+        if engineLostItsPausedClock || nativeLostItsPausedClock, Self.playbackTraceEnabled {
+            print("[PB-STATE] paused clock lost — reopening at \(String(format: "%.2f", savedPosition))s native=\(systemPlayback.isActive)")
+        }
         #if os(iOS)
         configureAudioSessionIfNeeded(preferMultichannel: systemPlayback.isActive)
         #endif
@@ -166,7 +186,7 @@ extension PlayerService {
             do {
                 let source = try await mediaResolver.resolve(songId: track.id, serverId: serverID, song: track)
                 guard contextIsCurrent(context) else { return }
-                currentSource = source
+                await replaceCurrentSource(source)
                 resolvedSourceOnResume = true
                 pendingRestoreInfo = (seekTime: savedPosition, pause: false)
                 guard await commitPresentation(context, { state in
@@ -193,7 +213,8 @@ extension PlayerService {
         guard contextIsCurrent(context) else { return }
         var startsFromColdSource = false
         if systemPlayback.isActive {
-            if hasPendingRestore || !systemEngine.hasCurrentItem || systemEngine.state == .error, let source = currentSource {
+            if hasPendingRestore || !systemEngine.hasCurrentItem || systemEngine.state == .error
+                || nativeLostItsPausedClock, let source = currentSource {
                 startsFromColdSource = true
                 let resumePosition = pendingRestoreInfo?.seekTime ?? max(savedPosition, engineProgress())
                 guard await commitPresentation(context, { state in
@@ -204,18 +225,22 @@ extension PlayerService {
                 let freshSource = resolvedSourceOnResume ? source : (await refreshedColdStartSource() ?? source)
                 guard commandID == transportCommandID, epoch == playbackEpoch, !Task.isCancelled else { return }
                 prepareColdResume(at: resumePosition)
-                currentSource = freshSource
+                await replaceCurrentSource(freshSource)
                 guard await commitPresentation(context, { state in state.currentPlaybackTrack = freshSource.playbackSong; return true }) else { return }
                 startEnginePlayback(
                     url: freshSource.url,
                     headers: freshSource.customHeaders,
-                    useSystemPlayer: true
+                    useSystemPlayer: true,
+                    preferredSampleRate: AudioQualityClassifier.nativePlaybackSampleRate(
+                        for: currentTrack ?? freshSource.playbackSong,
+                        source: freshSource
+                    )
                 )
             } else {
                 systemEngine.resume()
             }
         } else if let source = currentSource,
-                  hasPendingRestore || engine.state == .ready || engine.state == .stopped || engine.state == .error || engine.state == .disposed {
+                  engineLostItsPausedClock || hasPendingRestore || engine.state == .ready || engine.state == .stopped || engine.state == .error || engine.state == .disposed {
             startsFromColdSource = true
             // Session restore leaves the engine stopped with a pending seek — must play(url),
             // not resume(), or AudioStreaming can sit dead / hang the UI.
@@ -230,12 +255,19 @@ extension PlayerService {
             let freshSource = resolvedSourceOnResume ? source : (await refreshedColdStartSource() ?? source)
             guard commandID == transportCommandID, epoch == playbackEpoch, !Task.isCancelled else { return }
             prepareColdResume(at: resumePosition)
-            currentSource = freshSource
+            await replaceCurrentSource(freshSource)
             guard await commitPresentation(context, { state in state.currentPlaybackTrack = freshSource.playbackSong; return true }) else { return }
-            startEnginePlayback(url: freshSource.url, headers: freshSource.customHeaders,
-                                useSystemPlayer: resumePosition > 0 || currentTrack.map {
-                                    shouldUseSystemPlayer(for: $0, source: freshSource)
-                                } == true)
+            startEnginePlayback(
+                url: freshSource.url,
+                headers: freshSource.customHeaders,
+                useSystemPlayer: resumePosition > 0 || currentTrack.map {
+                    shouldUseSystemPlayer(for: $0, source: freshSource)
+                } == true,
+                preferredSampleRate: AudioQualityClassifier.nativePlaybackSampleRate(
+                    for: currentTrack ?? freshSource.playbackSong,
+                    source: freshSource
+                )
+            )
             Task { @MainActor in PlaybackBeatMeter.shared.setEnabled(true) }
         } else {
             engine.resume()
@@ -351,6 +383,7 @@ extension PlayerService {
         transport.intent = .stop
         transportCommandID &+= 1
         let commandID = transportCommandID
+        telemetry.markStopped()
         let context = playbackContext
         cancelAutoExtendFetch()
         playbackRequestTask?.cancel()
@@ -405,7 +438,7 @@ extension PlayerService {
         guard commandID == transportCommandID else { return }
         let stoppedPlaybackID = currentSource?.playbackSong?.id
         let stoppedJellyfinContext = currentSource?.jellyfinPlaybackContext
-        currentSource = nil
+        await replaceCurrentSource(nil)
         pendingRestoreInfo = nil
         seekState = .idle
         seekNeedsCommit = false
@@ -456,6 +489,8 @@ extension PlayerService {
             Logger.player.warning("seek ignored — non-finite target")
             return
         }
+        // A repeated scrub callback must not reopen a stream that is still settling.
+        if seekState.target == position { return }
         seekRequestGeneration &+= 1
         let request = seekRequestGeneration
         seekRecoveryRequest = nil
@@ -494,6 +529,7 @@ extension PlayerService {
         }
         // A rejected scrub during track resolution must not invalidate the play command.
         transportCommandID &+= 1
+        telemetry.beginSeek()
         let context = playbackContext
         seekDownloadTask?.cancel()
         cancelQualityUpgrade()

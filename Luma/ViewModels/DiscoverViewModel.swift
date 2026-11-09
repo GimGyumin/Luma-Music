@@ -156,6 +156,7 @@ final class DiscoverViewModel {
     private(set) var mostPlayed: [AlbumID3] = []
     private(set) var suggestedSelection: [AlbumID3] = []
     private(set) var personalMixes: [PersonalMix] = []
+    private(set) var personalMixesLoaded = false
     private(set) var isLoading: Bool = false
     private(set) var loadError: Error?
     private(set) var freshReleases: [AlbumRecommendation] = []
@@ -174,6 +175,7 @@ final class DiscoverViewModel {
         self.libraryService = libraryService
         self.recommendationService = recommendationService
         self.personalMixService = personalMixService
+        self.personalMixesLoaded = personalMixService == nil
         // Disk hydrate is async — apply on the next turn so init stays synchronous.
         Task { @MainActor in
             await DiscoverSectionsCache.hydrateFromDiskIfNeeded(serverId: serverId)
@@ -391,31 +393,52 @@ final class DiscoverViewModel {
             defer {
                 if self?.deferredMixGeneration == generation { self?.deferredPersonalMixTask = nil }
             }
-            // `try?` keeps the closure non-throwing: sleep only throws on cancellation
-            // (or an unlikely clock error), and the guard below handles cancellation.
-            try? await Task.sleep(for: .seconds(2))
+            // One short yield lets the Home shelves paint before the sequential mix
+            // builders touch the network. The first completed mix is published
+            // progressively, so this no longer waits for the full six-kind build.
+            try? await Task.sleep(for: .milliseconds(500))
             guard !Task.isCancelled else { return }
             await self?.loadPersonalMixes(serverId: serverId, forceRefresh: forceRefresh, progressive: true)
         }
     }
 
     private func loadPersonalMixes(serverId: String?, forceRefresh: Bool, progressive: Bool = false) async {
-        guard let personalMixService else { return }
-        if progressive {
-            if forceRefresh || personalMixes.isEmpty {
-                let mixes = await personalMixService.mixes(serverId: serverId, forceRefresh: forceRefresh, limit: 1)
-                guard !Task.isCancelled else { return }
-                personalMixes = mixes
-            }
-            let mixes = await personalMixService.mixes(serverId: serverId, forceRefresh: false)
-            guard !Task.isCancelled else { return }
-            personalMixes = mixes
+        guard let personalMixService else {
+            personalMixesLoaded = true
             return
         }
-        if !forceRefresh, !personalMixes.isEmpty { return }
+        if progressive {
+            let mixes = await personalMixService.mixes(
+                serverId: serverId,
+                forceRefresh: forceRefresh,
+                priorityKinds: [.heavyRotation, .essentials, .newMusic, .getUp, .chill, .focus]
+            ) { [weak self] partial in
+                guard let self else { return }
+                // Paint each completed mix without waiting for the remaining builders.
+                self.personalMixes = partial
+            }
+            guard !Task.isCancelled else { return }
+            personalMixes = mixes
+            personalMixesLoaded = true
+            publishMixesToWidget(mixes)
+            return
+        }
+        if !forceRefresh, !personalMixes.isEmpty {
+            personalMixesLoaded = true
+            return
+        }
         let mixes = await personalMixService.mixes(serverId: serverId, forceRefresh: forceRefresh)
         guard !Task.isCancelled else { return }
         personalMixes = mixes
+        personalMixesLoaded = true
+        publishMixesToWidget(mixes)
+    }
+
+    /// One small App Group snapshot for the recommendations widget. Writing it here
+    /// reuses the already-built personal mixes and never starts a second recommendation
+    /// graph; an unchanged snapshot does not reload WidgetKit.
+    private func publishMixesToWidget(_ mixes: [PersonalMix]) {
+        PersonalMixWidgetSnapshot.publish(mixes)
     }
 
     private func applyCache() {

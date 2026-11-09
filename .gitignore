@@ -24,13 +24,18 @@ DerivedData/
 Packages/**/.build/
 Packages/**/.swiftpm/
 
-# Runtime artifacts
-*.profraw
-nohup.out
-*.log
+# Firebase configuration is per-developer / per-environment
+GoogleService-Info.plist
+**/GoogleService-Info.plist
 
-# Internal audit artifacts
+# Cloud test build products and artifacts
+.cloud-test/
+*.xctestrun
+
+# Internal development notes and audit artifacts (not shipped)
+.agents/
+skills-lock.json
 /docs/audits/
-
-# Internal release audit
-/docs/RC_FOLLOWUP_AUDIT.md
+/docs/fixes/
+/docs/ui/
+/docs/screenshots/

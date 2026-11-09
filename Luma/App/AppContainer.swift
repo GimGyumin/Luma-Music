@@ -38,6 +38,7 @@ final class AppContainer {
     let libraryService: any LibraryServiceProtocol
     let homeDiscoveryFeed: HomeDiscoveryFeed
     let cacheService: any CacheServiceProtocol
+    let streamingCacheMaintenance: StreamingCacheMaintenance
     let downloadService: any DownloadServiceProtocol
     let mediaResolver: any MediaResolverProtocol
     let playerService: any PlayerServiceProtocol
@@ -57,6 +58,7 @@ final class AppContainer {
     let dominantColorExtractor = DominantColorExtractor()
     let nowPlayingBackgroundPreparation = NowPlayingBackgroundPreparation()
     let artworkImageCache: ArtworkImageCache
+    let replayHistory: ReplayHistorySync
     let statsService: StatsService
     private let _player: PlayerService
     let wrappedPlaylistService: WrappedPlaylistService
@@ -120,12 +122,22 @@ final class AppContainer {
             mediaIdentityService: mediaIdentityService
         )
         cacheService = cache
-
-        let stats = StatsService(modelContainer: listeningModelContainer, preparation: historyPreparation)
-        statsService = stats
+        streamingCacheMaintenance = StreamingCacheMaintenance(
+            cacheService: cache,
+            playerState: playerState,
+            settings: cacheSettings
+        )
 
         let server = ServerService(state: serverState, keychain: keychain, modelContainer: modelContainer, cacheService: cache)
         serverService = server
+        let replay = ReplayHistorySync(server: server, directory: temporaryStorage) { account, url in
+            await historyPreparation?.value
+            try await StatsService.backupLocalHistory(container: historyStore, serverID: account.localReplayID, to: url)
+        }
+        replayHistory = replay
+        let stats = StatsService(modelContainer: listeningModelContainer, preparation: historyPreparation, replay: replay,
+            account: { [serverState] in serverState.activeServer }, songs: { [libraryIndexService] id in libraryIndexService.replaySongs(for: id) })
+        statsService = stats
         // One bounded `ping` — no retries (the client builds with `retryPolicy: .none`) — is enough
         // to tell "the device has a route" apart from "the server answers", which is what the
         // server-backed tabs need to know.
@@ -140,11 +152,12 @@ final class AppContainer {
             modelContainer: modelContainer,
             deviceIdentity: jellyfinDeviceIdentity
         )
-        lyricsService = LyricsService(
+        let lyrics = LyricsService(
             serverService: server,
             modelContainer: modelContainer,
             mediaIdentityService: mediaIdentityService
         )
+        lyricsService = lyrics
         wrappedPlaylistService = WrappedPlaylistService(serverService: server, statsService: stats)
         radioService = RadioService(serverService: server)
 
@@ -162,7 +175,7 @@ final class AppContainer {
         )
         downloadService = download
 
-        let library = LibraryService(serverService: server, modelContainer: modelContainer, downloadService: download, statsService: stats, libraryIndex: libraryIndexService)
+        let library = LibraryService(serverService: server, modelContainer: modelContainer, downloadService: download, statsService: stats, replay: replay, libraryIndex: libraryIndexService)
         libraryService = library
         homeDiscoveryFeed = HomeDiscoveryFeed(library: library, serverState: serverState, downloads: download)
         mediaIdentityReconciliationService = MediaIdentityReconciliationService(
@@ -302,11 +315,29 @@ final class AppContainer {
         }
 
         NowPlayingBridge.performTogglePlayPause = { [weak player] in await player?.togglePlayPause() }
+        WidgetPlaybackBridge.playTrack = { [weak player, library, serverState] trackID, serverID in
+            guard let player else { return }
+            if let serverID {
+                let activeID = await MainActor.run { serverState.activeServer?.id.uuidString }
+                guard activeID == serverID else { return }
+            }
+            do {
+                let song = try await library.song(id: trackID)
+                try await player.play(tracks: [DisplayableSong(from: song)], startIndex: 0)
+            } catch {
+                // A widget tap is best-effort; the app remains responsible for
+                // exposing its normal error UI when the user opens it.
+            }
+        }
 
         if #available(iOS 27.0, macOS 27.0, *) {
             SiriBridge.playbackProvider = { [playerService] in playerService }
             SiriBridge.favoritesProvider = { [favoritesService] in favoritesService }
             SiriBridge.playlistProvider = { [playlistService] in playlistService }
+            SiriBridge.statsProvider = { [stats] in stats }
+            SiriBridge.libraryProvider = { [library] in library }
+            SiriBridge.lyricsProvider = { [lyrics] in lyrics }
+            SiriBridge.cacheProvider = { [cache] in cache }
             SiriBridge.openURLAction = { url in
                 #if os(iOS)
                 await MainActor.run { UIApplication.shared.open(url) }
@@ -550,6 +581,8 @@ final class AppContainer {
             "luma.cache.maxMegabytes",
             "luma.cache.format",
             "luma.cache.cellular",
+            "luma.cache.autoCleanup",
+            "luma.cache.lastMaintenanceAt",
             "luma.streaming.wifi",
             "luma.streaming.cellular",
             "luma.streaming.download",
@@ -638,470 +671,5 @@ final class AppContainer {
         defaults.set(true, forKey: DeveloperSettingsKey.forceOnboardingReplay)
         defaults.set(false, forKey: "onboardingComplete")
         Logger.boot.info("Developer: wiped \(serverIds.count, privacy: .public) server(s) and replaying onboarding")
-    }
-}
-
-// MARK: - CloudKit
-
-nonisolated enum LumaCloudKit {
-    static let containerIdentifier = "iCloud.com.kyumin.Music.Luma"
-}
-
-// MARK: - ModelContainer factory
-
-extension ModelContainer {
-    /// Flip to `true` only after joining the Apple Developer Program and restoring iCloud/CloudKit
-    /// entitlements — Personal Teams cannot provision iCloud.
-    private static let isCloudKitSyncEnabled = false
-
-    private static func cloudKitDatabase(inMemory: Bool) -> ModelConfiguration.CloudKitDatabase {
-        guard isCloudKitSyncEnabled, !inMemory else { return .none }
-        return .private(LumaCloudKit.containerIdentifier)
-    }
-
-    /// Creates the Luma ModelContainer.
-    /// - Parameter inMemory: Pass `true` in tests — Swift Testing parallelises tests,
-    ///   so each test must create its own in-memory container (never shared).
-    ///
-    /// Opening a persistent store is deliberately non-destructive. A transient failure such as
-    /// a full disk or temporary file lock must never be interpreted as permission to erase data.
-    static func luma(inMemory: Bool = false) throws -> ModelContainer {
-        let schema = Schema([
-            ServerConfig.self,
-            CachedTrack.self,
-            DownloadedTrack.self,
-            DownloadedAlbum.self,
-            DownloadedPlaylist.self,
-            QueueSnapshot.self,
-            FavoriteRecord.self,
-            PinnedItem.self,
-            PlaybackSession.self, // kept for schema-mismatch migration safety; see session() below
-            PlaybackEvent.self,   // kept for migration into listening(); see listening() below
-            CachedLyrics.self,
-            SearchHistoryEntry.self,
-            LibraryMetadataSong.self,
-            PlaylistCoverChoice.self,
-            RemoteIDAlias.self,
-            RemoteMediaIdentity.self,
-            JellyfinCapabilityRecord.self
-        ])
-        // Local-only: downloads/cache/favorites must not sync via iCloud.
-        let config = ModelConfiguration(schema: schema, isStoredInMemoryOnly: inMemory, cloudKitDatabase: .none)
-        return try openStore(named: "default", schema: schema, configuration: config)
-    }
-
-    /// Opens a store and preserves it on failure so the app can offer an explicit recovery choice.
-    private static func openStore(
-        named name: String,
-        schema: Schema,
-        configuration: ModelConfiguration
-    ) throws -> ModelContainer {
-        do {
-            return try ModelContainer(for: schema, configurations: configuration)
-        } catch {
-            Logger.boot.error(
-                "SwiftData store '\(name, privacy: .public)' failed to open; preserving files: \(error.localizedDescription, privacy: .public)"
-            )
-            throw error
-        }
-    }
-
-    /// Removes the store file plus `-shm` / `-wal` sidecars used by SQLite.
-    private static func removeSwiftDataStoreFiles(at url: URL) {
-        let fm = FileManager.default
-        for candidate in [
-            url,
-            URL(fileURLWithPath: url.path + "-shm"),
-            URL(fileURLWithPath: url.path + "-wal")
-        ] {
-            guard fm.fileExists(atPath: candidate.path) else { continue }
-            do {
-                try fm.removeItem(at: candidate)
-            } catch {
-                Logger.boot.error(
-                    "Failed to remove SwiftData file \(candidate.lastPathComponent, privacy: .public): \(error.localizedDescription, privacy: .public)"
-                )
-            }
-        }
-    }
-
-    /// Explicit last-resort wipe of all Luma SwiftData files (main + session + listening).
-    /// Call only after the user confirms the destructive recovery action.
-    static func resetAllLumaStores() {
-        let configs: [ModelConfiguration] = [
-            ModelConfiguration(isStoredInMemoryOnly: false),
-            ModelConfiguration("luma-session", isStoredInMemoryOnly: false),
-            ModelConfiguration("luma-listening", isStoredInMemoryOnly: false)
-        ]
-        for config in configs {
-            removeSwiftDataStoreFiles(at: config.url)
-        }
-        Logger.boot.warning("Reset all Luma SwiftData store files")
-    }
-
-    /// CloudKit-backed store for `PlaybackEvent` (Wrapped / listening history).
-    ///
-    /// Isolated so downloads and cache stay device-local. `PlaybackEvent` remains in
-    /// `luma()` only for one-time migration from older installs.
-    static func listening(inMemory: Bool = false) throws -> ModelContainer {
-        let schema = Schema([PlaybackEvent.self])
-        do {
-            let config = ModelConfiguration(
-                "luma-listening",
-                schema: schema,
-                isStoredInMemoryOnly: inMemory,
-                cloudKitDatabase: cloudKitDatabase(inMemory: inMemory)
-            )
-            return try ModelContainer(for: schema, configurations: config)
-        } catch {
-            // Portal / entitlement misconfig should not brick the app — fall back to local store.
-            Logger.boot.error("CloudKit listening store unavailable, using local-only: \(error.localizedDescription, privacy: .public)")
-            let config = ModelConfiguration(
-                "luma-listening",
-                schema: schema,
-                isStoredInMemoryOnly: inMemory,
-                cloudKitDatabase: .none
-            )
-            return try openStore(named: "luma-listening", schema: schema, configuration: config)
-        }
-    }
-
-    /// Isolated container for playback session data (queue + position), synced via CloudKit.
-    ///
-    /// Separating PlaybackSession from the main container means
-    /// PlaybackSessionService.savePosition() (every 5 s during playback) no longer
-    /// posts change notifications to the main store coordinator. The main context's
-    /// @Query<SearchHistoryEntry> never sees these saves, eliminating the continuous
-    /// 5-second render cascade that previously fired during all active playback.
-    ///
-    /// PlaybackSession.self is retained in luma() purely to avoid a schema-mismatch
-    /// migration error when opening existing stores from app versions where it lived
-    /// in the main container. That table remains in the main store file but is never
-    /// written to after this change.
-    /// - Parameter inMemory: Pass `true` in tests.
-    static func session(inMemory: Bool = false) throws -> ModelContainer {
-        let schema = Schema([PlaybackSession.self])
-        do {
-            let config = ModelConfiguration(
-                "luma-session",
-                schema: schema,
-                isStoredInMemoryOnly: inMemory,
-                cloudKitDatabase: cloudKitDatabase(inMemory: inMemory)
-            )
-            return try ModelContainer(for: schema, configurations: config)
-        } catch {
-            Logger.boot.error("CloudKit session store unavailable, using local-only: \(error.localizedDescription, privacy: .public)")
-            let config = ModelConfiguration(
-                "luma-session",
-                schema: schema,
-                isStoredInMemoryOnly: inMemory,
-                cloudKitDatabase: .none
-            )
-            return try openStore(named: "luma-session", schema: schema, configuration: config)
-        }
-    }
-}
-
-// MARK: - Listening history migration
-
-extension AppContainer {
-    private nonisolated static let listeningEventsMigratedKey = "luma.listeningEventsMigrated.v1"
-
-    /// Copies legacy `PlaybackEvent` rows from the main store into the CloudKit listening store once.
-    nonisolated static func migratePlaybackEventsIfNeeded(
-        from main: ModelContainer, to listening: ModelContainer, defaults: UserDefaults = .standard,
-        fetch: (ModelContext) throws -> [PlaybackEvent] = { try $0.fetch(FetchDescriptor<PlaybackEvent>()) }
-    ) {
-        guard !defaults.bool(forKey: listeningEventsMigratedKey) else { return }
-
-        let source = ModelContext(main)
-        let destination = ModelContext(listening)
-        let legacy: [PlaybackEvent]
-        let existingIDs: Set<UUID>
-        do {
-            legacy = try fetch(source)
-            existingIDs = Set(try fetch(destination).map(\.id))
-        } catch {
-            // A failed read is not an empty store. Leave the marker unset so startup can retry.
-            Logger.stats.error("Playback migration read failed: \(error.localizedDescription, privacy: .public)")
-            return
-        }
-        if legacy.isEmpty {
-            defaults.set(true, forKey: listeningEventsMigratedKey)
-            return
-        }
-
-        var migrated = 0
-        for event in legacy where !existingIDs.contains(event.id) {
-            destination.insert(
-                PlaybackEvent(
-                    id: event.id,
-                    trackId: event.trackId,
-                    trackTitle: event.trackTitle,
-                    albumId: event.albumId,
-                    albumTitle: event.albumTitle,
-                    artistId: event.artistId,
-                    artistName: event.artistName,
-                    genre: event.genre,
-                    timestamp: event.timestamp,
-                    durationListened: event.durationListened,
-                    trackDuration: event.trackDuration,
-                    wasCompleted: event.wasCompleted,
-                    serverId: event.serverId
-                )
-            )
-            migrated += 1
-        }
-
-        do {
-            try destination.save()
-            defaults.set(true, forKey: listeningEventsMigratedKey)
-            Logger.stats.info("Migrated \(migrated, privacy: .public) playback events into CloudKit listening store")
-        } catch {
-            Logger.stats.error("Failed to migrate playback events: \(error.localizedDescription, privacy: .public)")
-        }
-    }
-}
-
-// MARK: - Cover art cache invalidation
-
-extension AppContainer {
-    private static let coverArtCacheVersionKey = "luma.coverArtCacheVersion"
-    private static let currentCoverArtCacheVersion = 5
-
-    /// Invalidate resized derivatives after a decode-format change. Originals, offline
-    /// artwork and completion records are independent of the thumbnail pipeline.
-    static func invalidateCoverArtCacheIfNeeded(
-        artworkCache: ArtworkImageCache, coverArtsDirectory: URL? = nil,
-        defaults: UserDefaults = .standard
-    ) {
-        let stored = defaults.integer(forKey: coverArtCacheVersionKey)
-        guard stored < currentCoverArtCacheVersion else { return }
-        artworkCache.clearCache()
-        let directory = coverArtsDirectory ?? FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("app.luma/coverarts")
-        let files = (try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)) ?? []
-        for file in files where file.lastPathComponent.hasSuffix("@thumb") || file.lastPathComponent.hasSuffix("@hero") {
-            try? FileManager.default.removeItem(at: file)
-        }
-        URLCache.shared.removeAllCachedResponses()
-        defaults.set(currentCoverArtCacheVersion, forKey: coverArtCacheVersionKey)
-        Logger.player.info("ArtworkImageCache: invalidated resized derivatives (version \(stored) → \(currentCoverArtCacheVersion)); original covers retained")
-    }
-
-}
-
-// MARK: - Legacy cover art sweep
-
-extension AppContainer {
-    private static let artworkLegacySweepKey = "luma.artworkLegacySweep_v2"
-
-    /// One-shot background sweep that deletes untagged cover art files written by
-    /// pre-tier builds (plain `{id}` filenames with no `@thumb` / `@hero` suffix).
-    ///
-    /// These full-res JPEGs can be 2–4 MB each; decoding them at the 240px thumb
-    /// size took ~1100ms per file on a background thread, starving the audio decode
-    /// thread and causing audible crackling during queue load. ArtworkImageCache no
-    /// longer reads them (since the legacy fallback was removed), but they still
-    /// waste disk space and could confuse future disk-hit logic. Deleting them here
-    /// forces a clean re-download at the correct tier size.
-    static func sweepLegacyCoverArtFiles() {
-        // Untagged files can be the only offline cover. Original and legacy downloads are retained.
-        UserDefaults.standard.set(true, forKey: artworkLegacySweepKey)
-    }
-
-}
-
-// MARK: - Audio extension migration
-
-extension AppContainer {
-    private static let audioExtMigrationKey = "luma.audioExtMigration_v1"
-
-    /// One-shot migration that fixes downloaded tracks saved with a `.mpeg` extension.
-    ///
-    /// Root cause: the original DownloadService derived the file extension from the HTTP
-    /// Content-Type header. `audio/mpeg` → `.mpeg`, which AVPlayer maps to a video UTI
-    /// (public.mpeg) instead of public.mp3, causing silent playback failure for MP3 files.
-    ///
-    /// This migration:
-    /// 1. Purges the ephemeral CacheService (all entries may carry .mpeg).
-    /// 2. Renames permanent downloaded files from .mpeg to the correct extension using
-    ///    the server-declared `suffix` stored in DownloadedTrack, falling back to a
-    ///    MIME-type map when suffix is absent.
-    /// 3. Updates the SwiftData filePath records for each successfully renamed file.
-    static func migrateAudioExtensionsIfNeeded(
-        modelContainer: ModelContainer,
-        cacheService: any CacheServiceProtocol
-    ) async {
-        guard !UserDefaults.standard.bool(forKey: audioExtMigrationKey) else { return }
-
-        await cacheService.clearAll()
-        Logger.migration.info("[ExtMigration] Ephemeral audio cache cleared")
-
-        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-        let downloadsDir = docs.appendingPathComponent("app.luma/audio", isDirectory: true)
-
-        let ctx = ModelContext(modelContainer)
-        let tracks = (try? ctx.fetch(FetchDescriptor<DownloadedTrack>())) ?? []
-
-        var renamedCount = 0
-        var skippedCount = 0
-
-        for track in tracks {
-            guard track.filePath.hasSuffix(".mpeg") else { continue }
-            let desiredExt: String
-            if let s = track.suffix, !s.isEmpty {
-                desiredExt = s
-            } else {
-                desiredExt = Self.audioExtFromMime(track.mimeType)
-            }
-            guard desiredExt != "mpeg" else { continue }
-
-            let oldPath = track.filePath
-            let newPath = String(oldPath.dropLast(".mpeg".count)) + ".\(desiredExt)"
-            let oldURL = downloadsDir.appendingPathComponent(oldPath)
-            let newURL = downloadsDir.appendingPathComponent(newPath)
-
-            guard FileManager.default.fileExists(atPath: oldURL.path) else {
-                Logger.migration.warning("[ExtMigration] File missing, skipping: '\(oldPath, privacy: .public)'")
-                skippedCount += 1
-                continue
-            }
-            do {
-                if FileManager.default.fileExists(atPath: newURL.path) {
-                    try FileManager.default.removeItem(at: newURL)
-                }
-                try FileManager.default.moveItem(at: oldURL, to: newURL)
-                track.filePath = newPath
-                let songID = track.songId, serverID = track.serverId
-                let assets = (try? ctx.fetch(FetchDescriptor<CachedTrack>(predicate: #Predicate {
-                    $0.songId == songID && $0.serverId == serverID
-                }))) ?? []
-                for asset in assets where asset.filePath == oldPath { asset.filePath = newPath }
-                renamedCount += 1
-                Logger.migration.info("[ExtMigration] '\(oldPath, privacy: .public)' → '\(newPath, privacy: .public)'")
-            } catch {
-                Logger.migration.error("[ExtMigration] Rename failed '\(oldPath, privacy: .public)': \(error, privacy: .public)")
-                skippedCount += 1
-            }
-        }
-
-        try? ctx.save()
-        UserDefaults.standard.set(true, forKey: audioExtMigrationKey)
-        Logger.migration.info("[ExtMigration] Complete: \(renamedCount) renamed, \(skippedCount) skipped")
-    }
-
-    // v3: v2 was burned on installs that ran it against an EMPTY download set (fresh install) —
-    // it set the done-flag on a clean-but-empty pass, so the scan→remux path was never exercised.
-    // The version bump re-runs the migration; both keys bump together so the attempt counter resets.
-    private static let m4aFaststartMigrationKey = "luma.m4aFaststartMigration_v3"
-    private static let m4aFaststartAttemptsKey = "luma.m4aFaststartMigration_v3_attempts"
-    private static let m4aFaststartMaxAttempts = 3
-
-    /// Migration that faststart-remuxes already-downloaded m4a tracks so they play offline through
-    /// AudioStreaming (which cannot open non-faststart M4A). Fire-and-forget at boot.
-    ///
-    /// Retry-safe (unlike v1): the done-flag is set ONLY on a clean pass — save succeeded AND no
-    /// track failed to remux. Failed tracks (e.g. a transient export failure at boot) are retried
-    /// on the next launch, up to `m4aFaststartMaxAttempts` passes, after which it gives up so a
-    /// genuinely irrecoverable file can't trigger an eternal boot-time retry.
-    ///
-    /// Detection is CONTENT-based (`ftyp` sniff), not extension-based, so a mis-served m4a that an
-    /// earlier migration renamed `.mp3` is still caught. A remux REWRITES the bytes, so
-    /// `DownloadedTrack.fileSize` is refreshed from the remuxed file (with the same `?? 0` fallback
-    /// as the download path, so `downloadedURL`'s `fileSize == 0` escape covers a size-read miss
-    /// instead of persisting a stale, mismatched size). Scope: DownloadedTrack only (CachedTrack = Phase 2).
-    static func migrateM4AFaststartIfNeeded(modelContainer: ModelContainer) async {
-        guard !UserDefaults.standard.bool(forKey: m4aFaststartMigrationKey) else { return }
-
-        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-        let downloadsDir = docs.appendingPathComponent("app.luma/audio", isDirectory: true)
-
-        let ctx = ModelContext(modelContainer)
-        let tracks = (try? ctx.fetch(FetchDescriptor<DownloadedTrack>())) ?? []
-        let remuxer = AudioFaststartRemuxer()
-
-        var remuxedCount = 0
-        var failedCount = 0
-        var m4aCount = 0
-        for track in tracks {
-            let fileURL = downloadsDir.appendingPathComponent(track.filePath)
-            guard FileManager.default.fileExists(atPath: fileURL.path) else { continue }
-            // Content sniff, not extension — catches a container with a wrong/renamed extension.
-            guard AudioFaststartRemuxer.isM4AContainer(atPath: fileURL.path) else { continue }
-            m4aCount += 1
-            ManagedAudioStore.shared.acquire(fileURL)
-            defer { ManagedAudioStore.shared.release(fileURL) }
-            switch await remuxer.remuxToFaststartIfNeeded(at: fileURL) {
-            case .remuxed:
-                // Bytes changed — refresh fileSize from the remuxed file (?? 0 mirrors the
-                // download path, where downloadedURL's `== 0` escape tolerates a read miss).
-                let newSize = (try? FileManager.default.attributesOfItem(atPath: fileURL.path)[.size] as? Int64) ?? 0
-                track.fileSize = newSize
-                let songID = track.songId, serverID = track.serverId
-                let assets = (try? ctx.fetch(FetchDescriptor<CachedTrack>(predicate: #Predicate {
-                    $0.songId == songID && $0.serverId == serverID
-                }))) ?? []
-                for asset in assets where asset.filePath == track.filePath {
-                    asset.fileSize = newSize
-                    asset.transferIdentity = nil
-                }
-                remuxedCount += 1
-                Logger.migration.info("[M4AFaststart] faststart-remuxed '\(track.songId, privacy: .public)'")
-            case .failed:
-                failedCount += 1
-                Logger.migration.warning("[M4AFaststart] export failed '\(track.songId, privacy: .public)' — will retry next boot")
-            case .skipped:
-                break   // already faststart or not an MP4 container — nothing to do
-            }
-        }
-
-        // Persist the fileSize updates; only mark done on a clean pass so failures are retried.
-        var saveOK = true
-        do {
-            try ctx.save()
-        } catch {
-            saveOK = false
-            Logger.migration.error("[M4AFaststart] save failed: \(error, privacy: .public) — not marking done, will retry")
-        }
-
-        let attempts = UserDefaults.standard.integer(forKey: m4aFaststartAttemptsKey) + 1
-        UserDefaults.standard.set(attempts, forKey: m4aFaststartAttemptsKey)
-        let giveUp = attempts >= m4aFaststartMaxAttempts
-        if saveOK && (failedCount == 0 || giveUp) {
-            UserDefaults.standard.set(true, forKey: m4aFaststartMigrationKey)
-            if failedCount > 0 {
-                Logger.migration.warning("[M4AFaststart] giving up after \(attempts) attempts with \(failedCount) still failing")
-            }
-        }
-        Logger.migration.info("[M4AFaststart] Complete: \(remuxedCount) remuxed, \(failedCount) failed of \(m4aCount) m4a (\(tracks.count) total), attempt \(attempts)")
-    }
-
-    private static func audioExtFromMime(_ mimeType: String) -> String {
-        switch mimeType.lowercased() {
-        case "audio/mpeg", "audio/mp3":        return "mp3"
-        case "audio/flac", "audio/x-flac":     return "flac"
-        case "audio/mp4", "audio/m4a",
-             "audio/aac", "audio/x-aac":       return "m4a"
-        case "audio/ogg":                       return "ogg"
-        case "audio/opus":                      return "opus"
-        case "audio/wav", "audio/x-wav":       return "wav"
-        case "audio/aiff", "audio/x-aiff":     return "aiff"
-        case "audio/eac3", "audio/ec3", "audio/ac3": return "ec3"
-        default:                                return "mpeg"
-        }
-    }
-}
-
-// MARK: - SwiftUI environment key
-
-private struct AppContainerKey: EnvironmentKey {
-    static let defaultValue: AppContainer? = nil
-}
-
-extension EnvironmentValues {
-    var appContainer: AppContainer? {
-        get { self[AppContainerKey.self] }
-        set { self[AppContainerKey.self] = newValue }
     }
 }

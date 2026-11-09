@@ -22,7 +22,7 @@ struct RootView: View {
             } else if serverState.activeServer != nil && onboardingComplete {
                 #if os(macOS)
                 RootViewMacOS()
-                    .accentColor(.lumaAccent)
+                    .accentColor(LumaColors.controlAccent)
                     .modifier(LibraryPreparationGate())
                     .modifier(CredentialReentryPresenter(
                         needsReentry: serverState.needsCredentialReentry,
@@ -40,7 +40,7 @@ struct RootView: View {
                     )
                 } else {
                     MainTabView()
-                        .accentColor(.lumaAccent)
+                        .accentColor(LumaColors.controlAccent)
                         .modifier(LibraryPreparationGate())
                         .modifier(CredentialReentryPresenter(
                             needsReentry: serverState.needsCredentialReentry,

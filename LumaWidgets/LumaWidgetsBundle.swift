@@ -10,6 +10,8 @@ import SwiftUI
 struct LumaWidgetsBundle: WidgetBundle {
     var body: some Widget {
         NowPlayingWidget()
+        RecentWidget()
+        RecommendationsWidget()
         PinnedWidget()
         #if os(iOS)
         LibraryPreparationLiveActivity()

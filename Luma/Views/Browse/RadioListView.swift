@@ -42,8 +42,10 @@ struct RadioListView: View {
                 .listStyle(.plain)
                 .refreshable { await load(forceRefresh: true) }
                 .miniPlayerBottomMargin()
+                .transition(.opacity)
             }
         }
+        .lumaContentReveal(isReady: !(isLoading && stations.isEmpty))
         .lumaContentWidth()
         .navigationTitle(String(localized: "Radio", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale))
         .task(id: container?.serverState.isOnline) {

@@ -56,6 +56,13 @@ extension PlayerService {
 
     func savePositionCheckpoint(_ position: TimeInterval) async {
         guard !isTrackTransitionPending else { return }
+        // A stopped/rebuilt engine reports 0. That is not a user position and must never
+        // replace a real checkpoint. Explicit stop/new-track saves go through `saveSession`.
+        guard position.isFinite, position > 0.25 else { return }
+        if Self.playbackTraceEnabled {
+            let track = await MainActor.run { state.currentTrack?.id }
+            print("[PB-STATE] checkpoint attempt=\(playbackEpoch) track=\(track ?? "nil") position=\(String(format: "%.2f", position))")
+        }
         let publication = makePlaybackPublication()
         let snapshot = await MainActor.run { (state.currentTrack?.id, state.currentIndex, serverService.state.activeServer?.id) }
         guard publication.isCurrent, !isTrackTransitionPending,
@@ -71,6 +78,10 @@ extension PlayerService {
             (SessionPayload(currentIndex: state.currentIndex, currentPosition: state.position,
                 queue: state.queue, currentTrack: state.currentTrack, repeatMode: state.repeatMode),
              serverService.state.activeServer?.id)
+        }
+        if Self.playbackTraceEnabled {
+            let uiState = await MainActor.run { state.playbackState }
+            print("[PB-STATE] saveSession attempt=\(playbackEpoch) track=\(snapshot.currentTrack?.id ?? "nil") position=\(String(format: "%.2f", snapshot.currentPosition)) state=\(uiState)")
         }
         guard publication.isCurrent, let accountID, let trackID = snapshot.currentTrack?.id else { return }
         let identity = PlaybackCheckpointIdentity(accountID: accountID, trackID: trackID,
@@ -111,6 +122,7 @@ extension PlayerService {
         }
         guard data.queue.indices.contains(data.currentIndex) else {
             Logger.player.error("Session restore: invalid index \(data.currentIndex) for queue of \(data.queue.count) — clearing")
+            DiagnosticsCenter.shared.report(.restore)
             // Preserve unreadable/legacy rows for recovery instead of deleting user data.
             return
         }
@@ -163,6 +175,7 @@ extension PlayerService {
         } catch {
             guard await restorationIsCurrent(trackID: track.id, serverID: serverId, epoch: epoch, command: command) else { return }
             Logger.player.error("Session restore: failed to resolve media — \(error)")
+            DiagnosticsCenter.shared.report(.restore)
             await MainActor.run { state.isPlaybackAvailable = false }
             isRestoringSession = false
             return
@@ -171,7 +184,17 @@ extension PlayerService {
         guard await restorationIsCurrent(trackID: track.id, serverID: serverId, epoch: epoch, command: command) else { return }
 
         stopProgressTimer()
-        currentSource = source
+        await replaceCurrentSource(source)
+        // `replaceCurrentSource` suspends to retain a cache lease. A deep link, Siri,
+        // or the user can start playback during that suspension. Never inject the
+        // restored seek into that live attempt; it would pause and jump the new audio.
+        guard await restorationIsCurrent(trackID: track.id, serverID: serverId, epoch: epoch, command: command) else {
+            isRestoringSession = false
+            if Self.playbackTraceEnabled {
+                print("[PB-STATE] restore abandoned after source swap track=\(track.id) epoch=\(epoch)")
+            }
+            return
+        }
         pendingRestoreInfo = (seekTime: position, pause: true)
         #if os(macOS)
         // A restored macOS session must stay on the platform's single AVPlayer path
@@ -258,8 +281,14 @@ extension PlayerService {
 
     private func restorationIsCurrent(trackID: String, serverID: UUID, epoch: UInt64, command: UInt64) async -> Bool {
         guard epoch == playbackEpoch, command == transportCommandID, !Task.isCancelled else { return false }
+        let intent = transport.intent
         let matches = await MainActor.run {
-            state.currentTrack?.id == trackID && state.playbackState == .paused
+            state.currentTrack?.id == trackID
+                && RestorationAdmissionPolicy.permits(
+                    trackMatches: true,
+                    playbackState: state.playbackState,
+                    intent: intent
+                )
                 && serverService.state.activeServer?.id == serverID
         }
         return matches && epoch == playbackEpoch && command == transportCommandID && !Task.isCancelled

@@ -14,16 +14,28 @@ struct PerformanceBudgetTests {
             #expect(constrained.artworkInventoryInterval == .seconds(5))
         }
     }
-    @Test func warmArtworkStopsMotionWithoutDisablingLyricsOrGapless() {
+    @Test func warmArtworkSlowsWithoutDisablingLyricsOrGapless() {
         let normal = budget()
         let warm = budget(thermal: .fair)
         #expect(normal.allowsArtworkMotion)
-        #expect(!warm.allowsArtworkMotion)
+        #expect(warm.allowsArtworkMotion)
+        #expect(warm.artworkFramesPerSecond < normal.artworkFramesPerSecond)
         #expect(warm.allowsGaplessPrebuffer)
         #expect(warm.lyricsTickIntervalNs(karaokePlayback: true) <= 50_000_000)
         #expect(!budget(lowPower: true).allowsArtworkMotion)
+        #expect(budget(lowPower: true).allowsBeatVisuals)
+        #expect(budget(lowPower: true).artworkFramesPerSecond < normal.artworkFramesPerSecond)
         #expect(!budget(active: false).allowsArtworkMotion)
         #expect(!budget(memory: true).allowsArtworkMotion)
+    }
+
+    @Test func auxiliaryStreamOnlyDecodesForUnconstrainedVisibleVisuals() {
+        #expect(budget().allowsAuxiliaryStreamingDecoder)
+        for limited in [budget(lowPower: true), budget(thermal: .fair), budget(thermal: .serious),
+                        budget(thermal: .critical), budget(active: false), budget(memory: true),
+                        budget(reduceMotion: true)] {
+            #expect(!limited.allowsAuxiliaryStreamingDecoder)
+        }
     }
 
     @Test func automaticTransfersYieldBeforePlaybackOrExplicitDownloads() {
@@ -39,6 +51,12 @@ struct PerformanceBudgetTests {
         #expect(budget().maximumConcurrentDownloads == 3)
         #expect(budget(lowPower: true).allowsGaplessPrebuffer)
         #expect(budget(active: false).allowsGaplessPrebuffer)
+    }
+    @Test func lyricScrollMotionRemainsAvailableInLowPowerMode() {
+        #expect(budget(lowPower: true).allowsLyricScrollMotion)
+        #expect(!budget(lowPower: true, reduceMotion: true).allowsLyricScrollMotion)
+        #expect(!budget(thermal: .serious).allowsLyricScrollMotion)
+        #expect(!budget(active: false).allowsLyricScrollMotion)
     }
     @Test func lyricFrameBudgetBacksOffWithoutChangingTiming() {
         #expect(budget().lyricsRenderInterval == 1.0 / 60)
@@ -76,7 +94,7 @@ struct PerformanceBudgetTests {
         #expect(b.artworkPrefetchBatchSize == 3)
         #expect(b.artworkPrefetchPause == nil)
         #expect(b.meshFrameInterval == 1.0 / 12.0)
-        #expect(b.beatPublishInterval == 0.05)
+        #expect(b.beatPublishInterval == 1.0 / 30)
         #expect(b.lyricsTickIntervalNs(karaokePlayback: true) == 33_333_333)
         #expect(b.lyricsTickIntervalNs(karaokePlayback: false) == 100_000_000)
         #expect(!b.prefersCheapChrome)
@@ -88,11 +106,11 @@ struct PerformanceBudgetTests {
     func lowPowerDegrades() {
         let b = budget(lowPower: true)
         #expect(!b.allowsDecorativeMotion)
-        #expect(!b.allowsBeatVisuals)
+        #expect(b.allowsBeatVisuals)
         #expect(!b.allowsHeavyColorAnalysis)
         #expect(b.artworkPrefetchBatchSize == 1)
         #expect(b.artworkPrefetchPause != nil)
-        #expect(b.beatPublishInterval == 0.40)
+        #expect(b.beatPublishInterval == 1.0 / 15)
         #expect(b.meshFrameInterval == 1.0 / 8.0)
         #expect(b.lyricsTickIntervalNs(karaokePlayback: true) == 50_000_000)
         #expect(b.lyricsTickIntervalNs(karaokePlayback: false) == 150_000_000)

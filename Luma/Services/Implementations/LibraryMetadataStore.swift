@@ -152,6 +152,30 @@ final class LibraryMetadataStore {
             .map(\.song)
     }
 
+    /// Structured local filter for genre/year/format requests. Never fetches
+    /// from the server; the caller can merge a targeted search3 result when a
+    /// partially warmed cache is not enough.
+    func filtered(_ query: LibrarySongQuery, serverId: UUID, limit: Int) -> [DisplayableSong] {
+        let descriptor = FetchDescriptor<LibraryMetadataSong>(
+            predicate: #Predicate { $0.serverId == serverId }
+        )
+        let candidates = ((try? context.fetch(descriptor)) ?? []).map { $0.toDisplayableSong() }
+        var results = candidates.filter(query.matches)
+        if let text = query.text, !text.isEmpty {
+            results.sort { lhs, rhs in
+                let left = SiriSongSearchRanker.score(lhs, query: text)
+                let right = SiriSongSearchRanker.score(rhs, query: text)
+                if left != right { return left > right }
+                return lhs.title.localizedCaseInsensitiveCompare(rhs.title) == .orderedAscending
+            }
+        } else {
+            results.sort {
+                $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending
+            }
+        }
+        return Array(results.prefix(max(0, limit)))
+    }
+
     func song(id: String, serverId: UUID) -> DisplayableSong? {
         var descriptor = FetchDescriptor<LibraryMetadataSong>(
             predicate: #Predicate {

@@ -71,6 +71,10 @@ struct ImmersiveNowPlayingBackground: View {
         }
         .frame(width: width, height: height, alignment: .top)
         .clipped()
+        // The sleeve, its two blurred edge extensions, and the scrim are
+        // static for a given track/viewport. Rasterize them once instead of
+        // asking Core Animation to re-composite the large blurs every frame.
+        .drawingGroup()
         .allowsHitTesting(false)
         .accessibilityHidden(true)
     }

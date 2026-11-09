@@ -15,8 +15,7 @@ struct BackgroundDownloadRecoveryTests {
     private func stage(_ record: BackgroundDownloadJournal.Record, in journal: BackgroundDownloadJournal,
                        directory: URL) throws -> Data {
         try journal.insert(record)
-        let source = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
-            .appendingPathComponent("Fixtures/SilentMP3.mp3")
+        let source = LumaTestResources.fixture("Fixtures/SilentMP3.mp3", sourceFile: #filePath)
         let bytes = try Data(contentsOf: source)
         let file = directory.appendingPathComponent("incoming-\(UUID()).mp3")
         try bytes.write(to: file)

@@ -67,6 +67,13 @@ final class ArtworkImageCache {
     @ObservationIgnored
     private var cacheGeneration = 0
     @ObservationIgnored private var accountScope: ServerRequestIdentity?
+    /// The account-scoped prefix is immutable until the active account changes. Caching it
+    /// avoids re-hashing the server URL/username and formatting 32 hex bytes on every palette
+    /// lookup/store (hundreds of calls during album preparation and view bodies).
+    @ObservationIgnored private var presentationKeyPrefix: String?
+    @ObservationIgnored private var presentationKeyServerID: UUID?
+    @ObservationIgnored private var presentationKeyBaseURL: String?
+    @ObservationIgnored private var presentationKeyUsername: String?
     @ObservationIgnored private var localImageSources = CostBoundedCache<String, String>(countLimit: 110, costLimit: 110)
     /// Coalesces concurrent `load` calls for the same tier key (Home + Discover often
     /// request the same album thumb twice → duplicate network + flaky ImageIO decode).
@@ -89,6 +96,9 @@ final class ArtworkImageCache {
     private let serverService: (any ServerServiceProtocol)?
     private let serverState: ServerState?
     private let session: URLSession
+    #if os(iOS)
+    private let usesBackgroundArtworkSession: Bool
+    #endif
     private let presentationDefaults: UserDefaults
     // Caps in-flight server cover fetches to prevent saturating the TCP connection pool.
     private let fetchGate = CoverFetchGate(limit: 2)
@@ -107,6 +117,10 @@ final class ArtworkImageCache {
         config.timeoutIntervalForResource = 30
         config.httpMaximumConnectionsPerHost = 2
         self.session = session ?? URLSession(configuration: config)
+        #if os(iOS)
+        // An injected transport owns all its requests, including bulk originals.
+        usesBackgroundArtworkSession = session == nil
+        #endif
     }
 
     var allowsNetworkDownloads: Bool {
@@ -157,12 +171,26 @@ final class ArtworkImageCache {
     private func presentationKey(_ id: String) -> String {
         synchronizeAccount()
         let account = serverService?.state.activeServer ?? serverState?.activeServer
+        let serverID = account?.id
+        let baseURL = account?.baseURL
+        let username = account?.username
+        if let presentationKeyPrefix,
+           presentationKeyServerID == serverID,
+           presentationKeyBaseURL == baseURL,
+           presentationKeyUsername == username {
+            return presentationKeyPrefix + ArtworkIdentity.key(id)
+        }
         let identity = account.map {
             SHA256.hash(data: Data(($0.baseURL + "|" + $0.username).utf8))
                 .map { String(format: "%02x", $0) }.joined()
         } ?? "anonymous"
         let scope = (accountScope?.serverID.uuidString ?? account?.id.uuidString ?? "unscoped") + ":" + identity
-        return "luma.albumArtwork.\(scope).\(ArtworkIdentity.key(id))"
+        let prefix = "luma.albumArtwork.\(scope)."
+        presentationKeyPrefix = prefix
+        presentationKeyServerID = serverID
+        presentationKeyBaseURL = baseURL
+        presentationKeyUsername = username
+        return prefix + ArtworkIdentity.key(id)
     }
 
     /// Returns the cached image for the given tier synchronously, or nil if not yet loaded.
@@ -289,6 +317,7 @@ final class ArtworkImageCache {
     /// Hand off missing originals before iOS can suspend the library preparation task.
     /// Disk filenames and the URLSession registry deduplicate both this batch and UI observers.
     func enqueueBackgroundOriginals(coverIDs: [String], directory: URL) async {
+        guard usesBackgroundArtworkSession, !coverIDs.isEmpty else { return }
         let generation = cacheGeneration
         await LumaBackgroundDownloads.artwork.restoreArtworkTasks()
         for id in coverIDs {
@@ -326,7 +355,7 @@ final class ArtworkImageCache {
         guard let serverURL = await libraryService.coverArtURL(id: coverArtId, size: nil) else { return false }
 
         #if os(iOS)
-        if !cacheHero, let preparationDirectory {
+        if usesBackgroundArtworkSession, !cacheHero, let preparationDirectory {
             do {
                 let request = try await artworkRequest(url: serverURL, generation: generation)
                 let destinationID = accountScope.map { DownloadService.coverStorageName(for: tieredDiskId, serverId: $0.serverID) } ?? tieredDiskId
@@ -779,6 +808,10 @@ final class ArtworkImageCache {
     }
 
     func clearCache() {
+        presentationKeyPrefix = nil
+        presentationKeyServerID = nil
+        presentationKeyBaseURL = nil
+        presentationKeyUsername = nil
         paletteRevisions.removeAll()
         presentationPreferences.removeAll()
         for flight in originalFlights.values { flight.task.cancel() }
@@ -890,6 +923,9 @@ final class ArtworkImageCache {
     /// `nonisolated` so it is callable from `Task.detached` without hopping to MainActor.
     /// Internal (not private) so `CoverArtView`'s local-base fallback decodes identically.
     nonisolated static func thumbnailImage(from data: Data, maxDimension: Int) -> PlatformImage? {
+        let trace = DiagnosticsCenter.shared.begin(.artworkDecode)
+        var succeeded = false
+        defer { trace.finish(succeeded ? .success : .failure) }
         guard !data.isEmpty else { return nil }
 
         let sourceOptions: [CFString: Any] = [
@@ -909,6 +945,7 @@ final class ArtworkImageCache {
             kCGImageSourceShouldCacheImmediately: true
         ]
         if let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, thumbOptions as CFDictionary) {
+            succeeded = true
             return platformImage(from: cgImage)
         }
 
@@ -920,6 +957,7 @@ final class ArtworkImageCache {
             kCGImageSourceShouldCacheImmediately: true
         ]
         if let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, alwaysOptions as CFDictionary) {
+            succeeded = true
             return platformImage(from: cgImage)
         }
 
@@ -928,9 +966,14 @@ final class ArtworkImageCache {
             Logger.artworkCache.warning(
                 "thumbnailImage: ImageIO thumb failed for \(data.count, privacy: .public) byte payload — skipping full decode"
             )
+            DiagnosticsCenter.shared.report(.artworkDecode)
             return nil
         }
-        guard let full = PlatformImage(data: data) else { return nil }
+        guard let full = PlatformImage(data: data) else {
+            DiagnosticsCenter.shared.report(.artworkDecode)
+            return nil
+        }
+        succeeded = true
         return full.resized(maxDimension: CGFloat(maxDimension))
     }
 

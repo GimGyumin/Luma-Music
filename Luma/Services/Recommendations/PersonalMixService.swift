@@ -87,7 +87,13 @@ actor PersonalMixService {
         self.now = now
     }
 
-    func mixes(serverId: String?, forceRefresh: Bool = false, limit: Int? = nil) async -> [PersonalMix] {
+    func mixes(
+        serverId: String?,
+        forceRefresh: Bool = false,
+        limit: Int? = nil,
+        priorityKinds: [PersonalMixKind]? = nil,
+        onPartial: (@MainActor @Sendable ([PersonalMix]) -> Void)? = nil
+    ) async -> [PersonalMix] {
         let identity = await requestIdentity(serverId: serverId)
         guard serverState == nil || identity != nil else { return [] }
         if cachedServerId != serverId || forceRefresh || cachedAt.map({ now().timeIntervalSince($0) >= Self.ttl }) == true {
@@ -116,10 +122,16 @@ actor PersonalMixService {
 
         // Sequential builders — five `async let` fans out dozens of getAlbum / getSongsByGenre /
         // getTopSongs on plain HTTP and can RST the CFNetwork pool (HTTP/2 / QUIC parse failures).
-        // Callers can pass `limit: 1` to paint the first card, then call again without a limit.
-        let kinds: [PersonalMixKind] = [.newMusic, .heavyRotation, .essentials, .getUp, .chill, .focus]
+        // A full (unlimited) build reports each completed mix so the shelf can paint
+        // progressively instead of waiting for all six. Home can put Heavy Rotation and
+        // Essentials first without changing the default `limit: 1` path.
+        let kinds = priorityKinds ?? [.newMusic, .heavyRotation, .essentials, .getUp, .chill, .focus]
         var built = cached
         let have = Set(built.map(\.kind))
+
+        if limit == nil, let onPartial, !built.isEmpty {
+            await onPartial(built)
+        }
 
         for kind in kinds {
             guard await isCurrent(identity, generation: revision) else { return [] }
@@ -136,6 +148,9 @@ actor PersonalMixService {
             }
             if let mix {
                 built.append(mix)
+                if limit == nil, let onPartial {
+                    await onPartial(built)
+                }
             }
         }
 

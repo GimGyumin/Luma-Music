@@ -9,11 +9,9 @@
 
 The app and this GitHub repository are still being refined. We're focusing on playback stability, smooth interactions, consistent design, and clearer documentation.
 
-## 2026. Luma Music 1.0.
+## Coming soon. Luma Music 1.0.
 
-**Goal: a stable 1.0 release for iPhone and iPad before the end of 2026.**
-
-The date is a **target, not a guarantee**. Release candidates are still previews, and we'll continue testing and fixing issues before calling the app ready.
+The first stable release of **Luma Music 1.0 for iPhone and iPad** is coming soon. We're aiming to release before the end of 2026, pending final testing and release readiness.
 
 ## Next. Easier to understand.
 
@@ -28,6 +26,10 @@ A basic [installation guide](GETTING_STARTED.md) and [feature overview](FEATURES
 ## 2027. On Mac.
 
 **macOS — Coming next year (2027).** A dedicated Mac version is planned, but no macOS build or installer is currently released.
+
+## 2027. On Apple Watch.
+
+**watchOS — Targeting a 2027 release.** A dedicated Luma Music app for Apple Watch is planned.
 
 ---
 

@@ -15,6 +15,12 @@
 <p align="center"><sub>iPhone & iPad — IPA preview &nbsp; | &nbsp; macOS — Coming next year (2027)</sub></p>
 <p align="center"><sub>Navidrome · OpenSubsonic-compatible servers · Supported Jellyfin libraries</sub></p>
 
+> **RC2 source code · Coming soon**
+>
+> Luma Music 1.0 RC2 is now available as an IPA preview. The corresponding RC2 source code is in the final stages of preparation and is expected to be published within the next few hours.
+>
+> [Explore RC2](https://github.com/GimGyumin/Luma-Music/releases/tag/v1.0.0-rc2)
+
 ---
 
 ## Discover Luma
@@ -60,13 +66,13 @@ Library search, responsive artwork, and efficient UI updates. Supported system f
 
 ## Get Luma Music
 
-**Available now: iPhone and iPad IPA preview.**
+**Available now: Luma Music 1.0 RC2 IPA preview for iPhone and iPad.**
 
-**[Browse published releases](https://github.com/GimGyumin/Luma-Music/releases)** &nbsp; · &nbsp; **[Installation guide](docs/GETTING_STARTED.md)**
+**[Download RC2 IPA](https://github.com/GimGyumin/Luma-Music/releases/download/v1.0.0-rc2/Luma.1.0.RC2.ipa)** &nbsp; · &nbsp; **[All releases](https://github.com/GimGyumin/Luma-Music/releases)** &nbsp; · &nbsp; **[Installation guide](docs/GETTING_STARTED.md)**
 
 Download a published IPA, install it with a compatible sideloading method such as SideStore or AltStore, then connect to **your own music server**. Luma is a client, not a music server or a commercial streaming catalog.
 
-**There is currently no TestFlight or App Store distribution.** The post-rebrand IPA build is not available until it appears on Releases. [RC1](https://github.com/GimGyumin/Luma-Music/releases/tag/v1.0.0-rc1) is an earlier preview.
+**There is currently no TestFlight or App Store distribution.** [RC2](https://github.com/GimGyumin/Luma-Music/releases/tag/v1.0.0-rc2) is the latest IPA preview; [RC1](https://github.com/GimGyumin/Luma-Music/releases/tag/v1.0.0-rc1) remains available as an earlier version.
 
 | Platform | Availability |
 | --- | --- |

@@ -15,11 +15,11 @@
 <p align="center"><sub>iPhone & iPad — IPA preview &nbsp; | &nbsp; macOS — Coming next year (2027)</sub></p>
 <p align="center"><sub>Navidrome · OpenSubsonic-compatible servers · Supported Jellyfin libraries</sub></p>
 
-> **RC2 source code · Coming soon**
+> **RC2 source code · Published**
 >
-> Luma Music 1.0 RC2 is now available as an IPA preview. The corresponding RC2 source code is in the final stages of preparation and is expected to be published within the next few hours.
+> The source for **Luma Music 1.0 RC2 (build 1031)** is now available on `main`. The **RC2 IPA preview is being prepared** and will appear on GitHub Releases once it is published. A source-code update does not itself publish an IPA.
 >
-> [Explore RC2](https://github.com/GimGyumin/Luma-Music/releases/tag/v1.0.0-rc2)
+> [Browse RC2 source](https://github.com/GimGyumin/Luma-Music/tree/main) &nbsp; · &nbsp; [Check releases](https://github.com/GimGyumin/Luma-Music/releases)
 
 ---
 
@@ -66,13 +66,13 @@ Library search, responsive artwork, and efficient UI updates. Supported system f
 
 ## Get Luma Music
 
-**Available now: Luma Music 1.0 RC2 IPA preview for iPhone and iPad.**
+**Luma Music 1.0 RC2 (build 1031) source is available. The RC2 IPA preview is coming soon.**
 
-**[Download RC2 IPA](https://github.com/GimGyumin/Luma-Music/releases/download/v1.0.0-rc2/Luma.1.0.RC2.ipa)** &nbsp; · &nbsp; **[All releases](https://github.com/GimGyumin/Luma-Music/releases)** &nbsp; · &nbsp; **[Installation guide](docs/GETTING_STARTED.md)**
+**[Published IPA releases](https://github.com/GimGyumin/Luma-Music/releases)** &nbsp; · &nbsp; **[RC2 source code](https://github.com/GimGyumin/Luma-Music/tree/main)** &nbsp; · &nbsp; **[Installation guide](docs/GETTING_STARTED.md)**
 
-Download a published IPA, install it with a compatible sideloading method such as SideStore or AltStore, then connect to **your own music server**. Luma is a client, not a music server or a commercial streaming catalog.
+Only IPAs listed on GitHub Releases are available for installation. Download a published IPA, install it with a compatible sideloading method such as SideStore or AltStore, then connect to **your own music server**. Luma is a client, not a music server or a commercial streaming catalog.
 
-**There is currently no TestFlight or App Store distribution.** [RC2](https://github.com/GimGyumin/Luma-Music/releases/tag/v1.0.0-rc2) is the latest IPA preview; [RC1](https://github.com/GimGyumin/Luma-Music/releases/tag/v1.0.0-rc1) remains available as an earlier version.
+**There is currently no TestFlight or App Store distribution.** [RC1](https://github.com/GimGyumin/Luma-Music/releases/tag/v1.0.0-rc1) is an earlier public IPA preview; check [Releases](https://github.com/GimGyumin/Luma-Music/releases) for RC2 once it is published.
 
 | Platform | Availability |
 | --- | --- |
@@ -88,7 +88,7 @@ We're aiming for a **stable 1.0 iPhone/iPad release before the end of 2026**, su
 
 ## Your library stays yours.
 
-Your server. Your collection. Luma uses the system Keychain for server credentials and has **no built-in advertising, analytics, or tracking SDKs**.
+Your server. Your collection. Luma uses the system Keychain for server credentials and has **no built-in advertising SDK**. **Optional Firebase Crashlytics and Performance diagnostics are off by default**. If you enable **Share Diagnostics**, limited crash and performance information may be sent to Firebase. Custom reports exclude song titles, lyrics, account details, server addresses, and credentials. Disabling sharing stops new custom traces immediately, but Firebase collection changes may require an app restart to fully take effect.
 
 Optional integrations can send data when used: LRCLIB fallback may send track metadata; optional OpenAI translation sends lyric text to its provider; metadata searches may use MusicBrainz, Wikidata, Wikipedia, or Cover Art Archive. Apple translation depends on supported system capabilities. To disable LRCLIB fallback, select **Settings → Lyrics → Source → Server only**.
 

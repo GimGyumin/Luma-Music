@@ -74,8 +74,6 @@ Download the RC2 IPA, install it with a compatible sideloading method such as Si
 
 **There is currently no TestFlight or App Store distribution.** [RC2](https://github.com/GimGyumin/Luma-Music/releases/tag/v1.0.0-rc2) is the latest publicly available IPA preview; [RC1](https://github.com/GimGyumin/Luma-Music/releases/tag/v1.0.0-rc1) remains available as an earlier version.
 
-**Source archive note:** The RC2 release tag currently references an older source snapshot. For build 1031 source code, use the [published build 1031 commit](https://github.com/GimGyumin/Luma-Music/tree/7fd9018f31d63527d49a9d86eebff54367d1a1ea) until the release tag is corrected.
-
 | Platform | Availability |
 | --- | --- |
 | **iPhone** | IPA preview · iOS 18.6 or later |

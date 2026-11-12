@@ -86,7 +86,7 @@ Download the RC2 IPA, install it with a compatible sideloading method such as Si
 | **iPad** | IPA preview · iPadOS 18.6 or later · **Known UI issues; use iPhone for now. Fix planned for December 2026.** |
 | **macOS** | **Coming next year (2027)** · Not available |
 
-We're aiming for a **stable 1.0 iPhone/iPad release before the end of 2026**, subject to testing and final readiness. The macOS version is planned for 2027; the current IPA is not a Mac installer.
+The stable **Luma Music 1.0 release for iPhone and iPad has been postponed from late 2026 to early 2027**, subject to testing and release readiness. **Follow-up RC builds will continue in the meantime**, with the next RC focusing on minor fixes and iPad UI bug fixes. The separate macOS app is planned for 2027; the current IPA is not a Mac installer.
 
 [Get started](docs/GETTING_STARTED.md) &nbsp; · &nbsp; [Explore features](docs/FEATURES.md) &nbsp; · &nbsp; [Roadmap](docs/ROADMAP.md)
 

@@ -25,6 +25,8 @@ Quick answers to common questions and a safe way to report bugs.
 
 **[Roadmap →](ROADMAP.md)** — Stable iPhone/iPad 1.0 targeted for 2026, documentation plans, and macOS in 2027.
 
+**[RC2 notes & iPad UI notice →](releases/v1.0.0-rc2.md)** — Read the current iPad UI advisory and planned December 2026 correction.
+
 **[Published releases →](https://github.com/GimGyumin/Luma-Music/releases)** — Find out which IPA builds are actually available now.
 
 ## For contributors.

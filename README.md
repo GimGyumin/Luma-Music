@@ -12,8 +12,14 @@
   <a href="https://github.com/GimGyumin/Luma-Music/discussions">Community</a>
 </p>
 
-<p align="center"><sub>iPhone & iPad — IPA preview &nbsp; | &nbsp; macOS — Coming next year (2027)</sub></p>
+<p align="center"><sub>iPhone — IPA preview &nbsp; | &nbsp; iPad — UI fix planned for December 2026 &nbsp; | &nbsp; macOS — Coming in 2027</sub></p>
 <p align="center"><sub>Navidrome · OpenSubsonic-compatible servers · Supported Jellyfin libraries</sub></p>
+
+> **⚠️ iPad UI compatibility notice (November 2026)**
+> 
+> The current iPad version has known interface issues, and some UI elements may not work correctly. We plan to release an iPad fix **during December 2026**. **Until the updated version is available, please use Luma Music on iPhone.**
+>
+> **iPad 이용 안내:** 현재 iPad 버전에서 일부 UI가 정상적으로 작동하지 않는 문제가 확인되었습니다. **2026년 12월 중 수정 버전을 배포할 예정**입니다. 수정 버전 배포 전까지는 **iPhone에서 Luma Music을 이용해 주세요.**
 
 > **Luma Music 1.0 RC2 · Available now**
 >
@@ -66,7 +72,7 @@ Library search, responsive artwork, and efficient UI updates. Supported system f
 
 ## Get Luma Music
 
-**Available now: Luma Music 1.0 RC2 IPA preview for iPhone and iPad.**
+**Available now: Luma Music 1.0 RC2 IPA preview for iPhone.** The IPA also installs on iPad, but the current iPad UI has known issues. **Please use iPhone until the planned December 2026 iPad fix is released.**
 
 **[Download RC2 IPA](https://github.com/GimGyumin/Luma-Music/releases/download/v1.0.0-rc2/Luma.1.0.RC2.ipa)** &nbsp; · &nbsp; **[All releases](https://github.com/GimGyumin/Luma-Music/releases)** &nbsp; · &nbsp; **[Installation guide](docs/GETTING_STARTED.md)**
 
@@ -77,7 +83,7 @@ Download the RC2 IPA, install it with a compatible sideloading method such as Si
 | Platform | Availability |
 | --- | --- |
 | **iPhone** | IPA preview · iOS 18.6 or later |
-| **iPad** | IPA preview · iPadOS 18.6 or later |
+| **iPad** | IPA preview · iPadOS 18.6 or later · **Known UI issues; use iPhone for now. Fix planned for December 2026.** |
 | **macOS** | **Coming next year (2027)** · Not available |
 
 We're aiming for a **stable 1.0 iPhone/iPad release before the end of 2026**, subject to testing and final readiness. The macOS version is planned for 2027; the current IPA is not a Mac installer.

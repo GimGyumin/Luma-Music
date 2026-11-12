@@ -8,13 +8,19 @@
 
 You need an **iPhone with iOS 18.6+** or an **iPad with iPadOS 18.6+**, access to **your own compatible music server**, and a way to sign and sideload an IPA (for example, SideStore or AltStore).
 
+**⚠️ iPad UI compatibility notice (November 2026)**
+
+The current iPad version has known interface issues, and some UI elements may not work correctly. We plan to release an iPad fix **during December 2026**. **Until the updated version is available, please use Luma Music on iPhone.**
+
+**iPad 이용 안내:** 현재 iPad 버전에서 일부 UI가 정상적으로 작동하지 않는 문제가 확인되었습니다. **2026년 12월 중 수정 버전을 배포할 예정**입니다. 수정 버전 배포 전까지는 **iPhone에서 Luma Music을 이용해 주세요.**
+
 Luma is a client app for Navidrome, OpenSubsonic-compatible servers, and supported Jellyfin libraries. It does **not** provide or host a music catalog.
 
 ## 1. Choose a release.
 
 Go to **[GitHub Releases](https://github.com/GimGyumin/Luma-Music/releases)** and read the notes for the build you select.
 
-[RC1](https://github.com/GimGyumin/Luma-Music/releases/tag/v1.0.0-rc1) is an **earlier preview**, not stable 1.0. A new build is only available once it actually appears on Releases.
+[RC2](https://github.com/GimGyumin/Luma-Music/releases/tag/v1.0.0-rc2) is the latest published preview; [RC1](https://github.com/GimGyumin/Luma-Music/releases/tag/v1.0.0-rc1) is an earlier release. Neither is stable 1.0. The current iPad build has UI issues, so **install and use the iPhone version for now**. The iPad correction is planned for December 2026.
 
 ## 2. Install the IPA.
 

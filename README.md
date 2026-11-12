@@ -25,7 +25,7 @@
 >
 > RC2 is now available as an **iPhone and iPad IPA preview**. Build 1031 source code has also been published to `main`. This is a release candidate, not the final stable 1.0 release.
 >
-> [Download RC2 IPA](https://github.com/GimGyumin/Luma-Music/releases/download/v1.0.0-rc2/Luma.1.0.RC2.ipa) &nbsp; · &nbsp; [Release notes](https://github.com/GimGyumin/Luma-Music/releases/tag/v1.0.0-rc2) &nbsp; · &nbsp; [Browse build 1031 source](https://github.com/GimGyumin/Luma-Music/tree/7fd9018f31d63527d49a9d86eebff54367d1a1ea)
+> [Download RC2 IPA](https://github.com/GimGyumin/Luma-Music/releases/download/v1.0.0-rc2/Luma.1.0.RC2.ipa) &nbsp; · &nbsp; [Updated RC2 notes & iPad advisory](docs/releases/v1.0.0-rc2.md) &nbsp; · &nbsp; [GitHub release](https://github.com/GimGyumin/Luma-Music/releases/tag/v1.0.0-rc2) &nbsp; · &nbsp; [Browse build 1031 source](https://github.com/GimGyumin/Luma-Music/tree/7fd9018f31d63527d49a9d86eebff54367d1a1ea)
 
 ---
 

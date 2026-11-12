@@ -2,7 +2,7 @@
 
 **Good music deserves thoughtful software.**
 
-Luma Music is an independent, open-source player. We're refining the project and targeting a stable iPhone/iPad 1.0 release in **2026**, subject to testing.
+Luma Music is an independent, open-source player. We're refining the project and now targeting a stable iPhone/iPad 1.0 release in **early 2027**, subject to testing. Follow-up release candidates will continue, with the next RC focusing on small fixes and iPad UI corrections.
 
 Looking for a way to help? Start with the [documentation](docs/README.md), review the [roadmap](docs/ROADMAP.md), join [Discussions](https://github.com/GimGyumin/Luma-Music/discussions), or [report a problem](https://github.com/GimGyumin/Luma-Music/issues/new/choose).
 

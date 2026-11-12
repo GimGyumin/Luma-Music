@@ -9,6 +9,10 @@
 
 The app and this GitHub repository are still being refined. We're focusing on playback stability, smooth interactions, consistent design, and clearer documentation.
 
+## December 2026. iPad UI corrections.
+
+The current iPad IPA has known interface issues. An updated iPad version is **planned for December 2026**. **Until that fix is released, we recommend using Luma Music on iPhone.** The date is a target, not a guarantee.
+
 ## Coming soon. Luma Music 1.0.
 
 The first stable release of **Luma Music 1.0 for iPhone and iPad** is coming soon. We're aiming to release before the end of 2026, pending final testing and release readiness.

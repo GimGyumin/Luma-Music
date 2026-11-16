@@ -38,11 +38,12 @@
 ## Discover Luma
 
 <p align="center">
-  <img src="./assets/screenshots/now-playing.jpg" alt="Immersive Now Playing" width="30%" />
-  <img src="./assets/screenshots/lyrics-translation.jpg" alt="Synchronized lyrics and translation" width="30%" />
-  <img src="./assets/screenshots/lyrics-pronunciation.jpg" alt="Lyrics with pronunciation when supported" width="30%" />
+  <img src="./assets/screenshots/now-playing.jpg" alt="Immersive Now Playing" width="23%" />
+  <img src="./assets/screenshots/lyrics-translation.jpg" alt="Synchronized lyrics and translation" width="23%" />
+  <img src="./assets/screenshots/lyrics-pronunciation.jpg" alt="Lyrics with pronunciation when supported" width="23%" />
+  <img src="./assets/screenshots/rc3-lyrics-pronunciation.jpg" alt="RC3 English-to-Korean pronunciation with synchronized lyrics" width="23%" />
 </p>
-<p align="center"><sub>Now Playing &nbsp; · &nbsp; Lyrics & translation &nbsp; · &nbsp; Pronunciation</sub></p>
+<p align="center"><sub>Now Playing &nbsp; · &nbsp; Lyrics & translation &nbsp; · &nbsp; Pronunciation &nbsp; · &nbsp; RC3 pronunciation preview</sub></p>
 
 <p align="center">
   <img src="./assets/screenshots/album-page-hopeless-romantic.jpg" alt="Artwork-focused album page" width="30%" />

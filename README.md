@@ -27,6 +27,12 @@
 >
 > [Download RC2 IPA](https://github.com/GimGyumin/Luma-Music/releases/download/v1.0.0-rc2/Luma.1.0.RC2.ipa) &nbsp; · &nbsp; [Updated RC2 notes & iPad advisory](docs/releases/v1.0.0-rc2.md) &nbsp; · &nbsp; [GitHub release](https://github.com/GimGyumin/Luma-Music/releases/tag/v1.0.0-rc2) &nbsp; · &nbsp; [Browse build 1031 source](https://github.com/GimGyumin/Luma-Music/tree/7fd9018f31d63527d49a9d86eebff54367d1a1ea)
 
+> **Luma Music 1.0 RC3 · In preparation**
+>
+> RC3 introduces an immersive redesigned player, Lyricify-powered backgrounds, adaptive lyric scrolling, and English-to-Korean pronunciation fallback. The signed RC3 IPA is **not available yet**; RC2 remains the latest download.
+>
+> [Read the RC3 preview notes](docs/releases/v1.0.0-rc3.md)
+
 ---
 
 ## Discover Luma
@@ -56,7 +62,7 @@ Immersive artwork is available for **compatible covers only**. Some album covers
 
 Synchronized lyrics move with your music, including **TTML word-timed highlighting** when compatible timing data is available. Optional Apple- or OpenAI-powered translation can help with provided lyric text.
 
-**Pronunciation and romanization appear only when compatible pronunciation data is supplied.** Lyrics themselves depend on your server or an enabled source such as LRCLIB, and are not available for every track.
+**RC3 adds an English-to-Korean pronunciation fallback for supported words.** The currently released RC2 displays pronunciation only when compatible pronunciation data is supplied. Lyrics themselves depend on your server or an enabled source such as LRCLIB, and are not available for every track.
 
 ## Hear it all. Without the gaps.
 

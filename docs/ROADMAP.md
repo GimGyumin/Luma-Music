@@ -9,13 +9,13 @@
 
 The app and this GitHub repository are still being refined. We're focusing on playback stability, smooth interactions, consistent design, and clearer documentation.
 
-## December 2026. iPad UI corrections.
+## November 2026. RC3: player, lyrics, and iPad improvements.
 
-The current iPad IPA has known interface issues. An updated iPad version is **planned for December 2026**. **Until that fix is released, we recommend using Luma Music on iPhone.** The date is a target, not a guarantee.
+RC3 addresses the previously reported iPad interface issues and substantially updates the player, lyric backgrounds, adaptive lyric scrolling, and English-to-Korean pronunciation fallback. **iPad users should install RC3 once its signed IPA is published.** Until then, RC2 remains the currently available build and does not include these fixes. See the [RC3 preview notes](releases/v1.0.0-rc3.md).
 
-## Next RC. Small fixes, better iPad support.
+## Next. Validate RC3 and keep refining.
 
-**Release candidates will continue to be published regularly** while we work toward a stable 1.0 release. The next RC is expected to focus on **small fixes and refinements, including corrections to the iPad UI issues**, rather than major new features. Exact release timing and contents may change as testing continues.
+**Release candidates will continue** while we work toward stable 1.0. Priorities include release-build verification, real-device testing, data retention, and any remaining regressions. Timing depends on readiness.
 
 ## Early 2027. Luma Music 1.0.
 

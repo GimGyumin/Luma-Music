@@ -16,7 +16,9 @@ Luma can show line-synchronized lyrics and **TTML word-timed highlighting** when
 
 Optional Apple/OpenAI-powered lyric translation can work with available lyric text, where supported and configured.
 
-**Pronunciation and romanization require a compatible pronunciation layer in the supplied lyric data.** They are not generated for every track.
+**RC2:** Pronunciation and romanization require a compatible pronunciation layer in the supplied lyric data.
+
+**RC3 (once released):** English-to-Korean pronunciation fallback can generate approximate Korean readings for supported English words using CMUdict. Coverage is not universal; other languages and unsupported words may still require supplied pronunciation data.
 
 ## Sound that stays connected.
 

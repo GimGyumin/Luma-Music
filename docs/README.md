@@ -23,9 +23,11 @@ Quick answers to common questions and a safe way to report bugs.
 
 ## Stay in the loop.
 
-**[Roadmap →](ROADMAP.md)** — Stable iPhone/iPad 1.0 now targeted for early 2027, with continued RC builds, upcoming iPad UI fixes, and macOS/watchOS plans.
+**[Roadmap →](ROADMAP.md)** — Stable iPhone/iPad 1.0 now targeted for early 2027, with continued RC builds, iPad fixes included in RC3, and macOS/watchOS plans.
 
-**[RC2 notes & iPad UI notice →](releases/v1.0.0-rc2.md)** — Read the current iPad UI advisory and planned December 2026 correction.
+**[RC3 preview notes →](releases/v1.0.0-rc3.md)** — New player and lyrics experience, plus iPad UI fixes. The signed RC3 IPA is not yet published.
+
+**[RC2 release notes →](releases/v1.0.0-rc2.md)** — Historical notes for the currently available RC2 IPA; its iPad advisory describes that older build.
 
 **[Published releases →](https://github.com/GimGyumin/Luma-Music/releases)** — Find out which IPA builds are actually available now.
 

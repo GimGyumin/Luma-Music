@@ -12,14 +12,14 @@
   <a href="https://github.com/GimGyumin/Luma-Music/discussions">Community</a>
 </p>
 
-<p align="center"><sub>iPhone — IPA preview &nbsp; | &nbsp; iPad — UI fix planned for December 2026 &nbsp; | &nbsp; macOS — Coming in 2027</sub></p>
+<p align="center"><sub>iPhone — IPA preview &nbsp; | &nbsp; iPad — UI fixes included in RC3 &nbsp; | &nbsp; macOS — Coming in 2027</sub></p>
 <p align="center"><sub>Navidrome · OpenSubsonic-compatible servers · Supported Jellyfin libraries</sub></p>
 
-> **⚠️ iPad UI compatibility notice (November 2026)**
-> 
-> The current iPad version has known interface issues, and some UI elements may not work correctly. We plan to release an iPad fix **during December 2026**. **Until the updated version is available, please use Luma Music on iPhone.**
+> **📱 iPad update — RC3 recommended**
 >
-> **iPad 이용 안내:** 현재 iPad 버전에서 일부 UI가 정상적으로 작동하지 않는 문제가 확인되었습니다. **2026년 12월 중 수정 버전을 배포할 예정**입니다. 수정 버전 배포 전까지는 **iPhone에서 Luma Music을 이용해 주세요.**
+> The previously reported iPad interface issues have been addressed in **RC3**. **iPad users should update to RC3 when its IPA becomes available.** RC2 remains downloadable, but does not include these fixes.
+>
+> **iPad 업데이트 안내:** 기존에 보고된 iPad UI 문제를 **RC3에서 수정했습니다. RC3 IPA가 공개되면 iPad 사용자는 RC3로 업데이트해 주세요.** RC2는 계속 다운로드할 수 있지만 해당 수정 사항은 포함되지 않습니다.
 
 > **Luma Music 1.0 RC2 · Available now**
 >
@@ -79,7 +79,7 @@ Library search, responsive artwork, and efficient UI updates. Supported system f
 
 ## Get Luma Music
 
-**Available now: Luma Music 1.0 RC2 IPA preview for iPhone.** The IPA also installs on iPad, but the current iPad UI has known issues. **Please use iPhone until the planned December 2026 iPad fix is released.**
+**Available now: Luma Music 1.0 RC2 IPA preview.** RC3 includes fixes for the previously reported iPad UI issues. **iPad users are encouraged to install RC3 as soon as the signed IPA is published.**
 
 **[Download RC2 IPA](https://github.com/GimGyumin/Luma-Music/releases/download/v1.0.0-rc2/Luma.1.0.RC2.ipa)** &nbsp; · &nbsp; **[All releases](https://github.com/GimGyumin/Luma-Music/releases)** &nbsp; · &nbsp; **[Installation guide](docs/GETTING_STARTED.md)**
 
@@ -90,10 +90,10 @@ Download the RC2 IPA, install it with a compatible sideloading method such as Si
 | Platform | Availability |
 | --- | --- |
 | **iPhone** | IPA preview · iOS 18.6 or later |
-| **iPad** | IPA preview · iPadOS 18.6 or later · **Known UI issues; use iPhone for now. Fix planned for December 2026.** |
+| **iPad** | IPA preview · iPadOS 18.6 or later · **Previously reported UI issues addressed in RC3; update to RC3 when available.** |
 | **macOS** | **Coming next year (2027)** · Not available |
 
-The stable **Luma Music 1.0 release for iPhone and iPad has been postponed from late 2026 to early 2027**, subject to testing and release readiness. **Follow-up RC builds will continue in the meantime**, with the next RC focusing on minor fixes and iPad UI bug fixes. The separate macOS app is planned for 2027; the current IPA is not a Mac installer.
+The stable **Luma Music 1.0 release for iPhone and iPad has been postponed from late 2026 to early 2027**, subject to testing and release readiness. **Follow-up RC builds will continue in the meantime**, with RC3 introducing a redesigned player, improved lyrics, and iPad UI fixes. The separate macOS app is planned for 2027; the current IPA is not a Mac installer.
 
 [Get started](docs/GETTING_STARTED.md) &nbsp; · &nbsp; [Explore features](docs/FEATURES.md) &nbsp; · &nbsp; [Roadmap](docs/ROADMAP.md)
 

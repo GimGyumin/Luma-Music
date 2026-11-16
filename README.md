@@ -21,17 +21,11 @@
 >
 > **iPad 업데이트 안내:** 기존에 보고된 iPad UI 문제를 **RC3에서 수정했습니다. RC3 IPA가 공개되면 iPad 사용자는 RC3로 업데이트해 주세요.** RC2는 계속 다운로드할 수 있지만 해당 수정 사항은 포함되지 않습니다.
 
-> **Luma Music 1.0 RC2 · Available now**
+> **Luma Music 1.0 RC3 · Latest published release (IPA pending)**
 >
-> RC2 is now available as an **iPhone and iPad IPA preview**. Build 1031 source code has also been published to `main`. This is a release candidate, not the final stable 1.0 release.
+> The RC3 release page is published, with player, lyrics, and iPad improvements. **A signed RC3 IPA has not yet been attached**, so RC2 remains the latest downloadable IPA. The latest development build number is **261116**, but that source update has not yet been synchronized to this public repository.
 >
-> [Download RC2 IPA](https://github.com/GimGyumin/Luma-Music/releases/download/v1.0.0-rc2/Luma.1.0.RC2.ipa) &nbsp; · &nbsp; [Updated RC2 notes & iPad advisory](docs/releases/v1.0.0-rc2.md) &nbsp; · &nbsp; [GitHub release](https://github.com/GimGyumin/Luma-Music/releases/tag/v1.0.0-rc2) &nbsp; · &nbsp; [Browse build 1031 source](https://github.com/GimGyumin/Luma-Music/tree/7fd9018f31d63527d49a9d86eebff54367d1a1ea)
-
-> **Luma Music 1.0 RC3 · In preparation**
->
-> RC3 introduces an immersive redesigned player, Lyricify-powered backgrounds, adaptive lyric scrolling, and English-to-Korean pronunciation fallback. The signed RC3 IPA is **not available yet**; RC2 remains the latest download.
->
-> [Read the RC3 preview notes](docs/releases/v1.0.0-rc3.md)
+> [RC3 release page](https://github.com/GimGyumin/Luma-Music/releases/tag/v1.0.0-rc3) &nbsp; · &nbsp; [RC3 notes](docs/releases/v1.0.0-rc3.md) &nbsp; · &nbsp; [Download previous RC2 IPA](https://github.com/GimGyumin/Luma-Music/releases/download/v1.0.0-rc2/Luma.1.0.RC2.ipa)
 
 ---
 
@@ -79,9 +73,9 @@ Library search, responsive artwork, and efficient UI updates. Supported system f
 
 ## Get Luma Music
 
-**Available now: Luma Music 1.0 RC2 IPA preview.** RC3 includes fixes for the previously reported iPad UI issues. **iPad users are encouraged to install RC3 as soon as the signed IPA is published.**
+**Latest release: Luma Music 1.0 RC3 (signed IPA pending).** The RC3 release page is available, but the downloadable IPA is still RC2. RC3 includes fixes for previously reported iPad UI issues.
 
-**[Download RC2 IPA](https://github.com/GimGyumin/Luma-Music/releases/download/v1.0.0-rc2/Luma.1.0.RC2.ipa)** &nbsp; · &nbsp; **[All releases](https://github.com/GimGyumin/Luma-Music/releases)** &nbsp; · &nbsp; **[Installation guide](docs/GETTING_STARTED.md)**
+**[RC3 release page](https://github.com/GimGyumin/Luma-Music/releases/tag/v1.0.0-rc3)** &nbsp; · &nbsp; **[Download previous RC2 IPA](https://github.com/GimGyumin/Luma-Music/releases/download/v1.0.0-rc2/Luma.1.0.RC2.ipa)** &nbsp; · &nbsp; **[All releases](https://github.com/GimGyumin/Luma-Music/releases)** &nbsp; · &nbsp; **[Installation guide](docs/GETTING_STARTED.md)**
 
 Download the RC2 IPA, install it with a compatible sideloading method such as SideStore or AltStore, then connect to **your own music server**. Luma is a client, not a music server or a commercial streaming catalog.
 

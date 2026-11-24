@@ -17,15 +17,15 @@
 
 > **📱 iPad update — RC3 recommended**
 >
-> The previously reported iPad interface issues have been addressed in **RC3**. **iPad users should update to RC3 when its IPA becomes available.** RC2 remains downloadable, but does not include these fixes.
+> The previously reported iPad interface issues have been addressed in **RC3**. **RC3 is recommended for iPad users.**
 >
 > **iPad 업데이트 안내:** 기존에 보고된 iPad UI 문제를 **RC3에서 수정했습니다. RC3 IPA가 공개되면 iPad 사용자는 RC3로 업데이트해 주세요.** RC2는 계속 다운로드할 수 있지만 해당 수정 사항은 포함되지 않습니다.
 
-> **Luma Music 1.0 RC3 · Latest published release (IPA pending)**
+> **Luma Music 1.0 RC3 · Latest published release**
 >
-> The RC3 release page is published, with player, lyrics, and iPad improvements. **A signed RC3 IPA has not yet been attached**, so RC2 remains the latest downloadable IPA. The latest development build number is **261116**, but that source update has not yet been synchronized to this public repository.
+> The RC3 release page is published, with player, lyrics, and iPad improvements. The latest development build number is **261116**, but that source update has not yet been synchronized to this public repository.
 >
-> [RC3 release page](https://github.com/GimGyumin/Luma-Music/releases/tag/v1.0.0-rc3) &nbsp; · &nbsp; [RC3 notes](docs/releases/v1.0.0-rc3.md) &nbsp; · &nbsp; [Download previous RC2 IPA](https://github.com/GimGyumin/Luma-Music/releases/download/v1.0.0-rc2/Luma.1.0.RC2.ipa)
+> [RC3 release page](https://github.com/GimGyumin/Luma-Music/releases/tag/v1.0.0-rc3) &nbsp; · &nbsp; [RC3 notes](docs/releases/v1.0.0-rc3.md)
 
 ---
 
@@ -57,7 +57,7 @@ Immersive artwork is available for **compatible covers only**. Some album covers
 
 Synchronized lyrics move with your music, including **TTML word-timed highlighting** when compatible timing data is available. Optional Apple- or OpenAI-powered translation can help with provided lyric text.
 
-**RC3 adds an English-to-Korean pronunciation fallback for supported words.** The currently released RC2 displays pronunciation only when compatible pronunciation data is supplied. Lyrics themselves depend on your server or an enabled source such as LRCLIB, and are not available for every track.
+**RC3 adds an English-to-Korean pronunciation fallback for supported words.** RC2 displays pronunciation only when compatible pronunciation data is supplied. Lyrics themselves depend on your server or an enabled source such as LRCLIB, and are not available for every track.
 
 ## Hear it all. Without the gaps.
 
@@ -73,18 +73,18 @@ Library search, responsive artwork, and efficient UI updates. Supported system f
 
 ## Get Luma Music
 
-**Latest release: Luma Music 1.0 RC3 (signed IPA pending).** The RC3 release page is available, but the downloadable IPA is still RC2. RC3 includes fixes for previously reported iPad UI issues.
+**Latest release: Luma Music 1.0 RC3.** RC3 includes fixes for previously reported iPad UI issues.
 
-**[RC3 release page](https://github.com/GimGyumin/Luma-Music/releases/tag/v1.0.0-rc3)** &nbsp; · &nbsp; **[Download previous RC2 IPA](https://github.com/GimGyumin/Luma-Music/releases/download/v1.0.0-rc2/Luma.1.0.RC2.ipa)** &nbsp; · &nbsp; **[All releases](https://github.com/GimGyumin/Luma-Music/releases)** &nbsp; · &nbsp; **[Installation guide](docs/GETTING_STARTED.md)**
+**[RC3 release page](https://github.com/GimGyumin/Luma-Music/releases/tag/v1.0.0-rc3)** &nbsp; · &nbsp; **[All releases](https://github.com/GimGyumin/Luma-Music/releases)** &nbsp; · &nbsp; **[Installation guide](docs/GETTING_STARTED.md)**
 
-Download the RC2 IPA, install it with a compatible sideloading method such as SideStore or AltStore, then connect to **your own music server**. Luma is a client, not a music server or a commercial streaming catalog.
+Download an IPA from the releases page, install it with a compatible sideloading method such as SideStore or AltStore, then connect to **your own music server**. Luma is a client, not a music server or a commercial streaming catalog.
 
-**There is currently no TestFlight or App Store distribution.** [RC2](https://github.com/GimGyumin/Luma-Music/releases/tag/v1.0.0-rc2) is the latest publicly available IPA preview; [RC1](https://github.com/GimGyumin/Luma-Music/releases/tag/v1.0.0-rc1) remains available as an earlier version.
+**There is currently no TestFlight or App Store distribution.**
 
 | Platform | Availability |
 | --- | --- |
 | **iPhone** | IPA preview · iOS 18.6 or later |
-| **iPad** | IPA preview · iPadOS 18.6 or later · **Previously reported UI issues addressed in RC3; update to RC3 when available.** |
+| **iPad** | IPA preview · iPadOS 18.6 or later · **Previously reported UI issues addressed in RC3; RC3 recommended.** |
 | **macOS** | **Coming next year (2027)** · Not available |
 
 The stable **Luma Music 1.0 release for iPhone and iPad has been postponed from late 2026 to early 2027**, subject to testing and release readiness. **Follow-up RC builds will continue in the meantime**, with RC3 introducing a redesigned player, improved lyrics, and iPad UI fixes. The separate macOS app is planned for 2027; the current IPA is not a Mac installer.

@@ -79,7 +79,9 @@ Library search, responsive artwork, and efficient UI updates. Supported system f
 
 Download an IPA from the releases page, install it with a compatible sideloading method such as SideStore or AltStore, then connect to **your own music server**. Luma is a client, not a music server or a commercial streaming catalog.
 
-**The official 1.0 release will continue to be distributed through GitHub via sideloading. No TestFlight or App Store release is planned.**
+**The official 1.0 release in January 2027 will be distributed through GitHub via sideloading.**
+
+**TestFlight and App Store releases are planned for later in 2027.** There is no confirmed date yet, but your interest and support could help bring these releases forward. If you'd like to see Luma Music on TestFlight and the App Store sooner, consider starring the repository, sharing the project, or providing feedback.
 
 | Platform | Availability |
 | --- | --- |

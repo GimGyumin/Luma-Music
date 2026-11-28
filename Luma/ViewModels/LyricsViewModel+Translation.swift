@@ -512,6 +512,12 @@ extension LyricsViewModel {
             arePronunciationsVisible.toggle()
             scrollRestoreToken += 1
         }
+        if !generatedPronunciationIndices.isEmpty {
+            UserDefaults.standard.set(
+                arePronunciationsVisible,
+                forKey: Self.englishPronunciationPreferenceKey
+            )
+        }
     }
 
     func clearCache() async {

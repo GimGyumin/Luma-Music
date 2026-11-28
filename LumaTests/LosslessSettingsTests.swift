@@ -37,6 +37,22 @@ struct LosslessSettingsTests {
         #expect(restored.allowsWiFiLosslessUpgrade)
     }
 
+    @Test func automaticStreamingStillAdaptsWithLosslessDisabled() throws {
+        let suite = "LosslessSettingsTests.\(UUID())"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = StreamingSettings(defaults: defaults)
+        settings.wifiFormat = .matchStream
+        settings.losslessAudioEnabled = false
+
+        #expect(settings.formatForCurrentNetwork(isLimited: false) == .matchStream)
+        #expect(settings.adaptiveStreamingCeiling(isLimited: false) == .aac256)
+        settings.adaptiveCeiling = .aac128
+        #expect(settings.adaptiveStreamingCeiling(isLimited: false) == .aac128)
+        #expect(!settings.allowsWiFiLosslessUpgrade)
+        #expect(settings.effectiveDownloadFormat == .aac256)
+    }
+
     @Test func disabledLosslessNeverRaisesAnExplicitLossyQuality() {
         for format in [CacheFormat.aac256, .aac128, .opus_128] {
             #expect(StreamingSettings.effectiveFormat(format, losslessEnabled: false) == format)

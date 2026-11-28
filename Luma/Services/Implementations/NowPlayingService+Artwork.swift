@@ -6,14 +6,14 @@
 import Foundation
 import MediaPlayer
 import OSLog
-#if os(iOS)
+#if os(iOS) && !targetEnvironment(macCatalyst)
 import UIKit
 #endif
 
 extension NowPlayingService {
     func refreshArtworkPresentation() async {
         finalArtworkImage = nil
-        #if os(iOS)
+        #if os(iOS) && !targetEnvironment(macCatalyst)
         if #available(iOS 26.0, *) {
             await MainActor.run {
                 guard var info = NowPlayingMetadataSink.info else { return }
@@ -39,7 +39,7 @@ extension NowPlayingService {
 
     }
 
-    #if os(iOS)
+    #if os(iOS) && !targetEnvironment(macCatalyst)
     func installForegroundArtworkRetryObserver() {
         guard foregroundRetryObserver == nil else { return }
         foregroundRetryObserver = NotificationCenter.default.addObserver(
@@ -91,7 +91,6 @@ extension NowPlayingService {
         snapshot: NowPlayingSnapshot,
         generation: Int
     ) async -> Bool {
-        if hasArtwork, finalArtworkImage === image { return true }
         let installed = await installArtwork(
             ArtworkLoader.makeArtwork(image),
             for: snapshot,
@@ -104,7 +103,7 @@ extension NowPlayingService {
             hasArtwork = true
             pendingArtwork = nil
         }
-        #if os(iOS)
+        #if os(iOS) && !targetEnvironment(macCatalyst)
         if installed, #available(iOS 27.0, *),
            UserDefaults.standard.object(forKey: "luma.visuals.immersiveAlbums") as? Bool != false,
            let prepared = await LockScreenImmersiveArtwork.prepare(image) {

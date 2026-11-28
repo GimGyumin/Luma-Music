@@ -304,13 +304,13 @@ struct QueueRow: View {
             Button {
                 Task { await container?.playerService.playNext(song) }
             } label: {
-                Label("Play Next", systemImage: "text.line.first.and.arrowtriangle.forward")
+                DestinationMenuLabel.playNext(after: container?.playerState.currentTrack?.title)
             }
 
             Button {
                 Task { await container?.playerService.addToQueue(song) }
             } label: {
-                Label("Add to Queue", systemImage: "text.append")
+                DestinationMenuLabel.addToQueue()
             }
 
             Divider()
@@ -318,7 +318,7 @@ struct QueueRow: View {
             Button {
                 showAddToPlaylist = true
             } label: {
-                Label("Add to Playlist...", systemImage: "music.note.list")
+                DestinationMenuLabel.addToPlaylist()
             }
             .disabled(!isOnline)
 

@@ -41,6 +41,7 @@ struct ImmersiveCoverHero<Content: View>: View {
     var floatingTopPadding: CGFloat = LumaSpacing.xxxxl + 72
     var contentTopPadding: CGFloat? = nil
     var contentBottomPadding: CGFloat = LumaSpacing.l
+    var floatingCoverReveal: CoverArtReveal? = nil
     @ViewBuilder let content: () -> Content
 
     var body: some View {
@@ -134,7 +135,8 @@ struct ImmersiveCoverHero<Content: View>: View {
                 Group {
                     if let coverArtId {
                         CoverArtView(id: coverArtId, size: ArtworkTier.hero.decodePixels, tier: .hero,
-                                     initialImage: coverImage, contentMode: .fill)
+                                     initialImage: coverImage, contentMode: .fill,
+                                     reveal: floatingCoverReveal)
                     } else if let coverImage {
                         platformImage(coverImage)
                             .resizable()

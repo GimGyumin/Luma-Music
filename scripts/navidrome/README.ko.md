@@ -20,7 +20,7 @@ Navidrome DB가 있는 컴퓨터에서 실행한다. 다음 명령은 DB를 읽�
 
 ```sh
 python3 scripts/navidrome/sync_copyright.py \
-  --db /Users/your-username/navidrome/data/navidrome.db \
+  --db /Users/kyumin/navidrome/data/navidrome.db \
   --album Dangerous --artist 'Michael Jackson'
 ```
 

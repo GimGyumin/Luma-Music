@@ -4,6 +4,8 @@
 // See LICENSE file in the project root for full license information.
 
 import AVFoundation
+import AudioToolbox
+import CoreAudio
 import Synchronization
 import Observation
 import SwiftUI
@@ -92,6 +94,7 @@ final class PlaybackBeatMeter {
     private var analysisActive = false
     /// Number of visible consumers of the spectrum.
     private var listenCount = 0
+    @ObservationIgnored private var auxiliaryAnalysisListeners = 0
     @ObservationIgnored private var publicationTask: Task<Void, Never>?
     private var consumedRevision: UInt64 = 0
     nonisolated private static let pcmWindow = PlaybackPCMWindow()
@@ -99,7 +102,7 @@ final class PlaybackBeatMeter {
     @ObservationIgnored private var nativeSourceProvider: (@Sendable () -> PlaybackSpectrumSource?)?
     @ObservationIgnored private let fileAnalyzer = PlaybackFileSpectrumAnalyzer()
     @ObservationIgnored private var nativeAnalysisSourceProvider: (@Sendable () -> NativePlaybackAnalysisSource?)?
-    @ObservationIgnored private var nativeAnalysisPlayer: NativePlaybackAnalysisPlayer?
+    @ObservationIgnored private(set) var nativeAnalysisPlayer: NativePlaybackAnalysisPlayer?
     private var sourceProviderRevision: UInt64 = 0
     @ObservationIgnored private var missingSamplesSince: Double?
     private var lastLiveSampleHostTime = 0.0
@@ -107,18 +110,23 @@ final class PlaybackBeatMeter {
     nonisolated private static let publicationGeneration = Atomic<UInt64>(0)
     nonisolated private static let uiListeningFlag = Atomic<Bool>(false)
 
-    nonisolated static func enqueue(buffer: AVAudioPCMBuffer, when: AVAudioTime? = nil, outputLatency: Double = 0) {
+    nonisolated static func enqueue(buffer: AVAudioPCMBuffer, when: AVAudioTime? = nil,
+                                    outputLatency: Double = 0, supplementary: Bool = false) {
         enqueue(bufferList: buffer.audioBufferList, format: buffer.format.streamDescription.pointee,
             frameCount: Int(buffer.frameLength),
-            hostTime: when.flatMap { $0.isHostTimeValid ? AVAudioTime.seconds(forHostTime: $0.hostTime) + max(0, outputLatency) : nil })
+            hostTime: when.flatMap { $0.isHostTimeValid ? AVAudioTime.seconds(forHostTime: $0.hostTime) + max(0, outputLatency) : nil },
+            supplementary: supplementary)
     }
 
     /// Render callbacks only copy PCM into preallocated windows. FFT stays on the consumer.
     nonisolated static func enqueue(bufferList: UnsafePointer<AudioBufferList>,
-                                   format: AudioStreamBasicDescription, frameCount: Int, hostTime: Double? = nil, mediaTime: Double? = nil) {
+                                   format: AudioStreamBasicDescription, frameCount: Int,
+                                   hostTime: Double? = nil, mediaTime: Double? = nil,
+                                   supplementary: Bool = false) {
         guard uiListeningFlag.load(ordering: .relaxed) else { return }
         pcmWindow.capture(bufferList, format: format, frames: frameCount,
-            generation: publicationGeneration.load(ordering: .relaxed), hostTime: hostTime, mediaTime: mediaTime)
+            generation: publicationGeneration.load(ordering: .relaxed), hostTime: hostTime,
+            mediaTime: mediaTime, supplementary: supplementary)
     }
 
     private func resetSpectrumReference() {
@@ -132,6 +140,7 @@ final class PlaybackBeatMeter {
         presentedHostTime = nil
         previousPulse = 0
         analyzer.reset()
+        LyricifyBassAnalyzer.shared.reset()
         normalizer = PlaybackSpectrumNormalizer()
         lastEnvelopeHostTime = 0
         lastNativeSpectrumSource = nil
@@ -174,7 +183,7 @@ final class PlaybackBeatMeter {
     }
 
     private func updateNativeAnalysis() {
-        guard analysisActive, LumaPerformance.budget.allowsAuxiliaryStreamingDecoder,
+        guard analysisActive, auxiliaryAnalysisListeners > 0, LumaPerformance.budget.allowsAuxiliaryStreamingDecoder,
               let source = nativeAnalysisSourceProvider?() else {
             stopNativeAnalysis()
             return
@@ -195,7 +204,10 @@ final class PlaybackBeatMeter {
         }
         updateNativeAnalysis()
         var processed = 0
-        while processed < 6, let sample = Self.pcmWindow.copyLatest(into: analyzer.samples,
+        // The producer emits ~21.5 windows/s while this task runs at 30/15 Hz.
+        // Draining six windows at once turned a brief main-actor stall into a
+        // 200 ms visual backlog; two is enough to keep up and bounds onset latency.
+        while processed < 2, let sample = Self.pcmWindow.copyLatest(into: analyzer.samples,
             generation: Self.publicationGeneration.load(ordering: .relaxed), after: consumedRevision, oldestFirst: true) {
             processed += 1
             consumedRevision = sample.revision
@@ -207,13 +219,39 @@ final class PlaybackBeatMeter {
             }
             analysisLeadSeconds = presentationTime - now
             // Native taps may decode ahead of audible playback. Analyze once now,
-            // then present onset events at their media-derived host time.
-            guard presentationTime >= now - 0.15, presentationTime <= now + 10 else { continue }
+            // then present onset events at their media-derived host time. Samples that
+            // trail the audible clock are stale visual data, not a late reaction; the
+            // gapless analysis decoder is kept within this window by its drift correction.
+            // The supplementary flag only widens the window for the independent muted
+            // analysis decoder; the audible tap stays at 150 ms so onset timing is exact.
+            let earliest = sample.supplementary ? now - 0.5 : now - 0.15
+            guard presentationTime >= earliest, presentationTime <= now + 10 else { continue }
             let values = analyzer.analyze(sampleRate: sample.sampleRate, channels: sample.channels)
             analysisMediaTime = sample.mediaTime ?? lastAnalysisClock.map { $0.position + presentationTime - $0.hostTime }
             lastLiveSampleHostTime = sample.receivedAt
             missingSamplesSince = nil
+            // Keep the bars/onset path ahead of the extra Lyricify FFT work.
             apply(values, input: .pcm, receivedAt: sample.receivedAt, presentationTime: presentationTime)
+
+            // Lyricify's pulse is driven only by the audible playback engine.
+            guard listenCount > auxiliaryAnalysisListeners, !sample.supplementary else { continue }
+            var lyricifyChannels: [UnsafePointer<Float>] = []
+            lyricifyChannels.reserveCapacity(sample.channels)
+            for channel in 0..<sample.channels {
+                lyricifyChannels.append(UnsafePointer(
+                    analyzer.samples.advanced(by: channel * PlaybackPCMWindow.count)))
+            }
+            let windowStartMedia = sample.mediaTime.map {
+                $0 - Double(PlaybackPCMWindow.count) / (2 * sample.sampleRate)
+            }
+            let windowStartHost = presentationTime
+                - Double(PlaybackPCMWindow.count) / (2 * sample.sampleRate)
+            LyricifyBassAnalyzer.shared.processWindow(
+                channelData: lyricifyChannels,
+                frameCount: PlaybackPCMWindow.count,
+                sampleRate: sample.sampleRate,
+                windowStartMediaTime: windowStartMedia,
+                windowStartHostTime: windowStartHost)
         }
         return lastLiveSampleHostTime > 0
             && CACurrentMediaTime() - lastLiveSampleHostTime < 0.15
@@ -222,7 +260,7 @@ final class PlaybackBeatMeter {
     private func consumeNativeFileSample() async {
         let generation = Self.publicationGeneration.load(ordering: .relaxed)
         let providerRevision = sourceProviderRevision
-        if let source = nativeSourceProvider?() {
+        if auxiliaryAnalysisListeners > 0, let source = nativeSourceProvider?() {
             if lastNativeSpectrumSource?.hasSameItem(as: source) != true
                 || lastNativeSpectrumSource?.seekSequence != source.seekSequence {
                 resetSpectrumReference()
@@ -230,7 +268,8 @@ final class PlaybackBeatMeter {
             lastNativeSpectrumSource = source
             let readAt = CACurrentMediaTime()
             let values = await fileAnalyzer.energies(at: source)
-            guard !Task.isCancelled, analysisActive, sourceProviderRevision == providerRevision,
+            guard !Task.isCancelled, analysisActive, auxiliaryAnalysisListeners > 0,
+                  sourceProviderRevision == providerRevision,
                   Self.publicationGeneration.load(ordering: .relaxed) == generation else { return }
             if let values, let current = nativeSourceProvider?(), source.isCurrent(comparedTo: current), CACurrentMediaTime() - readAt <= 0.25 {
                 missingSamplesSince = nil
@@ -263,17 +302,25 @@ final class PlaybackBeatMeter {
     }
 
     /// Keep the mixer tap publishing while any UI consumer needs live energy.
-    func retainUIListening(waveform: Bool = false) {
+    func retainUIListening(waveform: Bool = false, playbackPCMOnly: Bool = false) {
         if waveform { waveformListeners += 1 }
+        if !playbackPCMOnly { auxiliaryAnalysisListeners += 1 }
         listenCount += 1
         if listenCount == 1 {
             refreshPerformanceBudget()
         }
     }
 
-    func releaseUIListening(waveform: Bool = false) {
+    func releaseUIListening(waveform: Bool = false, playbackPCMOnly: Bool = false) {
         if waveform { waveformListeners = max(0, waveformListeners - 1) }
+        if !playbackPCMOnly {
+            auxiliaryAnalysisListeners = max(0, auxiliaryAnalysisListeners - 1)
+            if auxiliaryAnalysisListeners == 0 { stopNativeAnalysis() }
+        }
         listenCount = max(0, listenCount - 1)
+        if playbackPCMOnly && listenCount == auxiliaryAnalysisListeners {
+            LyricifyBassAnalyzer.shared.reset()
+        }
         if listenCount == 0 {
             refreshPerformanceBudget()
         }

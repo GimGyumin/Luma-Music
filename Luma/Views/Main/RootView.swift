@@ -8,6 +8,7 @@ import SwiftUI
 struct RootView: View {
     @Environment(\.appContainer) private var container
     @AppStorage("onboardingComplete") private var onboardingComplete = false
+    @AppStorage(AppIntroductionVersion.storageKey) private var seenIntroductionVersion = ""
     @State private var showCredentialReentry = false
     @State private var needsLibraryIndexPreparation = LibraryIndexSchema.needsPreparation
 
@@ -19,6 +20,10 @@ struct RootView: View {
                     .tint(LumaColors.accent)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .background(Color("LaunchBackground").ignoresSafeArea())
+            } else if AppIntroductionVersion.needsPresentation(seen: seenIntroductionVersion, current: AppIntroductionVersion.current) {
+                LumaReleaseIntroductionView(isUpdate: !seenIntroductionVersion.isEmpty || onboardingComplete) {
+                    seenIntroductionVersion = AppIntroductionVersion.current
+                }
             } else if serverState.activeServer != nil && onboardingComplete {
                 #if os(macOS)
                 RootViewMacOS()

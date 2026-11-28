@@ -223,6 +223,8 @@ struct SettingsChoiceList<Item: SettingsChoiceItem>: View {
                                 .opacity(selection == item ? 1 : 0)
                                 .accessibilityHidden(true)
                         }
+                        .frame(minHeight: 42)
+                        .padding(.vertical, 6)
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)

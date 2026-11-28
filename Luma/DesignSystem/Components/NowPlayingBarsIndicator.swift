@@ -14,6 +14,7 @@ extension EnvironmentValues {
 struct NowPlayingBarsIndicator: View {
     let isPlaying: Bool
     var isBuffering = false
+    var tint: Color = .white
     @Environment(\.playbackVisualsPresented) private var surfacePresented
     @State private var intersectsViewport = false
     @State private var heldLevels = Array(repeating: CGFloat.zero, count: 4)
@@ -34,7 +35,7 @@ struct NowPlayingBarsIndicator: View {
         HStack(alignment: .center, spacing: 1.5) {
             ForEach(Array(levels.enumerated()), id: \.offset) { _, level in
                 Capsule()
-                    .fill(.white)
+                    .fill(tint)
                     .frame(width: 2.5, height: NowPlayingBarMotion.height(sample: level))
             }
         }

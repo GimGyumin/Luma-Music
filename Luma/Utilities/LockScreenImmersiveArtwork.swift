@@ -6,7 +6,7 @@
 import Foundation
 import CoreGraphics
 import AVFoundation
-#if os(iOS)
+#if os(iOS) && !targetEnvironment(macCatalyst)
 import UIKit
 import MediaPlayer
 import NowPlaying

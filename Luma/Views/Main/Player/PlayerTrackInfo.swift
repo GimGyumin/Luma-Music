@@ -55,73 +55,6 @@ private func containsFavorite(candidateIDs: Set<String>, in records: [FavoriteRe
     records.contains { candidateIDs.contains($0.itemId) }
 }
 
-struct FullPlayerFavoriteStarButton: View {
-    let playerState: PlayerState
-    let container: AppContainer?
-    let contentColor: Color
-
-    @Query private var favoriteMatches: [FavoriteRecord]
-    @State private var favoriteCandidateIDs: Set<String> = []
-
-    init(playerState: PlayerState, container: AppContainer?, contentColor: Color) {
-        self.playerState = playerState
-        self.container = container
-        self.contentColor = contentColor
-        let sid = container?.serverState.activeServer?.id ?? UUID()
-        let type = FavoriteType.song.rawValue
-        _favoriteMatches = Query(filter: #Predicate<FavoriteRecord> {
-            $0.serverId == sid && $0.itemType == type
-        })
-    }
-
-    private var isFavorite: Bool {
-        let candidates = favoriteCandidateIDs.isEmpty
-            ? Set([playerState.currentTrack?.id].compactMap { $0 })
-            : favoriteCandidateIDs
-        return containsFavorite(candidateIDs: candidates, in: favoriteMatches)
-    }
-
-    var body: some View {
-        Button {
-            HapticFeedback.light.trigger()
-            let fav = isFavorite
-            let songId = playerState.currentTrack?.id ?? ""
-            guard !songId.isEmpty else { return }
-            Task {
-                guard let container else { return }
-                do {
-                    if fav {
-                        try await container.favoritesService.unstar(itemType: .song, itemId: songId)
-                    } else {
-                        try await container.favoritesService.star(itemType: .song, itemId: songId)
-                    }
-                } catch {
-                    container.toastService.showError(error.localizedDescription)
-                }
-            }
-        } label: {
-            Image(systemName: isFavorite ? "star.fill" : "star")
-                .font(.system(size: 19, weight: .medium))
-                .foregroundStyle(isFavorite ? LumaColors.accent : contentColor)
-                .frame(width: 44, height: 44)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .disabled(container?.serverState.activeServer == nil || playerState.currentTrack == nil)
-        .accessibilityLabel(
-            isFavorite
-                ? String(localized: "Remove from Favorites", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale)
-                : String(localized: "Add to Favorites", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale)
-        )
-        .accessibilityAddTraits(isFavorite ? .isSelected : [])
-        .task(id: favoriteCandidatesKey(playerState: playerState, container: container, records: favoriteMatches)) {
-            let candidates = await loadFavoriteCandidateIDs(playerState: playerState, container: container)
-            guard !Task.isCancelled else { return }
-            favoriteCandidateIDs = candidates
-        }
-    }
-}
-
 // MARK: - Lyrics translate control
 
 struct LyricsTranslateButton: View {
@@ -184,6 +117,8 @@ struct LyricsTranslateButton: View {
 
 enum TrackInfoLayout {
     case standard
+    /// Wide iPad / desktop player column: larger Apple Music–style title block.
+    case widePlayer
     case lyricsHeader
     case phoneLandscape
     case immersivePortrait
@@ -270,7 +205,31 @@ struct TrackInfoSection: View {
     private var isLyricsHeader: Bool { layout == .lyricsHeader }
     private var artistFont: Font {
         if layout == .immersivePortrait { return .lumaImmersivePlayerArtist }
+        if layout == .widePlayer { return .system(size: 16, weight: .regular) }
         return layout == .phoneLandscape ? .system(size: 20) : (isLyricsHeader ? .system(size: 16) : .callout)
+    }
+
+    private var titleFont: Font {
+        if layout == .immersivePortrait { return .lumaImmersivePlayerTitle }
+        if layout == .phoneLandscape { return .system(size: 22, weight: .bold) }
+        if layout == .widePlayer { return .system(size: 26, weight: .semibold) }
+        return isLyricsHeader ? .system(size: 18, weight: .semibold) : .title2.weight(.semibold)
+    }
+
+    @ViewBuilder
+    private var titleView: some View {
+        if layout == .widePlayer {
+            // Music.app truncates the desktop title before the star/ellipsis row;
+            // the marquee stays reserved for the phone/header treatments.
+            Text(titleText)
+                .font(titleFont)
+                .foregroundStyle(contentColor)
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        } else {
+            MarqueeText(text: titleText, font: titleFont, color: contentColor)
+        }
     }
     private static let collapsedCoverSize: CGFloat = 64
     private var actionButtonSize: CGFloat { 44 }
@@ -296,14 +255,8 @@ struct TrackInfoSection: View {
             }
 
             VStack(alignment: .leading, spacing: layout == .immersivePortrait ? 0
-                    : (isLyricsHeader ? 2 : (layout == .phoneLandscape ? 2 : LumaSpacing.xs))) {
-                MarqueeText(
-                    text: titleText,
-                    font: layout == .immersivePortrait ? .lumaImmersivePlayerTitle
-                        : layout == .phoneLandscape ? .system(size: 22, weight: .bold)
-                        : (isLyricsHeader ? .system(size: 18, weight: .semibold) : .title2.weight(.semibold)),
-                    color: contentColor
-                )
+                    : (isLyricsHeader ? 2 : (layout == .widePlayer ? 3 : (layout == .phoneLandscape ? 2 : LumaSpacing.xs)))) {
+                titleView
 
                 if playerState.currentTrack != nil || playerState.isLiveStream {
                     if !playerState.isPlaybackAvailable {
@@ -317,36 +270,7 @@ struct TrackInfoSection: View {
                             .foregroundStyle(secondaryContentColor)
                             .lineLimit(1)
                     } else if let artist = playerState.currentTrack?.artist {
-                        Menu {
-                            Button {
-                                goToAlbum()
-                            } label: {
-                                GoToDestinationMenuLabel(
-                                    title: String(localized: "Go to Album", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale),
-                                    subtitle: playerState.currentTrack?.albumName,
-                                    systemImage: "square.stack"
-                                )
-                            }
-                            .disabled(playerState.currentTrack?.albumId == nil)
-                            Button {
-                                goToArtist()
-                            } label: {
-                                GoToDestinationMenuLabel(
-                                    title: String(localized: "Go to Artist", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale),
-                                    subtitle: artist,
-                                    systemImage: "music.mic"
-                                )
-                            }
-                        } label: {
-                            Text(artist)
-                                .font(artistFont)
-                                .foregroundStyle(secondaryContentColor)
-                                .lineLimit(1)
-                                .truncationMode(.tail)
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel(artist)
-                        .accessibilityHint(String(localized: "Go to album or artist", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale))
+                        artistNavigationMenu(artist)
                     }
 
                     if let classical = playerState.currentTrack?.classicalSubtitle {
@@ -450,7 +374,7 @@ struct TrackInfoSection: View {
                                 Button {
                                     songToAddToPlaylist = playerState.currentTrack
                                 } label: {
-                                    Label(String(localized: "Add to Playlist…", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale), systemImage: "text.badge.plus")
+                                    DestinationMenuLabel.addToPlaylist(systemImage: "text.badge.plus")
                                 }
                                 .disabled(container?.serverState.activeServer == nil || playerState.currentTrack == nil)
 
@@ -464,32 +388,16 @@ struct TrackInfoSection: View {
 
                                 Divider()
 
-                                Button {
-                                    goToAlbum()
-                                } label: {
-                                    GoToDestinationMenuLabel(
-                                        title: String(localized: "Go to Album", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale),
-                                        subtitle: playerState.currentTrack?.albumName,
-                                        systemImage: "square.stack"
-                                    )
-                                }
-                                .disabled(playerState.currentTrack?.albumId == nil)
-
-                                Button {
-                                    goToArtist()
-                                } label: {
-                                    GoToDestinationMenuLabel(
-                                        title: String(localized: "Go to Artist", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale),
-                                        subtitle: playerState.currentTrack?.artist,
-                                        systemImage: "music.mic"
-                                    )
-                                }
-                                .disabled(playerState.currentTrack?.artist == nil)
+                                destinationMenuItems
 
                                 Button {
                                     showSongInfo = true
                                 } label: {
-                                    Label(String(localized: "View Credits", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale), systemImage: "info.circle")
+                                    DestinationMenuLabel(
+                                        title: String(localized: "View Credits", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale),
+                                        subtitle: playerState.currentTrack?.title,
+                                        systemImage: "info.circle"
+                                    )
                                 }
                                 .disabled(playerState.currentTrack == nil)
 
@@ -512,7 +420,9 @@ struct TrackInfoSection: View {
                         .tint(.primary)
                     } label: {
                         Image(systemName: "ellipsis")
-                            .font(.system(size: layout == .immersivePortrait || isLyricsHeader ? ImmersivePlayerMetrics.menuGlyph : 17, weight: .bold))
+                            .font(.system(size: layout == .immersivePortrait || isLyricsHeader
+                                  ? ImmersivePlayerMetrics.menuGlyph
+                                  : (layout == .widePlayer ? 18 : 17), weight: .bold))
                             .foregroundStyle(contentColor)
                             .frame(width: actionButtonSize, height: actionButtonSize)
                             .contentShape(Rectangle())
@@ -638,7 +548,9 @@ struct TrackInfoSection: View {
             toggleFavorite()
         } label: {
             Image(systemName: isFavorite ? "star.fill" : "star")
-                .font(.system(size: layout == .immersivePortrait || isLyricsHeader ? ImmersivePlayerMetrics.favoriteGlyph : 17, weight: isLyricsHeader ? .regular : .semibold))
+                .font(.system(size: layout == .immersivePortrait || isLyricsHeader
+                      ? ImmersivePlayerMetrics.favoriteGlyph
+                      : (layout == .widePlayer ? 22 : 17), weight: isLyricsHeader ? .regular : .semibold))
                 .foregroundStyle(isFavorite ? LumaColors.accent : contentColor)
                 .frame(width: actionButtonSize, height: actionButtonSize)
                 .contentShape(Rectangle())
@@ -704,6 +616,45 @@ struct TrackInfoSection: View {
                 container?.toastService.showError(error.localizedDescription)
             }
         }
+    }
+
+    private func artistNavigationMenu(_ artist: String) -> some View {
+        Menu {
+            destinationMenuItems
+        } label: {
+            Text(artist)
+                .font(artistFont)
+                .foregroundStyle(secondaryContentColor)
+                .lineLimit(1)
+                .truncationMode(.tail)
+        }
+        .tint(.primary)
+        .menuOrder(.fixed)
+        .menuIndicator(.hidden)
+        .buttonStyle(.plain)
+        .accessibilityLabel(artist)
+        .accessibilityHint(String(localized: "Go to album or artist", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale))
+    }
+
+    @ViewBuilder
+    private var destinationMenuItems: some View {
+        Button(action: goToAlbum) {
+            DestinationMenuLabel(
+                title: String(localized: "Go to Album", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale),
+                subtitle: playerState.currentTrack?.albumName,
+                systemImage: "square.stack"
+            )
+        }
+        .disabled(playerState.currentTrack?.albumId == nil)
+
+        Button(action: goToArtist) {
+            DestinationMenuLabel(
+                title: String(localized: "Go to Artist", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale),
+                subtitle: playerState.currentTrack?.artist,
+                systemImage: "music.mic"
+            )
+        }
+        .disabled(playerState.currentTrack?.artist == nil)
     }
 
     private func goToAlbum() {

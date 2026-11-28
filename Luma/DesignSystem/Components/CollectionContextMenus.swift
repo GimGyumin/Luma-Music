@@ -73,13 +73,13 @@ struct CollectionContextMenuModifier: ViewModifier {
                         Button {
                             Task { await container?.playerService.playNext(songs) }
                         } label: {
-                            Label("Play Next", systemImage: "text.line.first.and.arrowtriangle.forward")
+                            DestinationMenuLabel.playNext(after: container?.playerState.currentTrack?.title)
                         }
 
                         Button {
                             Task { await container?.playerService.addToQueue(songs) }
                         } label: {
-                            Label("Add to Queue", systemImage: "text.append")
+                            DestinationMenuLabel.addToQueue()
                         }
 
                         Divider()
@@ -310,7 +310,7 @@ struct LazyCollectionContextMenuModifier: ViewModifier {
                                 showAddToPlaylist = true
                             }
                         } label: {
-                            Label("Add to Playlist…", systemImage: "text.badge.plus")
+                            DestinationMenuLabel.addToPlaylist(systemImage: "text.badge.plus")
                         }
                     }
 
@@ -322,7 +322,7 @@ struct LazyCollectionContextMenuModifier: ViewModifier {
                             await container?.playerService.playNext(songs)
                         }
                     } label: {
-                        Label("Play Next", systemImage: "text.line.first.and.arrowtriangle.forward")
+                        DestinationMenuLabel.playNext(after: container?.playerState.currentTrack?.title)
                     }
 
                     Button {
@@ -331,7 +331,7 @@ struct LazyCollectionContextMenuModifier: ViewModifier {
                             await container?.playerService.addToQueue(songs)
                         }
                     } label: {
-                        Label("Add to Queue", systemImage: "text.append")
+                        DestinationMenuLabel.addToQueue()
                     }
                 }
                 .tint(.primary)

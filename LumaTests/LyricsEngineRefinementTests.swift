@@ -5,6 +5,18 @@ import ImageIO
 
 @Suite("Lyrics engine refinements")
 struct LyricsEngineRefinementTests {
+    @Test func pronunciationCellsTrimSeparatorsWithoutChangingProviderTiming() {
+        let original = [LyricDisplayWord(text: "We ", startMs: 0, endMs: 1000, role: .main),
+                        LyricDisplayWord(text: " sing", startMs: 1000, endMs: 2000, role: .main)]
+        let reading = [LyricDisplayWord(text: "위 ", startMs: 0, endMs: 1000, role: .main),
+                       LyricDisplayWord(text: " 싱", startMs: 1000, endMs: 2000, role: .main)]
+        let pairs = LyricPronunciationPair.matching(original: original, reading: reading)
+        #expect(pairs.map(\.original.text) == ["We", "sing"])
+        #expect(pairs.flatMap(\.readings).map(\.text) == ["위", "싱"])
+        #expect(pairs.map(\.original.startMs) == [0, 1000])
+        #expect(pairs.flatMap(\.readings).map(\.endMs) == [1000, 2000])
+    }
+
     @Test func pronunciationColumnsRequireActualMatchingProviderIntervals() {
         let original = [LyricDisplayWord(text: "We", startMs: 0, endMs: 1000, role: .main),
             LyricDisplayWord(text: "sing", startMs: 1000, endMs: 2000, role: .main)]
@@ -14,6 +26,19 @@ struct LyricsEngineRefinementTests {
         #expect(LyricPronunciationPair.matching(original: original, reading: Array(reading.reversed())).isEmpty)
         #expect(LyricPronunciationPair.matching(original: original, reading: []).isEmpty)
     }
+    @Test func splitReadingUsesItsOwnClockAndKeepsUnannotatedSourceSpans() {
+        let original = [LyricDisplayWord(text: "We ", startMs: 0, endMs: 1000, role: .main),
+                        LyricDisplayWord(text: "sing", startMs: 1000, endMs: 2000, role: .main)]
+        let reading = [LyricDisplayWord(text: "시", startMs: 1050, endMs: 1500, role: .main),
+                       LyricDisplayWord(text: "잉", startMs: 1500, endMs: 2070, role: .main)]
+        let pairs = LyricPronunciationPair.matching(original: original, reading: reading)
+        #expect(pairs.count == 2)
+        #expect(pairs.first?.readings.isEmpty == true)
+        #expect(pairs.last?.readings.map(\.startMs) == [1050, 1500])
+        #expect(pairs.last?.readings.map(\.endMs) == [1500, 2070])
+        #expect(pairs.last?.separator == .space)
+    }
+
     @Test(arguments: ["مرحبا بالعالم الجميل", "שָׁלוֹם, עולם!", "우리 👩🏽‍🎤 e\u{301} 光と音楽", "君の名前を呼んでいる"])
     @MainActor func shapedScriptsKeepNativeParagraphDimensions(text: String) throws {
         let timed = LyricWordKaraokeLine(words: [.init(text: text, startMs: 0, endMs: 1000,

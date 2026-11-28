@@ -21,6 +21,8 @@ final class PlayerState {
     var currentIndex: Int = 0
     var playbackState: PlaybackState = .idle
     var position: TimeInterval = 0
+    /// Advances when playback loops back to the beginning without changing the track.
+    var trackRestartRevision: UInt64 = 0
     /// UI clock stays at this absolute target until the active engine confirms the seek.
     /// Applies equally to downloaded/cached files and remote streams.
     var pendingSeekPosition: TimeInterval?

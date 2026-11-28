@@ -61,44 +61,30 @@ struct PersonalMixArtwork: View {
 
 struct PersonalMixCard: View {
     let mix: PersonalMix
+    var width: CGFloat = 250
     static let cardWidth: CGFloat = 250
     static let cardHeight: CGFloat = 324
+
+    private var isCompactCard: Bool { width < 220 }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             PersonalMixArtwork(kind: mix.kind)
-                .frame(width: Self.cardWidth, height: Self.cardWidth)
+                .frame(width: width, height: width)
                 .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             Text(String(localized: String.LocalizationValue(mix.kind.localizationKey), bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale))
-                .font(.body.weight(.semibold))
+                .font(isCompactCard ? .subheadline.weight(.semibold) : .body.weight(.semibold))
                 .foregroundStyle(.primary)
                 .lineLimit(1)
             VStack(alignment: .leading, spacing: 2) {
                 Text(String(localized: "Updated \(mix.updatedAt.formatted(.relative(presentation: .named)))", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale))
+                    .lineLimit(1)
                 Text(LumaCountLabel.tracks(mix.tracks.count))
             }
             .font(.caption)
             .foregroundStyle(.secondary)
         }
-        .frame(width: Self.cardWidth, alignment: .leading)
+        .frame(width: width, alignment: .leading)
         .accessibilityHint(Text("Open playlist"))
-    }
-}
-
-/// Compatibility shelf; generated mixes navigate to PlaylistDetailView via HomeDestination.
-struct PersonalMixShelf: View {
-    let mixes: [PersonalMix]
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Your Playlists").font(.title2.bold())
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(alignment: .top, spacing: 12) {
-                    ForEach(mixes) { mix in
-                        NavigationLink(value: HomeDestination.personalMix(mix.kind)) { PersonalMixCard(mix: mix) }
-                            .buttonStyle(.plain)
-                    }
-                }
-            }
-        }
     }
 }

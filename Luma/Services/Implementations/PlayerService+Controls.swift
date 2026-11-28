@@ -238,6 +238,9 @@ extension PlayerService {
                 )
             } else {
                 systemEngine.resume()
+                // `pauseEngine()` disables the meter. AVPlayer resume does not reopen the
+                // source, so this is the only place that can pair the re-enable.
+                Task { @MainActor in PlaybackBeatMeter.shared.setEnabled(true) }
             }
         } else if let source = currentSource,
                   engineLostItsPausedClock || hasPendingRestore || engine.state == .ready || engine.state == .stopped || engine.state == .error || engine.state == .disposed {

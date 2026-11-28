@@ -14,12 +14,23 @@ struct FavoritesView: View {
     @Namespace private var albumZoomNamespace
 
     var body: some View {
-        Group {
-            if let vm = viewModel {
-                content(vm)
-                    .transition(.opacity)
-            } else {
-                LoadingStateView()
+        VStack(spacing: 0) {
+            #if os(macOS)
+            MacLibraryHeader(
+                title: String(localized: "Favorites", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale),
+                searchText: .constant(""),
+                searchPrompt: "",
+                showsSearch: false
+            ) { EmptyView() }
+            #endif
+
+            Group {
+                if let vm = viewModel {
+                    content(vm)
+                        .transition(.opacity)
+                } else {
+                    LoadingStateView()
+                }
             }
         }
         .lumaContentReveal(isReady: viewModel.map {

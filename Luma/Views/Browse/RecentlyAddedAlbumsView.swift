@@ -12,6 +12,7 @@ struct RecentlyAddedAlbumsView: View {
     @Environment(\.appContainer) private var container
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var albums: [AlbumID3] = []
+    @State private var searchText = ""
     @State private var isLoading = false
     @State private var error: UserFacingError?
     @Namespace private var albumZoomNamespace
@@ -24,8 +25,26 @@ struct RecentlyAddedAlbumsView: View {
         #endif
     }
 
+    private var visibleAlbums: [AlbumID3] {
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return albums }
+        return albums.filter {
+            $0.name.localizedCaseInsensitiveContains(query)
+                || ($0.artist?.localizedCaseInsensitiveContains(query) ?? false)
+        }
+    }
+
     var body: some View {
-        Group {
+        VStack(spacing: 0) {
+            #if os(macOS)
+            MacLibraryHeader(
+                title: String(localized: "Recently Added", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale),
+                searchText: $searchText,
+                searchPrompt: String(localized: "Search Recently Added", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale)
+            ) { EmptyView() }
+            #endif
+
+            Group {
             if isLoading && albums.isEmpty {
                 LoadingStateView()
             } else if let error, albums.isEmpty {
@@ -50,6 +69,7 @@ struct RecentlyAddedAlbumsView: View {
                 albumList
                     .transition(.opacity)
             }
+            }
         }
         .lumaContentReveal(isReady: !(isLoading && albums.isEmpty))
         .navigationTitle(String(localized: "Recently Added", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale))
@@ -59,11 +79,15 @@ struct RecentlyAddedAlbumsView: View {
 
     private var albumGrid: some View {
         GeometryReader { geo in
+            #if os(macOS)
+            let columns = MacDesign.Grid.columns(for: geo.size.width)
+            #else
             let count = gridColumnCount(for: geo.size.width)
             let columns = Array(repeating: GridItem(.flexible(), spacing: 16), count: count)
+            #endif
             ScrollView {
                 LazyVGrid(columns: columns, spacing: 24) {
-                    ForEach(albums) { album in
+                    ForEach(visibleAlbums) { album in
                         AlbumNavigationLink(album: album, namespace: albumZoomNamespace) { sourceID, namespace in
                             AlbumGridCell(album: album, zoomSourceId: sourceID, zoomNamespace: namespace)
                         }
@@ -77,7 +101,7 @@ struct RecentlyAddedAlbumsView: View {
     }
 
     private var albumList: some View {
-        List(albums) { album in
+        List(visibleAlbums) { album in
             AlbumNavigationLink(album: album, namespace: albumZoomNamespace) { sourceID, namespace in
                 AlbumRow(
                     albumId: album.id,

@@ -19,7 +19,7 @@ extension AlbumDetailContentView {
             : max(vm.totalDurationSeconds, Int(songs.reduce(0) { $0 + $1.duration }))
 
         return VStack(alignment: .leading, spacing: 2) {
-                if let mastering = albumMasteringPresentation(songs: songs) {
+                if let mastering = Self.albumMasteringPresentation(songs: songs) {
                     albumMasteringLine(mastering)
                         .padding(.bottom, 14)
                 }
@@ -42,7 +42,7 @@ extension AlbumDetailContentView {
                         .foregroundStyle(albumMetadataInk)
                 }
 
-                if let copyright = albumCopyrightLine(vm: vm) {
+                if let copyright = Self.albumCopyrightLine(vm: vm) {
                     Text(verbatim: copyright)
                         .font(.system(size: 17, weight: .regular))
                         .foregroundStyle(albumMetadataInk)
@@ -57,7 +57,7 @@ extension AlbumDetailContentView {
         .padding(.bottom, 36)
     }
 
-    private struct AlbumMasteringPresentation {
+    struct AlbumMasteringPresentation {
         enum Mark {
             case spatial
             case lossless
@@ -69,7 +69,7 @@ extension AlbumDetailContentView {
 
     /// Apple Music shows an Apple Digital Master credit when the source metadata carries
     /// that mastering flag; otherwise the footer presents the best available audio quality.
-    private func albumMasteringPresentation(songs: [DisplayableSong]) -> AlbumMasteringPresentation? {
+    static func albumMasteringPresentation(songs: [DisplayableSong]) -> AlbumMasteringPresentation? {
         let isAppleDigitalMaster = songs.contains { song in
             let metadata = [song.comment, song.genre]
                 .compactMap { $0?.lowercased() }
@@ -134,7 +134,7 @@ extension AlbumDetailContentView {
     /// Priority:
     /// 1. Track ID3 `copyright`/`℗` text (folds into `comment` on most servers).
     /// 2. OpenSubsonic `recordLabels` + release year.
-    private func albumCopyrightLine(vm: AlbumDetailViewModel) -> String? {
+    static func albumCopyrightLine(vm: AlbumDetailViewModel) -> String? {
         // 1. Explicit copyright text from a track comment — use verbatim.
         if let track = vm.trackCopyright?.trimmingCharacters(in: .whitespacesAndNewlines),
            !track.isEmpty {
@@ -161,7 +161,7 @@ extension AlbumDetailContentView {
 
     /// Normalize common ID3 spellings to the glyph treatment used by Music while retaining
     /// the label's original dates, owner names and intentional line breaks.
-    private func appleStyleCopyright(_ value: String) -> String {
+    private static func appleStyleCopyright(_ value: String) -> String {
         value
             .components(separatedBy: .newlines)
             .map { line in

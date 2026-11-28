@@ -87,8 +87,13 @@ final class ArtworkImageCache {
         var consumers: Set<UUID>
     }
     @ObservationIgnored private var originalFlights: [String: OriginalFlight] = [:]
+    private struct NetworkFailure {
+        let retryDate: Date
+        let transient: Bool
+        let networkRevision: UInt64
+    }
     @ObservationIgnored
-    private var failedNetworkLoadUntil = CostBoundedCache<String, Date>(countLimit: 256, costLimit: 256)
+    private var failedNetworkLoadUntil = CostBoundedCache<String, NetworkFailure>(countLimit: 256, costLimit: 256)
     nonisolated private static let networkFailureCooldown: TimeInterval = 60
 
     private let downloadService: any DownloadServiceProtocol
@@ -138,6 +143,18 @@ final class ArtworkImageCache {
     func storePreparedPalette(_ palette: ArtworkPalette, for coverArtId: String) {
         ColorCache.store(palette, for: presentationKey(coverArtId))
         ColorCache.store(palette, for: coverArtId)
+    }
+
+    func preparePlaceholderColor(for coverArtId: String, from thumbnail: PlatformImage) async {
+        guard preparedPalette(for: coverArtId) == nil else { return }
+        let token = palettePreparationToken(for: coverArtId)
+        let palette = await Task.detached(priority: .utility) {
+            AlbumColorAnalyzer.generateArtworkPalette(from: thumbnail, bottomStrip: false)
+        }.value
+        guard !Task.isCancelled, token == palettePreparationToken(for: coverArtId),
+              preparedPalette(for: coverArtId) == nil, var palette else { return }
+        palette.isProvisional = true
+        storePreparedPalette(palette, for: coverArtId)
     }
 
     func artworkPreference(for albumId: String) -> AlbumArtworkPreference {
@@ -256,6 +273,25 @@ final class ArtworkImageCache {
         return isCurrent(generation) ? result : nil
     }
 
+    /// Visible artwork retries transient failures without requiring a new view instance.
+    func loadVisibleArtwork(coverArtId: String, tier: ArtworkTier, allowNetwork: Bool = true) async -> PlatformImage? {
+        let key = cacheKey(id: coverArtId, tier: tier)
+        let generation = cacheGeneration
+        var fallback: PlatformImage?
+        for attempt in 0..<3 {
+            guard !Task.isCancelled, isCurrent(generation) else { return nil }
+            let image = await load(coverArtId: coverArtId, tier: tier, allowNetwork: allowNetwork)
+            guard !Task.isCancelled, isCurrent(generation) else { return nil }
+            fallback = image ?? fallback
+            guard attempt < 2, allowNetwork, allowsNetworkDownloads,
+                  let failure = failedNetworkLoadUntil[key], failure.transient else { break }
+            let delay = max(0, failure.retryDate.timeIntervalSinceNow)
+            do { try await Task.sleep(for: .seconds(delay)) }
+            catch { return nil }
+        }
+        return fallback
+    }
+
     /// Downloads the ORIGINAL (full-resolution) cover art from the server and persists it as
     /// a separate original file, caching a 1200 px decode in RAM for immediate hero surfaces.
     /// Used by the library-wide album-cover preloader so artwork is stored at its highest
@@ -367,7 +403,7 @@ final class ArtworkImageCache {
                 originalWasInstalled(coverArtId)
                 return true
             } catch {
-                if !Self.isCancellation(error) { rememberNetworkFailure(forKey: key) }
+                if !Self.isCancellation(error) { rememberNetworkFailure(forKey: key, generation: generation) }
                 return false
             }
         }
@@ -382,16 +418,16 @@ final class ArtworkImageCache {
         do {
             let (bytes, response) = try await session.data(for: try await artworkRequest(url: serverURL, generation: generation))
             if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
-                rememberNetworkFailure(forKey: key)
+                rememberNetworkFailure(forKey: key, generation: generation, status: http.statusCode)
                 return false
             }
             guard Self.looksLikeImageData(bytes) else {
-                rememberNetworkFailure(forKey: key)
+                rememberNetworkFailure(forKey: key, generation: generation)
                 return false
             }
             data = bytes
         } catch {
-            if !Self.isCancellation(error) { rememberNetworkFailure(forKey: key) }
+            if !Self.isCancellation(error) { rememberNetworkFailure(forKey: key, generation: generation) }
             return false
         }
 
@@ -416,7 +452,11 @@ final class ArtworkImageCache {
             ArtworkImageCache.thumbnailImage(from: data, maxDimension: ArtworkTier.hero.decodePixels)
         }.value
         await decodeGate.release()
-        guard let image, isCurrent(generation), !Task.isCancelled else { return false }
+        guard isCurrent(generation), !Task.isCancelled else { return false }
+        guard let image else {
+            rememberNetworkFailure(forKey: key, generation: generation)
+            return false
+        }
         // Validate with ImageIO, then save the response verbatim. Never promote a resized @hero file.
         await persistDisk(data, id: tieredDiskId, generation: generation)
         let originalURL = await diskURL(tieredDiskId, generation: generation)
@@ -689,11 +729,6 @@ final class ArtworkImageCache {
     }
 
     private func serverFetch(coverArtId: String, key: String, tier: ArtworkTier, generation: Int) async -> PlatformImage? {
-        let originalKey = "original:\(cacheKey(id: coverArtId, tier: .hero))"
-        if originalFlights[originalKey] != nil {
-            _ = await downloadOriginalAndCacheAsHero(coverArtId: coverArtId, cacheHero: false)
-            if let original = await loadPlainDiskCover(coverArtId: coverArtId, tier: tier) { return original }
-        }
         guard isCurrent(generation), !Task.isCancelled, allowsNetworkDownloads else { return nil }
         let maxDim = tier.decodePixels
         guard let serverURL = await libraryService.coverArtURL(id: coverArtId, size: maxDim) else { return nil }
@@ -705,14 +740,14 @@ final class ArtworkImageCache {
                 Logger.artworkCache.warning(
                     "[NET-COVER] failed id=\(coverArtId, privacy: .public) status=\(http.statusCode) duration=\(Int(Date().timeIntervalSince(t0) * 1000))ms"
                 )
-                rememberNetworkFailure(forKey: key)
+                rememberNetworkFailure(forKey: key, generation: generation, status: http.statusCode)
                 return nil
             }
             guard Self.looksLikeImageData(bytes) else {
                 Logger.artworkCache.warning(
                     "[NET-COVER] failed (not image) id=\(coverArtId, privacy: .public) bytes=\(bytes.count) duration=\(Int(Date().timeIntervalSince(t0) * 1000))ms"
                 )
-                rememberNetworkFailure(forKey: key)
+                rememberNetworkFailure(forKey: key, generation: generation)
                 return nil
             }
             data = bytes
@@ -722,7 +757,7 @@ final class ArtworkImageCache {
                 Logger.artworkCache.debug("[NET-COVER] cancelled id=\(coverArtId, privacy: .public) duration=\(ms)ms")
             } else {
                 Logger.artworkCache.warning("[NET-COVER] failed id=\(coverArtId, privacy: .public) duration=\(ms)ms error=\(error.localizedDescription, privacy: .public)")
-                rememberNetworkFailure(forKey: key)
+                rememberNetworkFailure(forKey: key, generation: generation)
             }
             return nil
         }
@@ -734,6 +769,7 @@ final class ArtworkImageCache {
         }.value
         await decodeGate.release()
         guard let image else {
+            rememberNetworkFailure(forKey: key, generation: generation)
             Logger.artworkCache.warning("[NET-COVER] failed (decode) id=\(coverArtId, privacy: .public) duration=\(Int(Date().timeIntervalSince(t0) * 1000))ms bytes=\(data.count)")
             return nil
         }
@@ -861,8 +897,9 @@ final class ArtworkImageCache {
     }
 
     private func shouldSkipNetworkFetch(forKey key: String) -> Bool {
-        guard let retryDate = failedNetworkLoadUntil[key] else { return false }
-        if retryDate > Date() {
+        guard let failure = failedNetworkLoadUntil[key] else { return false }
+        if failure.retryDate > Date(),
+           !failure.transient || failure.networkRevision == (serverState?.artworkNetworkRevision ?? 0) {
             Logger.artworkCache.debug("[NET-COVER] skipped recent failure key=\(key, privacy: .public)")
             return true
         }
@@ -870,8 +907,13 @@ final class ArtworkImageCache {
         return false
     }
 
-    private func rememberNetworkFailure(forKey key: String) {
-        failedNetworkLoadUntil.insert(Date().addingTimeInterval(Self.networkFailureCooldown), forKey: key, cost: 1)
+    private func rememberNetworkFailure(forKey key: String, generation: Int, status: Int? = nil) {
+        guard isCurrent(generation), !Task.isCancelled else { return }
+        let transient = status.map { $0 == 408 || $0 == 429 || (500..<600).contains($0) } ?? true
+        let delay: TimeInterval = transient ? (status == 429 ? 5 : 2) : Self.networkFailureCooldown
+        let failure = NetworkFailure(retryDate: Date().addingTimeInterval(delay), transient: transient,
+                                     networkRevision: serverState?.artworkNetworkRevision ?? 0)
+        failedNetworkLoadUntil.insert(failure, forKey: key, cost: 1)
     }
 
     private func touch(_ key: String) {

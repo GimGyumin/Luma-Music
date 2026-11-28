@@ -13,7 +13,7 @@ struct AboutSettingsView: View {
     }
 
     private var buildIdentifier: String {
-        Bundle.main.infoDictionary?["LumaBuildIdentifier"] as? String ?? "26A1001e"
+        Bundle.main.infoDictionary?["LumaBuildIdentifier"] as? String ?? "261116"
     }
 
     private var copyright: String {
@@ -59,6 +59,7 @@ struct AboutSettingsView: View {
                         SettingsValueRow("Apple Music Like Lyrics", value: "AGPL-3.0 — AMLL contributors")
                     }
                     SettingsValueRow("SwiftSonic", value: "MIT License — MathieuDubart")
+                    SettingsValueRow("CMU Pronouncing Dictionary", value: "BSD-2-Clause — Carnegie Mellon University")
                     HStack(alignment: .firstTextBaseline, spacing: LumaSpacing.s) {
                         Text("AudioStreaming")
                         Spacer(minLength: LumaSpacing.s)

@@ -28,9 +28,10 @@ struct CoverArtCard: View {
     var cornerRadius: CGFloat = LumaCornerRadius.standard
     var placeholderSystemImage: String = "music.note"
     var initialImage: PlatformImage? = nil
+    var placeholderTint: Color? = nil
 
     var body: some View {
-        CoverArtView(id: id, size: Int(size * 2), tier: tier, cornerRadius: cornerRadius, placeholderSystemImage: placeholderSystemImage, initialImage: initialImage)  // 2× for @2x sharpness
+        CoverArtView(id: id, size: Int(size * 2), tier: tier, cornerRadius: cornerRadius, placeholderSystemImage: placeholderSystemImage, initialImage: initialImage, placeholderTint: placeholderTint)  // 2× for @2x sharpness
             .frame(width: size, height: size)
             .lumaCoverStyle(cornerRadius: cornerRadius)
     }

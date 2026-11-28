@@ -149,22 +149,10 @@ struct SongContextPreview: View {
 
     var body: some View {
         HStack(spacing: LumaSpacing.m) {
-            Group {
-                if let coverImage {
-                    Image(platformImage: coverImage)
-                        .resizable()
-                        .aspectRatio(1, contentMode: .fit)
-                } else {
-                    Rectangle()
-                        .fill(.secondary.opacity(0.15))
-                        .aspectRatio(1, contentMode: .fit)
-                        .overlay {
-                            Image(systemName: "music.note")
-                                .font(.system(size: 60))
-                                .foregroundStyle(.secondary)
-                        }
-                }
-            }
+            CoverArtView(
+                id: song.effectiveCoverArtId, size: 224, tier: .thumb,
+                initialImage: coverImage, contentMode: .fit
+            )
             .frame(width: 112, height: 112)
             .clipShape(RoundedRectangle(cornerRadius: 10))
 

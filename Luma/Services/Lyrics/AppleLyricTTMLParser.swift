@@ -187,11 +187,11 @@ nonisolated private final class TTMLDocumentDecoder {
                 lines.append(LyricLine(begin: begin, end: begin == nil ? nil : lineRange.end ?? words.map(\.end).max(), key: key, agentId: lineAgent, words: words, documentOrder: order, sourceLineIndex: nil, preservesSourceSpacing: true, preservesSourceTiming: true))
                 order += 1
                 if let key {
-                    for inline in child.descendants("span") where inline.role == "x-translation" || inline.role == "x-roman" {
+                    readInlinePronunciation(child, key: key, inherited: parentRange, role: .main, agent: lineAgent, language: nil)
+                    for inline in child.descendants("span") where inline.role == "x-translation" {
                         let language = inline.xml("lang") ?? "und"
                         let values = tokens(inline, inherited: lineRange, role: .main, agent: lineAgent, preserve: false, localization: true)
-                        if inline.role == "x-roman" { transliterations[language, default: [:]][key] = LyricTransliteration(words: values, automaticallyCreated: false) }
-                        else { translations[language, default: [:]][key] = translation(values) }
+                        translations[language, default: [:]][key] = translation(values)
                     }
                 }
             }
@@ -199,6 +199,27 @@ nonisolated private final class TTMLDocumentDecoder {
         flush()
         if sections.count == initialSectionCount, node.name == "div", part != nil {
             sections.append(LyricSection(begin: bounds.begin, end: bounds.end, songPart: part, lines: []))
+        }
+    }
+
+    private func readInlinePronunciation(_ node: TTMLNode, key: String, inherited: Range,
+                                         role: LyricRole, agent: String?, language: String?) {
+        let role = role.isBackground || node.role == "x-bg" ? .background : role
+        let agent = node.metadata("agent") ?? agent
+        let language = node.xml("lang") ?? language
+        if node.role == "x-roman" {
+            let words = tokens(node, inherited: inherited, role: role, agent: agent, preserve: false, localization: true)
+            guard !words.isEmpty else { return }
+            let keyLanguage = language ?? "und"
+            let previous = transliterations[keyLanguage]?[key]?.words ?? []
+            transliterations[keyLanguage, default: [:]][key] = LyricTransliteration(
+                words: previous + words, automaticallyCreated: false
+            )
+        } else if node.role != "x-translation" {
+            let bounds = range(node, inherited: inherited)
+            for child in node.children {
+                readInlinePronunciation(child, key: key, inherited: bounds, role: role, agent: agent, language: language)
+            }
         }
     }
 

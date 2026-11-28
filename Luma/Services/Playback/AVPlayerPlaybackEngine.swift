@@ -636,7 +636,8 @@ nonisolated final class AVPlayerPlaybackEngine: PlaybackEngine, @unchecked Senda
     private static func finite(_ seconds: Double?) -> Double { seconds?.isFinite == true ? max(0, seconds!) : 0 }
     private func makeMeteredItem(url: URL, headers: [String: String]) -> AVPlayerItem {
         let item = Self.makeItem(url: url, headers: headers)
-        if #available(iOS 27, macOS 27, *), allowsAudioAnalysis, let meter = NativePlaybackMeterTap() {
+        if #available(iOS 27, macOS 27, *), allowsAudioAnalysis,
+           let meter = NativePlaybackMeterTap(trackMix: true) {
             meters[ObjectIdentifier(item)] = meter
             Task { @MainActor [weak self, weak item] in
                 guard let self, let item else { return }
@@ -694,7 +695,7 @@ nonisolated final class AVPlayerPlaybackEngine: PlaybackEngine, @unchecked Senda
                 await MainActor.run {
                     self.lock.withLock {
                         guard self.replacementIsCurrentLocked(id), self.allowsAudioAnalysis,
-                              let meter = NativePlaybackMeterTap() else { return }
+                              let meter = NativePlaybackMeterTap(trackMix: true) else { return }
                         let trackID: CMPersistentTrackID
                         if #available(iOS 27, macOS 27, *) {
                             trackID = AVAudioMixInputParametersTrackID.mixID.rawValue

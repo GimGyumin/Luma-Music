@@ -17,6 +17,7 @@ struct LumaSplashView: View {
     let summary: String
     let icon: String
     let accent: Color
+    var appIconName: String? = nil
     let features: [Feature]
     let footnote: String?
     let buttonTitle: String
@@ -26,38 +27,48 @@ struct LumaSplashView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
-                Image(systemName: icon)
-                    .font(.system(size: 34, weight: .medium))
-                    .foregroundStyle(accent)
-                    .frame(maxWidth: .infinity)
-                    .accessibilityHidden(true)
-                    .padding(.top, 32)
+                Group {
+                    if let appIconName {
+                        Image(appIconName)
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: 104, height: 104)
+                            .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+                    } else {
+                        Image(systemName: icon)
+                            .font(.system(size: 46, weight: .medium))
+                            .foregroundStyle(accent)
+                    }
+                }
+                .frame(maxWidth: .infinity)
+                .accessibilityHidden(true)
+                .padding(.top, 50)
 
                 Text(title)
-                    .font(.title2.bold())
+                    .font(.largeTitle.bold())
                     .accessibilityAddTraits(.isHeader)
-                    .padding(.top, 30)
+                    .padding(.top, 34)
 
                 Text(summary)
-                    .font(.subheadline)
+                    .font(.body)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.top, 7)
 
-                VStack(alignment: .leading, spacing: 22) {
+                VStack(alignment: .leading, spacing: 26) {
                     ForEach(features) { feature in
-                        HStack(alignment: .top, spacing: 15) {
+                        HStack(alignment: .top, spacing: 18) {
                             Image(systemName: feature.icon)
-                                .font(.system(size: 19, weight: .medium))
+                                .font(.system(size: 27, weight: .regular))
                                 .foregroundStyle(accent)
-                                .frame(width: 28)
+                                .frame(width: 34)
                                 .accessibilityHidden(true)
 
                             VStack(alignment: .leading, spacing: 3) {
                                 Text(feature.title)
-                                    .font(.subheadline.weight(.semibold))
+                                    .font(.body.weight(.semibold))
                                 Text(feature.detail)
-                                    .font(.caption)
+                                    .font(.subheadline)
                                     .foregroundStyle(.secondary)
                                     .fixedSize(horizontal: false, vertical: true)
                             }
@@ -70,7 +81,7 @@ struct LumaSplashView: View {
 
                 if let footnote {
                     Text(footnote)
-                        .font(.caption2)
+                        .font(.footnote)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                         .padding(.top, 36)
@@ -81,23 +92,23 @@ struct LumaSplashView: View {
             .frame(maxWidth: 500)
             .frame(maxWidth: .infinity)
         }
-        .background(PlatformColors.systemBackground)
+        .background(PlatformColors.secondarySystemBackground)
         .safeAreaInset(edge: .bottom, spacing: 0) {
             Button(action: onContinue) {
                 Text(buttonTitle)
                     .font(.body.weight(.semibold))
                     .foregroundStyle(.white)
-                    .frame(maxWidth: .infinity, minHeight: 52)
+                    .frame(maxWidth: .infinity, minHeight: 54)
                     .background(accent, in: Capsule())
             }
             .buttonStyle(.plain)
             .accessibilityIdentifier(buttonIdentifier)
             .padding(.horizontal, 28)
             .padding(.top, 12)
-            .padding(.bottom, 16)
+            .padding(.bottom, 24)
             .frame(maxWidth: 500)
             .frame(maxWidth: .infinity)
-            .background(PlatformColors.systemBackground)
+            .background(PlatformColors.secondarySystemBackground)
         }
     }
 }

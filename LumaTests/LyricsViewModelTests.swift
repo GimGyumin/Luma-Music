@@ -476,6 +476,27 @@ struct LyricsViewModelSeekTests {
 @MainActor
 struct LyricsViewModelScrollTests {
 
+    @Test func enhancedServerPronunciationKeepsSeparateCueTimes() async throws {
+        let primary = StructuredLyrics(lang: "en", synced: true,
+            line: [Line(value: "We sing", start: 1000)], kind: .main,
+            cueLine: [CueLine(index: 0, start: 1000, end: 3000, value: "We sing", cue: [
+                LyricCue(start: 1000, end: 2000, value: "We", byteStart: 0, byteEnd: 2),
+                LyricCue(start: 2000, end: 3000, value: "sing", byteStart: 3, byteEnd: 7)
+            ])])
+        let reading = StructuredLyrics(lang: "en", synced: true,
+            line: [Line(value: "위 싱", start: 1030)], kind: .pronunciation,
+            cueLine: [CueLine(index: 0, start: 1030, end: 3000, value: "위 싱", cue: [
+                LyricCue(start: 1030, end: 1970, value: "위", byteStart: 0, byteEnd: 3),
+                LyricCue(start: 2040, end: 3000, value: "싱", byteStart: 4, byteEnd: 7)
+            ])])
+        let (vm, _) = try makeViewModel(lyrics: LyricsList(structuredLyrics: [primary, reading]))
+        await vm.load()
+        let pairs = try #require(vm.pronunciationPairs.first)
+        #expect(pairs.map(\.original.text) == ["We", "sing"])
+        #expect(pairs.flatMap(\.readings).map(\.startMs) == [1030, 2040])
+        #expect(vm.translatedLyrics.first?.pronunciationText == "위 싱")
+    }
+
     @Test func providedReadingColumnsPreserveWordTimingAndRenderAllLayers() async throws {
         let structured = StructuredLyrics(lang: "en", synced: true,
             line: [Line(value: "We carry this melody", start: 0), Line(value: "Home again", start: 5000)])
@@ -493,7 +514,7 @@ struct LyricsViewModelScrollTests {
         vm.update(elapsedMs: 1500)
         #expect(vm.pronunciationPairs[0].count == 4)
         #expect(vm.generatedPronunciationIndices.isEmpty)
-        #expect(vm.pronunciationPairs[0][1].reading.startMs == 1000)
+        #expect(vm.pronunciationPairs[0][1].readings.first?.startMs == 1000)
         let line = try #require(vm.translatedLyrics.first)
         #expect(line.translatedText == "우리는 이 노래를 간직해")
         for browsing in [false, true] {

@@ -30,11 +30,33 @@ struct BottomToolbar: View {
     var showsRouteName: Bool = true
     var phoneLandscape: Bool = false
     var phonePortrait: Bool = false
+    /// Phone full player: share the artwork-aware colour system with the
+    /// progress and volume sliders.
+    var phonePortraitPalette: ImmersiveSliderPalette? = nil
     /// Landscape matches Music's generic AirPlay glyph instead of the current
     /// route's device glyph. The button still opens the real route picker.
     var prefersAirPlayGlyph: Bool = false
 
-    private var glyphColor: Color { secondaryContentColor }
+    private var glyphColor: Color {
+        if phonePortrait, let palette = phonePortraitPalette {
+            return palette.icon.opacity(0.85)
+        }
+        return secondaryContentColor
+    }
+
+    private var activeGlyphColor: Color {
+        if phonePortrait, let palette = phonePortraitPalette {
+            return palette.activeControlIcon
+        }
+        return spreadToEdges ? Color.white.opacity(0.92) : Color.black.opacity(0.72)
+    }
+
+    private var activeFillColor: Color {
+        if phonePortrait, let palette = phonePortraitPalette {
+            return palette.activeControlFill
+        }
+        return glyphColor
+    }
 
     var body: some View {
         HStack(spacing: spreadToEdges ? LumaSpacing.m : 0) {
@@ -50,7 +72,7 @@ struct BottomToolbar: View {
                 Spacer(minLength: 0)
                 queueButton
             } else if spreadToEdges {
-                AudioOutputRouteButton(tintColor: glyphColor, showsRouteName: showsRouteName)
+                AudioOutputRouteButton(tintColor: glyphColor, showsRouteName: showsRouteName, portraitStyle: phonePortrait)
                     .accessibilityLabel(String(localized: "Audio output", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale))
                 Spacer(minLength: 0)
                 lyricsButton
@@ -63,7 +85,7 @@ struct BottomToolbar: View {
                     translateButton
                         .frame(maxWidth: .infinity)
                 }
-                AudioOutputRouteButton(tintColor: glyphColor, showsRouteName: showsRouteName)
+                AudioOutputRouteButton(tintColor: glyphColor, showsRouteName: showsRouteName, portraitStyle: phonePortrait)
                     .accessibilityLabel(String(localized: "Audio output", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale))
                     .frame(maxWidth: .infinity)
                 queueButton
@@ -142,26 +164,31 @@ struct BottomToolbar: View {
         Image(systemName: systemName)
             .font(phonePortrait ? .system(size: ImmersivePlayerMetrics.footerGlyph) : .title3)
             .foregroundStyle(isActive
-                ? (phonePortrait ? Color.white : Color.black.opacity(0.72))
-                : glyphColor)
+                ? activeGlyphColor
+                : (spreadToEdges ? Color.white.opacity(0.78) : glyphColor))
             .frame(width: phoneLandscape ? 44 : ImmersivePlayerMetrics.footerHeight,
                    height: phoneLandscape ? 44 : ImmersivePlayerMetrics.footerHeight)
             .background {
                 if isActive {
                     if phonePortrait {
-                        // Frosted selection: the artwork colour behind the
-                        // toolbar shows through instead of a flat white disc.
+                        // Artwork-tinted selection keeps lyrics and queue in the
+                        // same palette as the progress and volume controls.
                         Circle()
-                            .fill(.ultraThinMaterial)
-                            .overlay(Circle().fill(Color.white.opacity(0.16)))
+                            .fill(activeFillColor)
                             .frame(width: ImmersivePlayerMetrics.footerSelectionDiameter,
                                    height: ImmersivePlayerMetrics.footerSelectionDiameter)
                     } else {
                         Circle()
-                            .fill(Color.white.opacity(phoneLandscape ? 0.92 : 0.68))
+                            .fill(Color.white.opacity(spreadToEdges ? 0.16 : (phoneLandscape ? 0.92 : 0.68)))
                             .frame(width: phonePortrait ? ImmersivePlayerMetrics.footerSelectionDiameter : (phoneLandscape ? 38 : 44),
                                    height: phonePortrait ? ImmersivePlayerMetrics.footerSelectionDiameter : (phoneLandscape ? 38 : 44))
                     }
+                } else if spreadToEdges {
+                    // Music.app keeps both lyric/queue controls in quiet glass
+                    // circles instead of showing only the selected surface.
+                    Circle()
+                        .fill(Color.white.opacity(0.10))
+                        .frame(width: 44, height: 44)
                 }
             }
             .contentShape(Circle())
@@ -175,6 +202,7 @@ private struct AudioOutputRouteButton: View {
     var showsRouteName: Bool = true
     var showsHeadphones: Bool = false
     var prefersAirPlayGlyph: Bool = false
+    var portraitStyle = false
     @State private var routeName = ""
     @State private var routeSymbol = "airplayaudio"
 
@@ -201,12 +229,12 @@ private struct AudioOutputRouteButton: View {
         .overlay(alignment: .bottom) {
             if showsRouteName, !routeName.isEmpty {
                 Text(verbatim: visibleRouteName)
-                    .font(.system(size: 12, weight: .regular))
+                    .font(.system(size: portraitStyle ? 14 : 12, weight: portraitStyle ? .semibold : .regular))
                     .foregroundStyle(tintColor)
                     .lineLimit(1)
                     .minimumScaleFactor(0.72)
                     .frame(width: 116)
-                    .offset(y: 10)
+                    .offset(y: portraitStyle ? 16 : 10)
                     .allowsHitTesting(false)
                     .accessibilityHidden(true)
             }
@@ -342,6 +370,7 @@ private struct AudioOutputRouteButton: View {
     var showsRouteName: Bool = true
     var showsHeadphones: Bool = false
     var prefersAirPlayGlyph: Bool = false
+    var portraitStyle = false
 
     var body: some View {
         AirPlayButton()
@@ -356,6 +385,7 @@ private struct AudioOutputRouteButton: View {
     var showsRouteName: Bool = true
     var showsHeadphones: Bool = false
     var prefersAirPlayGlyph: Bool = false
+    var portraitStyle = false
 
     var body: some View {
         Image(systemName: "airplayaudio")
@@ -375,23 +405,36 @@ struct VolumeSection: View {
     /// Artwork-derived tint for the unfilled track. Nil keeps the neutral
     /// white-opacity track used by the other players.
     var backgroundTint: Color? = nil
+    /// Phone portrait: resolved artwork-aware slider colours.
+    var sliderPalette: ImmersiveSliderPalette? = nil
     @Environment(\.appContainer) private var container
     #if os(macOS)
     @AppStorage("luma.lastVolume") private var localVolume: Double = 0.7
     #endif
 
+    private var sliderIconColor: Color {
+        sliderPalette?.icon ?? secondaryContentColor
+    }
+
+    private var sliderFillColor: Color {
+        sliderPalette?.volumeFill ?? contentColor
+    }
+
     var body: some View {
         HStack(spacing: LumaSpacing.s) {
             Image(systemName: "speaker.fill")
                 .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(secondaryContentColor.opacity(0.85))
+                .foregroundStyle(sliderIconColor.opacity(0.85))
                 .frame(width: 18)
                 .accessibilityHidden(true)
 
             #if os(iOS)
             SystemVolumeView(
-                contentColor: contentColor,
+                contentColor: sliderFillColor,
                 trackTint: backgroundTint,
+                trackColor: sliderPalette?.volumeTrack,
+                fillColor: sliderPalette?.volumeFill,
+                pressedFillColor: sliderPalette?.pressedFill,
                 sliderHeight: phoneLandscape ? 28 : 36,
                 sliderTrackHeight: phoneLandscape ? 4 : 6,
                 sliderActiveTrackHeight: phoneLandscape ? 10 : 14
@@ -413,7 +456,7 @@ struct VolumeSection: View {
 
             Image(systemName: "speaker.wave.3.fill")
                 .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(secondaryContentColor.opacity(0.85))
+                .foregroundStyle(sliderIconColor.opacity(0.85))
                 .frame(width: 22)
                 .accessibilityHidden(true)
         }

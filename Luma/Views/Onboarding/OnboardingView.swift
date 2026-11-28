@@ -61,7 +61,7 @@ struct OnboardingView: View {
                                 step = .cache
                             } else {
                                 pendingWelcome = true
-                                step = .about
+                                step = .welcome
                             }
                         },
                         onBack: { step = .language }
@@ -111,7 +111,7 @@ struct OnboardingView: View {
             // Developer replay sets forceOnboardingReplay so this path must not fire.
             if !isReplay, !forceOnboardingReplay, container?.serverState.activeServer != nil {
                 if pendingWelcome {
-                    step = .about
+                    step = .welcome
                 } else {
                     onboardingComplete = true
                 }

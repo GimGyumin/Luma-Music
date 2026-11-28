@@ -30,7 +30,12 @@ final class ServerState {
     var servers: [ServerSnapshot] = []
     @ObservationIgnored private(set) var accountRevision: UInt64 = 0
     var activeServer: ServerSnapshot? {
-        didSet { if oldValue != activeServer { _ = activeServer?.localReplayID; accountRevision &+= 1 } }
+        didSet {
+            guard oldValue != activeServer else { return }
+            _ = activeServer?.localReplayID
+            accountRevision &+= 1
+            measuredBytesPerSecond = nil
+        }
     }
     var isConnected: Bool = false
     /// False when the **active server** cannot be reached: a ping timed out, the host refused the
@@ -41,20 +46,36 @@ final class ServerState {
     /// "online" to `NWPathMonitor`, and a server that is restarting answers nothing while the device
     /// is perfectly connected. Server-backed tabs read this one; Library, Downloads and Search keep
     /// working from the local index and the download store regardless of its value.
-    var isServerReachable: Bool = true
+    var isServerReachable: Bool = true {
+        didSet { if oldValue != isServerReachable { artworkNetworkRevision &+= 1 } }
+    }
+    private(set) var artworkNetworkRevision: UInt64 = 0
     /// Updated by NetworkMonitor. False when NWPathMonitor reports no connectivity.
-    var isOnline: Bool = true
+    var isOnline: Bool = true {
+        didSet { if oldValue != isOnline { artworkNetworkRevision &+= 1 } }
+    }
     /// Updated by NetworkMonitor. True when the connection is metered (cellular, hotspot).
     /// Default false — optimistic until the first NWPath update corrects it on launch (~100ms).
     var isExpensive: Bool = false
     /// Transport type, separate from cost: a Wi-Fi hotspot may also be expensive.
-    var isCellularConnection: Bool = false
+    var isCellularConnection: Bool = false {
+        didSet { if oldValue != isCellularConnection { artworkNetworkRevision &+= 1 } }
+    }
     /// Updated by NetworkMonitor. True when the path is constrained — iOS Low Data Mode, or a
     /// link the user marked as metered even though it is Wi-Fi. Unlike `isExpensive` this also
     /// covers throttled Wi-Fi, which is why background transfers key off it.
     var isNetworkConstrained: Bool = false
     /// One coherent path snapshot, including changes that leave `isOnline` true.
-    var playbackNetworkPath: PlaybackNetworkPath?
+    var playbackNetworkPath: PlaybackNetworkPath? {
+        didSet {
+            guard oldValue != playbackNetworkPath else { return }
+            playbackNetworkRevision &+= 1
+            measuredBytesPerSecond = nil
+        }
+    }
+    @ObservationIgnored private(set) var playbackNetworkRevision: UInt64 = 0
+
+    var usesCellularQuality: Bool { isCellularConnection || isExpensive || isNetworkConstrained }
     /// Last measured throughput (bytes/s), published by `MediaResolver` after `NetworkSpeedProbe`
     /// samples the link. Lets a *throttled* Wi-Fi link — which iOS reports as unlimited — stop
     /// background transfers and adapt Automatic quality, the way cellular already does.

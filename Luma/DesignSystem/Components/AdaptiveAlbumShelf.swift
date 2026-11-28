@@ -18,12 +18,34 @@ struct AdaptiveAlbumShelf: View {
 
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @ScaledMetric(relativeTo: .body) private var prominentTextHeight: CGFloat = 56
+    @State private var availableWidth: CGFloat = 0
+
+    private var usesIPadShelfLayout: Bool {
+        LumaDashboardLayout.usesIPadLayout(for: horizontalSizeClass)
+    }
 
     private var itemSize: CGFloat {
         #if os(macOS)
-        160
+        // Music's macOS shelves step from 160 at the narrow window to 184 at
+        // wide window widths; the cards do not stretch to fill the row.
+        switch availableWidth {
+        case ..<850:  return 160
+        case ..<1100: return 164
+        default:      return 184
+        }
         #else
-        horizontalSizeClass == .regular ? 180 : (prominent ? 160 : 150)
+        if usesIPadShelfLayout {
+            return LumaDashboardLayout.regularItemSize
+        }
+        return horizontalSizeClass == .regular ? 180 : (prominent ? 160 : 150)
+        #endif
+    }
+
+    private var cardSpacing: CGFloat {
+        #if os(macOS)
+        20
+        #else
+        usesIPadShelfLayout ? LumaDashboardLayout.regularItemSpacing : LumaSpacing.m
         #endif
     }
 
@@ -46,7 +68,7 @@ struct AdaptiveAlbumShelf: View {
             }
 
             ScrollView(.horizontal, showsIndicators: false) {
-                LazyHStack(spacing: LumaSpacing.m) {
+                LazyHStack(spacing: cardSpacing) {
                     ForEach(albums) { album in
                         AlbumNavigationLink(album: album, namespace: albumNamespace, destination: destination(album)) { sourceID, namespace in
                             albumCard(album, sourceID: sourceID, namespace: namespace)
@@ -62,6 +84,7 @@ struct AdaptiveAlbumShelf: View {
             // Keep the row from scrolling under the iPad sidebarAdaptable chrome.
             .clipped()
         }
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { availableWidth = $0 }
     }
 
     private func albumCard(_ album: AlbumID3, sourceID: String, namespace: Namespace.ID) -> some View {
@@ -72,16 +95,28 @@ struct AdaptiveAlbumShelf: View {
                 .lumaMatchedTransitionSource(id: sourceID, in: namespace)
             Text(album.name)
                 .foregroundStyle(.primary)
-                .font(prominent ? .body.weight(.semibold) : .lumaCellTitle)
+                .font(titleFont)
                 .lineLimit(1)
             if showArtist, let artist = album.artist {
                 Text(artist)
-                    .font(prominent ? .subheadline : .lumaCaption)
+                    .font(artistFont)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
             }
         }
         .frame(width: itemSize, alignment: .leading)
+    }
+
+    private var titleFont: Font {
+        usesIPadShelfLayout
+            ? .subheadline.weight(.semibold)
+            : (prominent ? .body.weight(.semibold) : .lumaCellTitle)
+    }
+
+    private var artistFont: Font {
+        usesIPadShelfLayout
+            ? .subheadline
+            : (prominent ? .subheadline : .lumaCaption)
     }
 }
 

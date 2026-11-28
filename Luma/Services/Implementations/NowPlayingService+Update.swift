@@ -136,7 +136,7 @@ extension NowPlayingService {
             // artwork already loaded for the current track is preserved.
             await commitNowPlaying(publication, revision: revision) {
                 guard artworkRevision.matches(generation) else { return }
-                var info = NowPlayingMetadataSink.info ?? [:]
+                var info = NowPlayingMetadataSink.info ?? Self.makeNowPlayingInfo(for: snapshot)
                 info[MPMediaItemPropertyTitle] = snapshot.title
                 info[MPNowPlayingInfoPropertyElapsedPlaybackTime] = snapshot.position
                 info[MPMediaItemPropertyPlaybackDuration] = snapshot.duration
@@ -171,7 +171,14 @@ extension NowPlayingService {
                 )))
             }
             #endif
-            if !hasArtwork { await displayArtwork(currentSong ?? snapshot) }
+            let systemHasArtwork = await MainActor.run {
+                NowPlayingMetadataSink.info?[MPMediaItemPropertyArtwork] is MPMediaItemArtwork
+            }
+            guard revision == playbackGeneration else { return }
+            if !hasArtwork || !systemHasArtwork {
+                hasArtwork = false
+                await displayArtwork(currentSong ?? snapshot)
+            }
             return
         }
 

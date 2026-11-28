@@ -131,6 +131,16 @@ struct StorageManagementView: View {
                 Text(String(localized: "Manage cached data used by Luma on this device.", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale))
             }
 
+            Section {
+                SettingsNavigationRow("Downloaded Music") {
+                    DownloadedMusicManagementView()
+                }
+            } header: {
+                SettingsSectionHeader("Music")
+            } footer: {
+                SettingsSectionFooter("Review songs by artist or album and remove music you no longer need on this device.")
+            }
+
             if viewModel.reclaimableAudioBytes > 0 {
                 Section(String(localized: "Recommendations", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale)) {
                     Button {

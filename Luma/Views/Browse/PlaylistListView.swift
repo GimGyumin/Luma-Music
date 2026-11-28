@@ -16,8 +16,6 @@ struct PlaylistListView: View {
     @State private var showCreateSheet = false
     @State private var searchText = ""
     @State private var playlistFilter: PlaylistLibraryFilter
-    @State private var personalMixes: [PersonalMix] = []
-    @State private var recommendationsLoaded = false
     @AppStorage("luma.playlistSort") private var playlistSort: PlaylistSort = .title
     @Query private var downloadedPlaylists: [DownloadedPlaylist]
 
@@ -27,69 +25,74 @@ struct PlaylistListView: View {
     }
 
     var body: some View {
-        Group {
-            if let vm = viewModel {
-                content(vm)
-                    .transition(.opacity)
-            } else {
-                LoadingStateView()
+        VStack(spacing: 0) {
+            #if os(macOS)
+            macHeader
+            #endif
+
+            Group {
+                if let vm = viewModel {
+                    content(vm)
+                        .transition(.opacity)
+                } else {
+                    LoadingStateView()
+                }
             }
+            .lumaContentReveal(isReady: viewModel.map { !($0.isLoading && $0.playlists.isEmpty) } ?? false)
+            #if os(iOS)
+            .navigationTitle(String(localized: "Playlists", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale))
+            .navigationBarTitleDisplayModeLarge()
+            .lumaLibrarySearch(
+                text: $searchText,
+                prompt: String(localized: "Search Playlists", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale)
+            )
+            .toolbar {
+                ToolbarItem(placement: .primaryAction) {
+                    Button {
+                        showCreateSheet = true
+                    } label: {
+                        Image(systemName: "plus")
+                            .foregroundStyle(.primary)
+                    }
+                    .disabled(container?.serverState.isOnline != true)
+                }
+                ToolbarItem(placement: .primaryAction) {
+                    Menu {
+                        Picker("Sort By", selection: $playlistSort) {
+                            ForEach(PlaylistSort.allCases, id: \.self) { sort in
+                                Label(sort.label, systemImage: sort.systemImage).tag(sort)
+                            }
+                        }
+                    } label: {
+                        Image(systemName: "line.3.horizontal.decrease")
+                            .renderingMode(.original)
+                            .foregroundStyle(.primary)
+                    }
+                    .tint(.primary)
+                    .foregroundStyle(.primary)
+                    .accessibilityLabel("Sort playlists")
+                }
+                ToolbarItem(placement: .primaryAction) {
+                    Menu {
+                        Picker("Playlists", selection: $playlistFilter) {
+                            ForEach(PlaylistLibraryFilter.allCases, id: \.self) { filter in
+                                Label(filter.label, systemImage: filter.systemImage).tag(filter)
+                            }
+                        }
+                    } label: {
+                        Image(systemName: "ellipsis")
+                            .renderingMode(.original)
+                            .foregroundStyle(.primary)
+                    }
+                    .tint(.primary)
+                    .foregroundStyle(.primary)
+                    .accessibilityLabel("Filter playlists")
+                }
+            }
+            #endif
         }
-        .lumaContentReveal(isReady: viewModel.map { !($0.isLoading && $0.playlists.isEmpty) } ?? false)
         .lumaContentWidth()
-        .navigationTitle(String(localized: "Playlists", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale))
-        .navigationBarTitleDisplayModeLarge()
-        .lumaLibrarySearch(
-            text: $searchText,
-            prompt: String(localized: "Search Playlists", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale)
-        )
-        .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                Button {
-                    showCreateSheet = true
-                } label: {
-                    Image(systemName: "plus")
-                        .foregroundStyle(.primary)
-                }
-                .disabled(container?.serverState.isOnline != true)
-            }
-            ToolbarItem(placement: .primaryAction) {
-                Menu {
-                    Picker("Sort By", selection: $playlistSort) {
-                        ForEach(PlaylistSort.allCases, id: \.self) { sort in
-                            Label(sort.label, systemImage: sort.systemImage).tag(sort)
-                        }
-                    }
-                } label: {
-                    Image(systemName: "line.3.horizontal.decrease")
-                        .renderingMode(.original)
-                        .foregroundStyle(.primary)
-                }
-                .tint(.primary)
-                .foregroundStyle(.primary)
-                .accessibilityLabel("Sort playlists")
-            }
-            ToolbarItem(placement: .primaryAction) {
-                Menu {
-                    Picker("Playlists", selection: $playlistFilter) {
-                        ForEach(PlaylistLibraryFilter.allCases, id: \.self) { filter in
-                            Label(filter.label, systemImage: filter.systemImage).tag(filter)
-                        }
-                    }
-                } label: {
-                    Image(systemName: "ellipsis")
-                        .renderingMode(.original)
-                        .foregroundStyle(.primary)
-                }
-                .tint(.primary)
-                .foregroundStyle(.primary)
-                .accessibilityLabel("Filter playlists")
-            }
-        }
         .tint(.primary)
-        .task(id: container?.serverState.activeServer?.id) {
-            await loadRecommendations()
-        }
         .sheet(isPresented: $showCreateSheet) {
             CreatePlaylistSheet { _ in
                 Task { await viewModel?.load() }
@@ -108,10 +111,58 @@ struct PlaylistListView: View {
         }
     }
 
+    #if os(macOS)
+    private var macHeader: some View {
+        MacLibraryHeader(
+            title: String(localized: "Playlists", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale),
+            searchText: $searchText,
+            searchPrompt: String(localized: "Search Playlists", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale)
+        ) {
+            MacLibraryHeaderButton(
+                systemImage: "plus",
+                help: String(localized: "New Playlist", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale),
+                action: { showCreateSheet = true }
+            )
+            .disabled(container?.serverState.isOnline != true)
+
+            Menu {
+                Picker("Sort By", selection: $playlistSort) {
+                    ForEach(PlaylistSort.allCases, id: \.self) { sort in
+                        Label(sort.label, systemImage: sort.systemImage).tag(sort)
+                    }
+                }
+            } label: {
+                Image(systemName: "arrow.up.arrow.down")
+                    .font(.system(size: 13, weight: .medium))
+                    .frame(width: 28, height: 28)
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .accessibilityLabel(Text("Sort playlists"))
+
+            Menu {
+                Picker("Playlists", selection: $playlistFilter) {
+                    ForEach(PlaylistLibraryFilter.allCases, id: \.self) { filter in
+                        Label(filter.label, systemImage: filter.systemImage).tag(filter)
+                    }
+                }
+            } label: {
+                Image(systemName: "line.3.horizontal.decrease")
+                    .font(.system(size: 13, weight: .medium))
+                    .frame(width: 28, height: 28)
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .accessibilityLabel(Text("Filter playlists"))
+        }
+    }
+    #endif
+
     @ViewBuilder
     private func content(_ vm: PlaylistListViewModel) -> some View {
         VStack(spacing: 0) {
-            recommendationShelves
             if vm.isLoading && vm.playlists.isEmpty {
                 LoadingStateView()
             } else if container?.serverState.isOnline == false && vm.playlists.isEmpty {
@@ -138,20 +189,55 @@ struct PlaylistListView: View {
                     subtitle: "Create playlists on your server to see them here."
                 )
             } else {
+                #if os(macOS)
+                playlistGrid(vm)
+                    .transition(.opacity)
+                #else
                 playlistList(vm)
                     .transition(.opacity)
+                #endif
             }
         }
     }
 
-    /// Server playlists keep their own sort/filter behaviour. Luma mixes remain a
-    /// separate leading section in the Playlists tab.
-    private var recommendationShelves: some View {
-        PlaylistRecommendationsShelf(
-            mixes: personalMixes,
-            isLoading: !recommendationsLoaded
-        )
+    #if os(macOS)
+    @ViewBuilder
+    private func playlistGrid(_ vm: PlaylistListViewModel) -> some View {
+        let playlists = displayedPlaylists(vm.playlists)
+        GeometryReader { geo in
+            let columns = MacDesign.Grid.columns(for: geo.size.width)
+            ScrollView {
+                if playlists.isEmpty {
+                    ContentUnavailableView.search(text: searchText)
+                        .padding(.top, 40)
+                } else {
+                    LazyVGrid(columns: columns, spacing: MacDesign.Metrics.albumGridRowGap) {
+                        ForEach(playlists) { playlist in
+                            NavigationLink(value: HomeDestination.playlist(playlist)) {
+                                OnlinePlaylistRow(playlist: playlist, style: .grid)
+                                    .appEntityIdentifier(playlistEntityIdentifier(playlist))
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .padding(.horizontal, MacDesign.Metrics.libraryGridInset)
+                    .padding(.top, 8)
+                }
+            }
+            .refreshable { await vm.load() }
+            .miniPlayerBottomMargin()
+        }
     }
+
+    private static func gridColumnCount(for width: CGFloat) -> Int {
+        switch width {
+        case ..<560:  return 2
+        case ..<700:  return 3
+        case ..<1300: return 4
+        default:      return 5
+        }
+    }
+    #endif
 
     @ViewBuilder
     private func playlistList(_ vm: PlaylistListViewModel) -> some View {
@@ -176,35 +262,8 @@ struct PlaylistListView: View {
         .listStyle(.plain)
         .refreshable {
             await vm.load()
-            await loadRecommendations(forceRefresh: true)
         }
         .miniPlayerBottomMargin()
-    }
-
-    @MainActor
-    private func loadRecommendations(forceRefresh: Bool = false) async {
-        guard let container, container.serverState.isOnline,
-              let serverID = container.serverState.activeServer?.id.uuidString else {
-            recommendationsLoaded = true
-            return
-        }
-        // PersonalMixService owns caching and refresh; opening this tab must not rebuild
-        // the recommendation graph on every appearance.
-        let mixesBinding = $personalMixes
-        let loaded = await container.personalMixService.mixes(
-            serverId: serverID,
-            forceRefresh: forceRefresh,
-            priorityKinds: [.heavyRotation, .essentials, .newMusic, .getUp, .chill, .focus]
-        ) { partial in
-            // Show each completed mix in the recommendation strip instead of
-            // holding the whole section until the last builder finishes.
-            mixesBinding.wrappedValue = PlaylistRecommendationPolicy.ordered(partial)
-        }
-        guard !Task.isCancelled,
-              container.serverState.activeServer?.id.uuidString == serverID else { return }
-        recommendationsLoaded = true
-        personalMixes = PlaylistRecommendationPolicy.ordered(loaded)
-        PersonalMixWidgetSnapshot.publish(loaded)
     }
 
     private func displayedPlaylists(_ playlists: [Playlist]) -> [Playlist] {
@@ -287,9 +346,15 @@ private enum PlaylistSort: String, CaseIterable {
 
 // MARK: - Online playlist row
 
+private enum PlaylistRowStyle {
+    case row
+    case grid
+}
+
 private struct OnlinePlaylistRow: View {
     let playlist: Playlist
     var namespace: Namespace.ID? = nil
+    var style: PlaylistRowStyle = .row
     var onActionCompleted: (() -> Void)? = nil
 
     @Environment(\.appContainer) private var container
@@ -300,29 +365,23 @@ private struct OnlinePlaylistRow: View {
     /// downloaded copy on this device.
     @Query private var downloadedMatches: [DownloadedPlaylist]
 
-    init(playlist: Playlist, namespace: Namespace.ID? = nil, onActionCompleted: (() -> Void)? = nil) {
+    init(playlist: Playlist, namespace: Namespace.ID? = nil, style: PlaylistRowStyle = .row, onActionCompleted: (() -> Void)? = nil) {
         self.playlist = playlist
         self.namespace = namespace
+        self.style = style
         self.onActionCompleted = onActionCompleted
         let pid = playlist.id
         _downloadedMatches = Query(filter: #Predicate<DownloadedPlaylist> { $0.playlistId == pid })
     }
 
     var body: some View {
-        HStack(spacing: LumaSpacing.m) {
-            PlaylistCoverThumbnail(playlistId: playlist.id, serverId: nil, coverArtId: playlist.coverArt ?? playlist.id, title: playlist.name, size: 56)
-                .lumaMatchedTransitionSource(id: playlist.id, in: namespace)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(playlist.name)
-                    .font(.lumaCellTitle)
-                    .lineLimit(1)
-                Text(LumaCountLabel.tracks(playlist.songCount))
-                    .font(.lumaCaption)
-                    .foregroundStyle(.secondary)
+        Group {
+            if style == .grid {
+                gridBody
+            } else {
+                rowBody
             }
-            Spacer(minLength: 0)
         }
-        .padding(.vertical, LumaSpacing.xs)
         .task(id: playlist.id) {
             coverImage = await artworkImageCache.load(coverArtId: playlist.coverArt ?? playlist.id)
         }
@@ -356,6 +415,51 @@ private struct OnlinePlaylistRow: View {
                 }
             }
         }
+    }
+
+    private var rowBody: some View {
+        HStack(spacing: LumaSpacing.m) {
+            PlaylistCoverThumbnail(playlistId: playlist.id, serverId: nil, coverArtId: playlist.coverArt ?? playlist.id, title: playlist.name, size: 56)
+                .lumaMatchedTransitionSource(id: playlist.id, in: namespace)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(playlist.name)
+                    .font(.lumaCellTitle)
+                    .lineLimit(1)
+                Text(LumaCountLabel.tracks(playlist.songCount))
+                    .font(.lumaCaption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.vertical, LumaSpacing.xs)
+    }
+
+    private var gridBody: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            GeometryReader { geometry in
+                PlaylistCoverThumbnail(
+                    playlistId: playlist.id,
+                    serverId: nil,
+                    coverArtId: playlist.coverArt ?? playlist.id,
+                    title: playlist.name,
+                    size: max(1, geometry.size.width)
+                )
+                .lumaMatchedTransitionSource(id: playlist.id, in: namespace)
+            }
+            .aspectRatio(1, contentMode: .fit)
+
+            Text(playlist.name)
+                .font(.system(size: 13, weight: .regular))
+                .foregroundStyle(.primary)
+                .lineLimit(1)
+
+            Text(LumaCountLabel.tracks(playlist.songCount))
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(Rectangle())
     }
 }
 

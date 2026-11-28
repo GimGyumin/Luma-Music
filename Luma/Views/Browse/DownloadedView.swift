@@ -10,15 +10,26 @@ struct DownloadedView: View {
     @Environment(\.appContainer) private var container
 
     var body: some View {
-        Group {
-            if let serverId = container?.serverState.activeServer?.id {
-                DownloadedContent(serverId: serverId)
-            } else {
-                EmptyStateView(
-                    systemImage: "arrow.down.circle",
-                    title: "No Server",
-                    subtitle: "Connect to a server to manage downloads."
-                )
+        VStack(spacing: 0) {
+            #if os(macOS)
+            MacLibraryHeader(
+                title: String(localized: "Downloaded", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale),
+                searchText: .constant(""),
+                searchPrompt: "",
+                showsSearch: false
+            ) { EmptyView() }
+            #endif
+
+            Group {
+                if let serverId = container?.serverState.activeServer?.id {
+                    DownloadedContent(serverId: serverId)
+                } else {
+                    EmptyStateView(
+                        systemImage: "arrow.down.circle",
+                        title: "No Server",
+                        subtitle: "Connect to a server to manage downloads."
+                    )
+                }
             }
         }
         .lumaContentWidth()

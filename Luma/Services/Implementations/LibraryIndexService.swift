@@ -30,7 +30,12 @@ final class LibraryIndexService {
     }
 
     private var variants = AtmosVariantCatalogue()
-    private var detailVariants: [String: AtmosVariantCatalogue] = [:]
+    private struct DetailVariantCatalog {
+        let id = UUID()
+        let catalog: AtmosVariantCatalogue
+    }
+
+    private var detailVariants: [String: DetailVariantCatalog] = [:]
     private var detailServerID: UUID?
     @ObservationIgnored private let defaults: UserDefaults
     private var atmosSelectionRevision = 0
@@ -58,7 +63,7 @@ final class LibraryIndexService {
             if let cover = variants.coverArtID(forAlbumID: song.albumId) { return cover }
         }
         if detailServerID == serverID(), detailServerID != nil, let albumID = song.albumId,
-           let catalog = detailVariants[albumID] {
+           let catalog = detailVariants[albumID]?.catalog {
             if let cover = catalog.songsByID[song.id]?.explicitCoverArtId { return cover }
             if let cover = catalog.coverArtID(forAlbumID: albumID) { return cover }
         }
@@ -71,17 +76,17 @@ final class LibraryIndexService {
         let overrides = defaults.dictionary(forKey: Self.manualKey(serverId)) as? [String: String] ?? [:]
         if let id = overrides[song.id] {
             let candidate = (loadedServerID == serverId ? variants.songsByID[id] : nil)
-                ?? (detailServerID == serverId ? detailVariants.values.compactMap { $0.songsByID[id] }.first : nil)
+                ?? (detailServerID == serverId ? detailVariants.values.lazy.compactMap { $0.catalog.songsByID[id] }.first : nil)
             guard let candidate, AtmosVariantCatalogue.isAtmos(candidate) else { return nil }
             return candidate
         }
         if detailServerID == serverId, let album = song.albumId,
-           let candidate = detailVariants[album]?.preferred(for: song) { return candidate }
+           let candidate = detailVariants[album]?.catalog.preferred(for: song) { return candidate }
         return loadedServerID == serverId ? variants.preferred(for: song) : nil
     }
 
     func registerAlbumVersions(_ albums: [AlbumID3], serverId: UUID) async {
-        guard serverId == serverID() else { return }
+        guard serverId == serverID(), !albums.isEmpty else { return }
         let token = generation
         let revision = accountRevision()
         let worker = Task.detached(priority: .utility) {
@@ -90,16 +95,22 @@ final class LibraryIndexService {
         let catalog = await withTaskCancellationHandler { await worker.value } onCancel: { worker.cancel() }
         guard token == generation, revision == accountRevision(), serverId == serverID(), !Task.isCancelled else { return }
         if detailServerID != serverId { detailVariants = [:]; detailServerID = serverId }
-        for album in albums { detailVariants[album.id] = catalog }
+        let detail = DetailVariantCatalog(catalog: catalog)
+        for album in albums { detailVariants[album.id] = detail }
     }
 
     func atmosCandidates(for song: DisplayableSong, serverId: UUID) async -> [DisplayableSong] {
         guard serverId == serverID() else { return [] }
         let token = generation
         let revision = accountRevision()
-        let snapshots = (loadedServerID == serverId ? [variants] : [])
-            + (detailServerID == serverId ? Array(detailVariants.values) : [])
-        let worker = Task.detached(priority: .userInitiated) {
+        var snapshots = loadedServerID == serverId ? [variants] : []
+        if detailServerID == serverId {
+            var seen: Set<UUID> = []
+            for detail in detailVariants.values where seen.insert(detail.id).inserted {
+                snapshots.append(detail.catalog)
+            }
+        }
+        let worker = Task.detached(priority: .userInitiated) { [snapshots] in
             Dictionary(snapshots.flatMap { $0.manualCandidates(for: song) }.map { ($0.id, $0) }, uniquingKeysWith: { _, song in song })
                 .values.sorted { $0.title.localizedStandardCompare($1.title) == .orderedAscending }
         }
@@ -118,7 +129,7 @@ final class LibraryIndexService {
         guard serverId == serverID() else { return }
         if let id, !id.isEmpty {
             let candidate = (loadedServerID == serverId ? variants.songsByID[id] : nil)
-                ?? (detailServerID == serverId ? detailVariants.values.compactMap { $0.songsByID[id] }.first : nil)
+                ?? (detailServerID == serverId ? detailVariants.values.lazy.compactMap { $0.catalog.songsByID[id] }.first : nil)
             guard let candidate, AtmosVariantCatalogue.isAtmos(candidate),
                   candidate.id != song.id,
                   AtmosAlbumPolicy.normalized(candidate.artist ?? "") == AtmosAlbumPolicy.normalized(song.artist ?? "") else { return }

@@ -71,6 +71,8 @@ extension Notification.Name {
     nonisolated static let lumaToggleQueue = Notification.Name("luma.toggleQueue")
     nonisolated static let lumaOpenFullPlayer = Notification.Name("luma.openFullPlayer")
     nonisolated static let lumaOpenFullPlayerLyrics = Notification.Name("luma.openFullPlayerLyrics")
+    /// Opens Luma's in-app Audio Quality settings from the player quality card.
+    nonisolated static let lumaOpenAudioQualitySettings = Notification.Name("luma.openAudioQualitySettings")
     nonisolated static let lumaSelectAlbums = Notification.Name("luma.selectAlbums")
     nonisolated static let lumaNavigateToAlbum    = Notification.Name("lumaNavigateToAlbum")
     nonisolated static let lumaNavigateToArtist   = Notification.Name("lumaNavigateToArtist")

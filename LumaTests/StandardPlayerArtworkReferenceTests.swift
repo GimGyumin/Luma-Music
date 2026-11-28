@@ -12,7 +12,7 @@ import AppKit
 struct StandardPlayerArtworkReferenceTests {
     @Test(arguments: [true, false])
     func artworkMatchesSuppliedScreenshot(playing: Bool) throws {
-        // The screenshots are 588×1280. Compare in a 402pt phone viewport.
+        // Render the reference proportions in a 402pt phone viewport.
         let pixelScale: CGFloat = 588.0 / 402.0
         let viewport = CGSize(width: 402, height: 1280 / pixelScale)
         let renderer = ImageRenderer(content:
@@ -24,7 +24,6 @@ struct StandardPlayerArtworkReferenceTests {
                 Color.blue
                 StandardPlayerArtworkSlot(isPlaying: playing, reduceMotion: false) { _ in
                     Color(.sRGB, red: 1, green: 0, blue: 0)
-                        .clipShape(RoundedRectangle(cornerRadius: 12))
                 }
             }
             .frame(width: viewport.width, height: viewport.height)
@@ -33,12 +32,15 @@ struct StandardPlayerArtworkReferenceTests {
         renderer.scale = pixelScale
         let image = try #require(renderer.cgImage)
         let rect = try artworkBounds(image)
-        let reference = playing ? CGRect(x: 35, y: 140, width: 518, height: 518)
-            : CGRect(x: 105, y: 210, width: 378, height: 378)
+        let reference = playing ? CGRect(x: 47, y: 140, width: 494, height: 494)
+            : CGRect(x: 114, y: 207, width: 361, height: 361)
         #expect(abs(rect.minX - reference.minX) <= 2)
         #expect(abs(rect.minY - reference.minY) <= 2)
         #expect(abs(rect.width - reference.width) <= 2)
         #expect(abs(rect.height - reference.height) <= 2)
+        let corner = CGPoint(x: rect.minX + 2, y: rect.minY + 2)
+        #expect(!containsArtworkPixel(image, at: corner))
+        #expect(containsArtworkPixel(image, at: CGPoint(x: rect.midX, y: rect.minY + 2)))
         // Native renderer diagnostic, not a manipulated user screenshot.
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("luma-standard-reference-\(playing ? "playing" : "paused").png")
@@ -88,8 +90,20 @@ struct StandardPlayerArtworkReferenceTests {
             #expect(art.width == art.height && art.width > 0)
             #expect(art.minY >= metrics.topInset + ImmersivePlayerMetrics.panelTopGap)
             #expect(art.maxY <= metrics.infoTop - LumaSpacing.xl + 0.01)
-            #expect(art.minX >= 24 && art.maxX <= size.width - 24)
+            #expect(art.minX >= 32 && art.maxX <= size.width - 32)
         }
+    }
+
+    private func containsArtworkPixel(_ image: CGImage, at point: CGPoint) -> Bool {
+        guard let pixel = image.cropping(to: CGRect(origin: point, size: CGSize(width: 1, height: 1))) else {
+            return false
+        }
+        var rgba = [UInt8](repeating: 0, count: 4)
+        guard let context = CGContext(data: &rgba, width: 1, height: 1,
+            bitsPerComponent: 8, bytesPerRow: 4, space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return false }
+        context.draw(pixel, in: CGRect(x: 0, y: 0, width: 1, height: 1))
+        return rgba[0] > 230 && rgba[1] < 20 && rgba[2] < 20
     }
 
     private func artworkBounds(_ image: CGImage) throws -> CGRect {

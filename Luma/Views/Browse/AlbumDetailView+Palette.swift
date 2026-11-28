@@ -10,8 +10,9 @@ extension AlbumDetailContentView {
         guard !Task.isCancelled, viewModel?.acceptsPresentationUpdates != false,
               albumCoverId == coverArtId else { return }
         let identity = paletteIdentity
-        let changed = paletteRequestID != nil && paletteRequestID != identity
-        paletteRequestID = identity
+        let coverScope = "\(container?.serverState.accountRevision ?? 0):\(coverArtId)"
+        let changedCover = paletteCoverScope != nil && paletteCoverScope != coverScope
+        paletteCoverScope = coverScope
         artworkPreference = artworkImageCache.artworkPreference(for: albumId)
         // Preparation owns image decoding and edge analysis. The page reads a
         // finished snapshot when one is current. A palette from an older analyzer
@@ -22,14 +23,16 @@ extension AlbumDetailContentView {
             applyAlbumPalette(palette, coverArtId: coverArtId)
             return
         }
-        if changed {
+        if changedCover {
             artworkAnalysis = nil
             dominantColor = .clear
         }
+        // Playback can install a larger copy of the same artwork. Keep the current
+        // page palette until preparation finishes so the page never flashes unthemed.
         if await AlbumCoverPreloadService.prepareTheme(
             for: coverArtId,
             artworkImageCache: artworkImageCache,
-            dominantColorExtractor: colorExtractor, allowNetwork: isOnline
+            dominantColorExtractor: colorExtractor, allowNetwork: isOnline, retryVisibleArtwork: true
         ), !Task.isCancelled, viewModel?.acceptsPresentationUpdates != false,
            paletteIdentity == identity, albumCoverId == coverArtId,
            let palette = artworkImageCache.preparedPalette(for: coverArtId) {

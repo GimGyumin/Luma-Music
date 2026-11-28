@@ -136,6 +136,22 @@ struct LyricGlyphPresentationTests {
         #expect(LyricPresentationClock.time(sampleMs: 250, sampledAt: 8, now: 8, advancing: true) == 250)
     }
 
+    @Test func liveLyricClockDoesNotRewindOnLateSamplesOrPause() {
+        let predicted = LyricPresentationClock.time(sampleMs: 1_000, sampledAt: 5, now: 6,
+            advancing: true, predictionLimitMs: 750)
+        #expect(predicted == 1_750)
+        let late = LyricPresentationClock.time(sampleMs: 1_500, sampledAt: 6, now: 6,
+            advancing: true, previousMs: predicted, predictionLimitMs: 750)
+        #expect(late == predicted)
+        let caughtUp = LyricPresentationClock.time(sampleMs: 1_800, sampledAt: 6.3, now: 6.3,
+            advancing: true, previousMs: late, predictionLimitMs: 750)
+        #expect(caughtUp == 1_800)
+        let paused = LyricPresentationClock.time(sampleMs: 1_800, sampledAt: 6.3, now: 6.4,
+            advancing: false, previousMs: 1_850)
+        #expect(paused == 1_850)
+        #expect(LyricPresentationClock.time(sampleMs: 400, sampledAt: 7, now: 7, advancing: false) == 400)
+    }
+
     @Test func seeksAndPlaybackHandoffsKeepTheirMotion() {
         #expect(LyricScrollTiming.style(previous: 2, target: 30, seeking: true, reduceMotion: false) == .glide)
         #expect(LyricScrollTiming.style(previous: 30, target: 2, seeking: true, reduceMotion: false) == .glide)

@@ -121,10 +121,5 @@ final class MusicHapticsController: ObservableObject {
         Logger.player.debug("Music Haptics: playback active (system manages haptics when enabled)")
     }
 
-    func openSystemSettings() {
-        if let url = URL(string: UIApplication.openSettingsURLString) {
-            UIApplication.shared.open(url)
-        }
-    }
 }
 #endif

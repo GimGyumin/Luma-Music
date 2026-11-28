@@ -18,6 +18,7 @@ nonisolated struct LyricPlaybackTimeline: Sendable {
     private let leafCount: Int
     private let maximumEnds: [Int]
     private let upcomingLeads: [Int?]
+    private let leadEntries: [Entry]
 
     init(rows: [LyricDisplayRow]) {
         let entries = rows.enumerated().compactMap { index, row -> Entry? in
@@ -26,6 +27,11 @@ nonisolated struct LyricPlaybackTimeline: Sendable {
             return Entry(index: index, start: start, end: row.endMs, secondary: row.isSecondaryAgent)
         }.sorted { ($0.start, $0.index) < ($1.start, $1.index) }
         self.entries = entries
+        var leads: [Entry] = []
+        for entry in entries where !entry.secondary && leads.last?.start != entry.start {
+            leads.append(entry)
+        }
+        leadEntries = leads
         var leaves = 1
         while leaves < entries.count { leaves *= 2 }
         leafCount = leaves
@@ -47,17 +53,40 @@ nonisolated struct LyricPlaybackTimeline: Sendable {
         upcomingLeads = upcoming
     }
 
+    func nextStart(after milliseconds: Int, leadOnly: Bool = false) -> Int? {
+        if leadOnly {
+            let index = firstLeadAfter(milliseconds)
+            return leadEntries.indices.contains(index) ? leadEntries[index].start : nil
+        }
+        let index = firstStart(after: milliseconds, count: entries.count) { entries[$0].start }
+        return entries.indices.contains(index) ? entries[index].start : nil
+    }
+
+    /// Lead focus stays with the most recent start through a short gap or an overlapping vocal.
+    func latestStartedLead(at milliseconds: Int) -> Int? {
+        let index = firstLeadAfter(milliseconds) - 1
+        return leadEntries.indices.contains(index) ? leadEntries[index].index : nil
+    }
+
+    private func firstLeadAfter(_ milliseconds: Int) -> Int {
+        firstStart(after: milliseconds, count: leadEntries.count) { leadEntries[$0].start }
+    }
+
+    private func firstStart(after milliseconds: Int, count: Int, startAt: (Int) -> Int) -> Int {
+        var low = 0, high = count
+        while low < high {
+            let middle = low + (high - low) / 2
+            if startAt(middle) <= milliseconds { low = middle + 1 }
+            else { high = middle }
+        }
+        return low
+    }
+
     func activeRows(for milliseconds: Int) -> (primary: Int?, indices: Set<Int>) {
         var indices = Set<Int>()
         var primaryLead: Entry?
         var primaryAny: Entry?
-        var low = 0, high = entries.count
-        while low < high {
-            let middle = low + (high - low) / 2
-            if entries[middle].start <= milliseconds { low = middle + 1 }
-            else { high = middle }
-        }
-        let firstFuture = low
+        let firstFuture = firstStart(after: milliseconds, count: entries.count) { entries[$0].start }
         // Skip entire expired subtrees. Cost follows active overlap, rather than the
         // document length, without a forward-only cursor that could break backward seeks.
         func collect(_ node: Int, _ lower: Int, _ upper: Int) {

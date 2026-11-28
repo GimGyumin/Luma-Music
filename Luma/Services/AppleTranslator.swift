@@ -1,3 +1,4 @@
+#if !targetEnvironment(macCatalyst)
 import Foundation
 import OSLog
 @preconcurrency import Translation
@@ -128,3 +129,4 @@ extension Array {
         }
     }
 }
+#endif

@@ -546,6 +546,8 @@ struct LumaApp: App {
         .restorationBehavior(.disabled)
         .commands {
             LumaCommands()
+            SidebarCommands()
+            ToolbarCommands()
         }
         #endif
 
@@ -566,8 +568,8 @@ struct LumaApp: App {
             }
         }
         .windowStyle(.plain)
-        .windowResizability(.contentSize)
-        .defaultSize(width: 320, height: 136)
+        .windowResizability(.contentMinSize)
+        .defaultSize(width: 320, height: 154)
         .defaultPosition(.topTrailing)
         .restorationBehavior(.disabled)
         #endif

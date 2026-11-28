@@ -18,6 +18,10 @@ struct SystemVolumeView: View {
     /// Artwork-derived tint for the unfilled track; nil keeps the white-alpha
     /// track used by the standard/wide players.
     var trackTint: Color? = nil
+    /// Phone portrait: fully resolved album-aware track/fill colours.
+    var trackColor: Color? = nil
+    var fillColor: Color? = nil
+    var pressedFillColor: Color? = nil
     var sliderHeight: CGFloat = 36
     var sliderTrackHeight: CGFloat = 6
     var sliderActiveTrackHeight: CGFloat = 14
@@ -40,8 +44,9 @@ struct SystemVolumeView: View {
             ),
             total: 1.0,
             onEditingChanged: { editing in observer.setEditing(editing) },
-            trackColor: trackTint?.opacity(0.45) ?? contentColor.opacity(0.22),
-            fillColor: contentColor,
+            trackColor: trackColor ?? trackTint?.opacity(0.45) ?? contentColor.opacity(0.22),
+            fillColor: fillColor ?? contentColor,
+            pressedFillColor: pressedFillColor,
             height: sliderHeight,
             trackHeight: sliderTrackHeight,
             // Match Music's restrained active state: a modest thicker white fill,

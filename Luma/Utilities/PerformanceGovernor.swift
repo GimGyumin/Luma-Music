@@ -147,10 +147,13 @@ nonisolated struct PerformanceBudget: Equatable, Sendable {
         allowsLyricScrollMotion && !isMemoryPressured
     }
 
-    /// A second streaming decoder is discretionary. Live PCM and local-file
-    /// visualization can still serve visible indicators on a constrained device.
+    /// A visible bass response needs PCM even when the audible gapless AVPlayer item
+    /// cannot carry an audio-mix tap. `allowsBeatVisuals` already scopes this to a
+    /// visible, playing, non-thermal-critical surface; the meter publishes at the
+    /// Low Power cadence separately, so disabling the only PCM source here would make
+    /// the pulse disappear instead of merely slowing it.
     var allowsAuxiliaryStreamingDecoder: Bool {
-        allowsBeatVisuals && !isLowPowerMode && thermalPressure == .nominal
+        allowsBeatVisuals
     }
 
     // MARK: Chrome

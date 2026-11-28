@@ -65,15 +65,3 @@ struct AlbumRow: View {
         )
     }
 }
-
-extension AlbumRow {
-    init(album: AlbumID3) {
-        self.init(
-            albumId: album.id,
-            name: album.name,
-            artist: album.artist,
-            year: album.year,
-            coverArtId: album.coverArt
-        )
-    }
-}

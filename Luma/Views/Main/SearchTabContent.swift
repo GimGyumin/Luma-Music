@@ -10,7 +10,16 @@ struct SearchTabContent: View {
     @State private var viewModel: SearchViewModel?
     @State private var isSearchActive = false
     @State private var requestedSearchFocus = false
+    @State private var macSearchFocused = false
     @FocusState private var searchFocused: Bool
+
+    private var suggestionsVisible: Bool {
+        #if os(macOS)
+        macSearchFocused
+        #else
+        searchFocused
+        #endif
+    }
     @State private var category: SearchCategory = .all
     @State private var downloadsOnly = false
 
@@ -25,14 +34,15 @@ struct SearchTabContent: View {
     private var trimmedQuery: String { searchQuery.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines) }
     private var serverId: String { container?.serverState.activeServer?.id.uuidString ?? "" }
     private var isOnline: Bool { container?.serverState.isOnline != false }
+    private var searchesDownloadsOnly: Bool { isOnline && downloadsOnly }
     private var searchRunKey: String {
-        "\(trimmedQuery)|\(serverId)|\(container?.serverState.isServerReachable != false)|\(downloadsOnly)|\(isOnline)|\(viewModel != nil)"
+        "\(trimmedQuery)|\(serverId)|\(container?.serverState.isServerReachable != false)|\(searchesDownloadsOnly)|\(isOnline)|\(viewModel != nil)"
     }
 
     private var searchContent: some View {
         VStack(spacing: 0) {
             if isSearchActive { searchScope }
-            if !searchFocused, !trimmedQuery.isEmpty { categoryPicker }
+            if !suggestionsVisible, !trimmedQuery.isEmpty { categoryPicker }
 
             Group {
                 if trimmedQuery.isEmpty {
@@ -40,10 +50,10 @@ struct SearchTabContent: View {
                 } else if let vm = viewModel {
                     SearchResultsList(
                         viewModel: vm,
-                        category: downloadsOnly ? .songs : category,
+                        category: searchesDownloadsOnly ? .songs : category,
                         query: trimmedQuery,
-                        showsSuggestions: searchFocused,
-                        downloadsOnly: downloadsOnly,
+                        showsSuggestions: suggestionsVisible,
+                        downloadsOnly: searchesDownloadsOnly,
                         onSuggestion: { suggestion in
                             searchQuery.wrappedValue = suggestion
                             searchFocused = false
@@ -64,13 +74,50 @@ struct SearchTabContent: View {
         }
     }
 
+    #if os(macOS)
+    /// Music's Search page owns a centered 458 pt field in the 52 pt toolbar
+    /// band, with history/categories below it.
+    private var macSearchPage: some View {
+        VStack(spacing: 0) {
+            GeometryReader { geometry in
+                HStack {
+                    Spacer(minLength: 0)
+                    MacSearchField(
+                        text: searchQuery,
+                        prompt: "Artists, Songs, Lyrics, and More",
+                        width: min(458, max(280, geometry.size.width - 48)),
+                        onSubmit: {
+                            macSearchFocused = false
+                            isSearchActive = false
+                        },
+                        onFocusChange: { focused in
+                            macSearchFocused = focused
+                            isSearchActive = focused || !trimmedQuery.isEmpty
+                        }
+                    )
+                    Spacer(minLength: 0)
+                }
+                .frame(height: MacDesign.Metrics.toolbarHeight)
+            }
+            .frame(height: MacDesign.Metrics.toolbarHeight)
+
+            searchContent
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .background(Color(nsColor: .windowBackgroundColor))
+        .accessibilityIdentifier("mac.search.page")
+    }
+    #endif
+
     private var searchableContent: some View {
         searchContent
         .navigationTitle(String(localized: "Search", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale))
-        .lumaAccountProfileToolbar(isVisible: !isSearchActive)
+        .lumaAccountProfileToolbar(isVisible: isOnline && !isSearchActive)
         .searchable(text: searchQuery, isPresented: $isSearchActive,
             placement: searchPlacement,
-            prompt: Text("Artists, Songs, Lyrics, and More"))
+            prompt: isOnline ? Text("Artists, Songs, Lyrics, and More") : Text(
+                String(localized: "Library", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale)
+            ))
         .searchFocused($searchFocused)
         .onSubmit(of: .search) { searchFocused = false }
         .onAppear {
@@ -99,7 +146,13 @@ struct SearchTabContent: View {
     }
 
     var body: some View {
-        searchableContent
+        Group {
+            #if os(macOS)
+            macSearchPage
+            #else
+            searchableContent
+            #endif
+        }
         .onReceive(NotificationCenter.default.publisher(for: .lumaFocusSearch)) { _ in
             guard !searchFocused, !requestedSearchFocus else { return }
             requestedSearchFocus = true
@@ -127,7 +180,7 @@ struct SearchTabContent: View {
             guard container?.libraryIndexService.lastError != nil, !trimmedQuery.isEmpty else { return }
             await runSearch()
         }
-        .onChange(of: downloadsOnly) { _, _ in category = .all }
+        .onChange(of: searchesDownloadsOnly) { _, _ in category = .all }
         .onChange(of: isSearchActive) { _, active in
             if !active {
                 requestedSearchFocus = false
@@ -143,28 +196,35 @@ struct SearchTabContent: View {
         await viewModel?.search(
             query: trimmedQuery,
             serverReachable: isOnline && container?.serverState.isServerReachable != false,
-            downloadsOnly: downloadsOnly
+            downloadsOnly: searchesDownloadsOnly
         )
     }
 
-    private var searchScope: some View {
-        Picker(String(localized: "Search Scope", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale), selection: $downloadsOnly) {
-            if isOnline {
-                Text(String(localized: "Library", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale)).tag(false)
-            } else {
-                Text(String(localized: "Indexed Music", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale)).tag(false)
+    @ViewBuilder private var searchScope: some View {
+        let library = String(localized: "Library", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale)
+        if isOnline {
+            Picker(String(localized: "Search Scope", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale), selection: $downloadsOnly) {
+                Text(library).tag(false)
+                Text(String(localized: "Downloads", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale)).tag(true)
             }
-            Text(String(localized: "Downloads", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale)).tag(true)
+            .pickerStyle(.segmented)
+            .padding(.horizontal, 20)
+            .padding(.bottom, 12)
+        } else {
+            Text(library)
+                .font(.subheadline)
+                .padding(.horizontal, 24)
+                .frame(minWidth: 176, minHeight: 34)
+                .lumaGlassCapsule()
+                .accessibilityAddTraits(.isSelected)
+                .padding(.bottom, 12)
         }
-        .pickerStyle(.segmented)
-        .padding(.horizontal, 20)
-        .padding(.bottom, 12)
     }
 
     private var categoryPicker: some View {
         ScrollView(.horizontal) {
             HStack(spacing: 8) {
-                ForEach(downloadsOnly ? [.all, .songs] : SearchCategory.allCases) { item in
+                ForEach(searchesDownloadsOnly ? [.all, .songs] : SearchCategory.allCases) { item in
                     Button { category = item } label: { Text(item.title) }
                         .buttonStyle(.bordered)
                         .tint(category == item ? Color.accentColor : Color.secondary)
@@ -178,6 +238,18 @@ struct SearchTabContent: View {
     }
 
     @ViewBuilder private var searchLanding: some View {
+        if !isOnline {
+            if isSearchActive {
+                SearchHistoryListView(serverId: serverId, path: $path, showsOfflineEmptyState: true)
+            } else {
+                DeviceOfflineView()
+            }
+        } else {
+            onlineSearchLanding
+        }
+    }
+
+    @ViewBuilder private var onlineSearchLanding: some View {
         #if os(macOS)
         ScrollView {
             VStack(alignment: .leading, spacing: LumaSpacing.xl) {

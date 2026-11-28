@@ -32,8 +32,8 @@ nonisolated enum CacheFormat: String, CaseIterable, Identifiable, Sendable, Coda
         switch self {
         case .matchStream:  return String(localized: "Automatic", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale)
         case .flacOriginal: return String(localized: "Lossless", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale)
-        case .aac256:       return "AAC 256 kbps"
-        case .aac128:       return "AAC 128 kbps"
+        case .aac256:       return String(localized: "High Quality", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale)
+        case .aac128:       return String(localized: "High Efficiency", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale)
         case .opus_128:     return String(localized: "Data Saver", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale)
         case .mp3_320:      return "MP3 320 kbps"
         case .mp3_192:      return "MP3 192 kbps"
@@ -45,8 +45,8 @@ nonisolated enum CacheFormat: String, CaseIterable, Identifiable, Sendable, Coda
         switch self {
         case .matchStream:  return String(localized: "Uses your server's default setting", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale)
         case .flacOriginal: return String(localized: "Original file without conversion", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale)
-        case .aac256:       return String(localized: "High quality AAC", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale)
-        case .aac128:       return String(localized: "Smaller files, good quality", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale)
+        case .aac256:       return "AAC (256 kbps)"
+        case .aac128:       return "AAC (128 kbps)"
         case .opus_128:     return "Opus 128 kbps"
         case .mp3_320, .mp3_192: return nil
         }

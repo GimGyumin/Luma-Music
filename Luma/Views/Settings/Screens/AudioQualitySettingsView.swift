@@ -29,6 +29,9 @@ struct AudioQualitySettingsView: View {
                     AudioQualitySelectionView(title: "Cellular Streaming", selection: $settings.cellularFormat,
                                               losslessEnabled: settings.losslessAudioEnabled)
                 }
+                SettingsNavigationRow("Downloads", value: settings.effectiveDownloadFormat.title) {
+                    DownloadQualitySettingsView(settings: settings)
+                }
             } footer: {
                 SettingsSectionFooter("Changes apply to new streams and downloads. Previously downloaded and cached music keeps its existing quality. Turning lossless back on restores your saved quality choices.")
             }
@@ -63,7 +66,9 @@ struct AudioQualitySelectionView: View {
     var losslessEnabled = true
 
     private var items: [CacheFormat] {
-        losslessEnabled ? [.matchStream, .aac256, .flacOriginal, .aac128, .opus_128] : [.aac256, .aac128, .opus_128]
+        CacheFormat.selectableCases.filter { format in
+            losslessEnabled || (format != .flacOriginal && (isStreaming || format != .matchStream))
+        }
     }
 
     var body: some View {
@@ -74,13 +79,18 @@ struct AudioQualitySelectionView: View {
                 : "Lossless files use more storage on your device. Downloads preserve the original file's resolution when available. Previously downloaded songs keep their existing quality.",
             items: items,
             selection: Binding(
-                get: { StreamingSettings.effectiveFormat(selection, losslessEnabled: losslessEnabled) },
+                get: {
+                    if isStreaming {
+                        return StreamingSettings.effectiveStreamingPreference(selection, losslessEnabled: losslessEnabled)
+                    }
+                    return StreamingSettings.effectiveFormat(selection, losslessEnabled: losslessEnabled)
+                },
                 set: { selection = $0 }
             ),
             subtitle: { format in
                 if format == .matchStream {
                     return isStreaming
-                        ? String(localized: "Adapts to your connection and prefers original quality", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale)
+                        ? String(localized: "Adjusts quality based on network conditions and measured speed", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale)
                         : String(localized: "Original file without conversion", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale)
                 }
                 return format.subtitle

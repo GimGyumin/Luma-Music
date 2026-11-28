@@ -78,8 +78,10 @@ struct ToastOverlay: ViewModifier {
     private var bottomInset: CGFloat {
         #if os(iOS)
         miniPlayerVisible ? LumaSpacing.miniPlayerBottomMargin + LumaSpacing.s : LumaSpacing.l
+        #elseif os(macOS)
+        miniPlayerVisible ? MacShellMetrics.playerBarHeight + MacShellMetrics.playerBarBottomInset + LumaSpacing.s : LumaSpacing.l
         #else
-        miniPlayerVisible ? LumaMacOSLayout.playerBarReservedHeight + LumaSpacing.s : LumaSpacing.l
+        LumaSpacing.l
         #endif
     }
 

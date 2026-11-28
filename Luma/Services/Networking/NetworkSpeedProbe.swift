@@ -21,6 +21,8 @@ nonisolated struct URLSessionSpeedSampler: SpeedSampling {
         let config = URLSessionConfiguration.ephemeral
         config.networkServiceType = .responsiveData
         config.requestCachePolicy = .reloadIgnoringLocalCacheData
+        config.timeoutIntervalForResource = 3
+        config.allowsConstrainedNetworkAccess = false
         config.urlCache = nil
         config.httpCookieStorage = nil
         return URLSession(configuration: config)
@@ -71,18 +73,18 @@ nonisolated struct URLSessionSpeedSampler: SpeedSampling {
             }
         }
 
-        guard let bodyStarted else { return nil }
+        guard !Task.isCancelled, let bodyStarted else { return nil }
         let elapsed = Date().timeIntervalSince(bodyStarted)
         // Too little data (or no measurable window) cannot separate a slow link from a stalled
         // request. Report "unknown" so the caller keeps Automatic as configured instead of capping it;
         // a link that really cannot keep up still lowers quality through the underrun path.
-        guard received >= Self.minimumSampleBytes, elapsed > 0.05 else {
+        guard received >= Self.minimumSampleBytes, elapsed > 0.05 || received >= maxBytes else {
             Logger.network.debug(
                 "Speed probe inconclusive — \(received, privacy: .public) bytes in \(Int(elapsed * 1000), privacy: .public)ms"
             )
             return nil
         }
-        let rate = Double(received) / elapsed
+        let rate = Double(received) / max(elapsed, 0.05)
         Logger.network.debug(
             "Speed probe sample — \(received, privacy: .public) bytes in \(Int(elapsed * 1000), privacy: .public)ms (warm-up excluded) → \(Int(rate / 1_024), privacy: .public) KB/s"
         )
@@ -94,20 +96,24 @@ nonisolated struct URLSessionSpeedSampler: SpeedSampling {
     private static let minimumSampleBytes = 24 * 1024
 }
 
-/// Caches one throughput measurement per server so "Automatic" quality can adapt without paying a
-/// probe on every track.
+/// Reuses throughput samples for the same server, account and network path.
 actor NetworkSpeedProbe {
     private let sampler: any SpeedSampling
     private let ttl: TimeInterval
     private let maxBytes: Int
     private let budget: TimeInterval
 
-    private var cached: [UUID: (bytesPerSecond: Double, sampledAt: Date)] = [:]
-    private var inFlight: [UUID: Task<Double?, Never>] = [:]
+    nonisolated struct Scope: Equatable, Sendable {
+        let accountRevision: UInt64
+        let networkRevision: UInt64
+    }
+
+    private var cached: [UUID: (scope: Scope?, bytesPerSecond: Double, sampledAt: Date)] = [:]
+    private var inFlight: [UUID: (scope: Scope?, token: UUID, task: Task<Double?, Never>)] = [:]
 
     init(
         sampler: any SpeedSampling = URLSessionSpeedSampler(),
-        ttl: TimeInterval = 600,
+        ttl: TimeInterval = 120,
         maxBytes: Int = 96 * 1_024,
         budget: TimeInterval = 1.5
     ) {
@@ -118,16 +124,19 @@ actor NetworkSpeedProbe {
     }
 
     /// A still-fresh measurement, without starting a new one.
-    func freshRate(serverId: UUID) -> Double? {
-        guard let entry = cached[serverId],
+    func freshRate(serverId: UUID, scope: Scope? = nil) -> Double? {
+        guard let entry = cached[serverId], entry.scope == scope,
               Date().timeIntervalSince(entry.sampledAt) < ttl else { return nil }
         return entry.bytesPerSecond
     }
 
     /// Returns the measured rate, reusing a fresh cache entry and de-duplicating concurrent callers.
-    func measurement(serverId: UUID, url: URL, headers: [String: String]) async -> Double? {
-        if let rate = freshRate(serverId: serverId) { return rate }
-        if let existing = inFlight[serverId] { return await existing.value }
+    func measurement(serverId: UUID, url: URL, headers: [String: String], scope: Scope? = nil) async -> Double? {
+        if let rate = freshRate(serverId: serverId, scope: scope) { return rate }
+        if let existing = inFlight[serverId] {
+            if existing.scope == scope { return await existing.task.value }
+            existing.task.cancel()
+        }
 
         let sampler = self.sampler
         let maxBytes = self.maxBytes
@@ -135,11 +144,13 @@ actor NetworkSpeedProbe {
         let task = Task.detached(priority: .utility) { () -> Double? in
             await sampler.sample(url: url, headers: headers, maxBytes: maxBytes, budget: budget)
         }
-        inFlight[serverId] = task
+        let token = UUID()
+        inFlight[serverId] = (scope, token, task)
         let rate = await task.value
+        guard inFlight[serverId]?.token == token else { return nil }
         inFlight[serverId] = nil
         if let rate {
-            cached[serverId] = (rate, Date())
+            cached[serverId] = (scope, rate, Date())
             Logger.network.info(
                 "Measured \(Int(rate / 1_024), privacy: .public) KB/s for automatic-quality adaptation"
             )
@@ -150,6 +161,7 @@ actor NetworkSpeedProbe {
     /// Test/inspection hook.
     func reset() {
         cached.removeAll()
+        for pending in inFlight.values { pending.task.cancel() }
         inFlight.removeAll()
     }
 }

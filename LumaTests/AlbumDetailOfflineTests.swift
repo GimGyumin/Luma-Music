@@ -93,7 +93,10 @@ private final class ADDownloadStub: DownloadServiceProtocol {
     func localAlbumData(albumId: String, serverId: UUID) async -> LocalAlbumData? { albumData }
     func downloadedURL(forSongId songId: String, serverId: UUID) async -> URL? { nil }
     func isDownloaded(songId: String, serverId: UUID) async -> Bool { false }
-    func downloadedSongIds(serverId: UUID) async -> Set<String> { [] }
+    var downloadedIDsOperation: (() async -> Set<String>)?
+    func downloadedSongIds(serverId: UUID) async -> Set<String> {
+        await downloadedIDsOperation?() ?? []
+    }
     func localCoverArtURL(forId coverArtId: String) async -> URL? {
         if let coverURLOperation { return await coverURLOperation(coverArtId) }
         return coverURLs[coverArtId]
@@ -251,6 +254,60 @@ struct AlbumDetailOfflineTests {
         #expect(vm.songs.map(\.id) == ["s1", "s2", "s3"])
         #expect(vm.isPrimaryContentReady)
         #expect(!vm.isOffline)
+    }
+
+    @Test func firstEntryPublishesTracksBeforeDownloadReconciliation() async {
+        let library = ADLibraryStub()
+        let song = DisplayableSong(id: "s1", title: "Song", duration: 180).asSong()
+        library.albumResult = AlbumID3(id: "album-1", name: "Album", songCount: 1, duration: 180, song: [song])
+        let downloads = ADDownloadStub()
+        var pending: CheckedContinuation<Set<String>, Never>?
+        downloads.downloadedIDsOperation = { await withCheckedContinuation { pending = $0 } }
+        let state = ServerState()
+        state.activeServer = ServerSnapshot(from: ServerConfig(displayName: "Test", baseURL: "https://example.invalid", username: "u"))
+        let vm = AlbumDetailViewModel(albumId: "album-1", libraryService: library,
+            downloadService: downloads, toastService: ToastService(), serverState: state)
+
+        let loading = Task { await vm.loadIfNeeded() }
+        while pending == nil { await Task.yield() }
+        #expect(vm.isPrimaryContentReady)
+        #expect(!vm.isLoading)
+        #expect(vm.songs.map(\.id) == ["s1"])
+        pending?.resume(returning: ["s1"])
+        await loading.value
+        #expect(vm.songs.first?.isDownloaded == true)
+    }
+
+    @Test func appearanceCallbacksShareFirstLoadAndResumeAfterCancellation() async {
+        let library = ADLibraryStub()
+        var pending: [CheckedContinuation<AlbumID3, any Error>] = []
+        var requests = 0
+        library.albumOperation = {
+            requests += 1
+            guard requests == 1 else { throw URLError(.badServerResponse) }
+            return try await withCheckedThrowingContinuation { pending.append($0) }
+        }
+        let state = ServerState()
+        state.activeServer = ServerSnapshot(from: ServerConfig(displayName: "Test", baseURL: "https://example.invalid", username: "u"))
+        let vm = AlbumDetailViewModel(albumId: "album-1", libraryService: library,
+            downloadService: ADDownloadStub(), toastService: ToastService(), serverState: state)
+
+        let first = Task { await vm.loadIfNeeded() }
+        while pending.isEmpty { await Task.yield() }
+        await vm.loadIfNeeded()
+        await vm.resumePendingLoadIfNeeded()
+        #expect(requests == 1)
+        first.cancel()
+        for waiter in pending { waiter.resume(throwing: CancellationError()) }
+        await first.value
+        #expect(!vm.isLoading)
+        #expect(!vm.isPrimaryContentReady)
+
+        library.albumOperation = nil
+        library.albumResult = AlbumID3(id: "album-1", name: "Recovered", songCount: 0, duration: 0)
+        await vm.resumePendingLoadIfNeeded()
+        #expect(vm.isPrimaryContentReady)
+        #expect(vm.albumName == "Recovered")
     }
 
     @Test func resumedCoverProgressCountsDiskFilesAndExcludesFailures() {

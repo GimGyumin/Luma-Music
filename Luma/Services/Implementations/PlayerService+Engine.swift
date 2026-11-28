@@ -267,8 +267,8 @@ extension PlayerService {
         let context = await MainActor.run {
             (state.currentTrack, serverService.state.activeServer?.id,
              streamingSettings.formatForCurrentNetwork(
-                isLimited: serverService.state.isExpensive || serverService.state.isNetworkConstrained
-             ), streamingSettings.adaptiveCeiling, state.playbackState)
+                isLimited: serverService.state.usesCellularQuality
+             ), streamingSettings.adaptiveStreamingCeiling(isLimited: serverService.state.usesCellularQuality), state.playbackState)
         }
         guard epoch == playbackEpoch, generation == systemPlayback.generation, !Task.isCancelled,
               !systemPlayback.recoveredCurrentStall,

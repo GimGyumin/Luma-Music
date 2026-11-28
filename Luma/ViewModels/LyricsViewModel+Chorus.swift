@@ -75,31 +75,45 @@ extension LyricsViewModel {
         // Need at least one of: original, translation
         guard !originalText.isEmpty || !translationText.isEmpty else { return nil }
 
-        // ── Timing resolution ──
-        // Use translation span → bgWords word timing → row timing → next lead
-        let tBeginMs = lyric?.backgroundBegin.map { Int(($0 * 1000).rounded()) }
-        let tEndMs = lyric?.backgroundEnd.map { Int(($0 * 1000).rounded()) }
-        let wBeginMs = bgWords.compactMap({ $0.startMs > 0 ? $0.startMs : nil }).min()
-        let wEndMs = bgWords.compactMap({ $0.endMs > 0 ? $0.endMs : nil }).max()
-
-        let bgBegin = tBeginMs ?? wBeginMs ?? row.startMs ?? 0
-        let bgEnd: Int
-        if let te = tEndMs, te > bgBegin { bgEnd = te }
-        else if let we = wEndMs, we > bgBegin { bgEnd = we }
-        else if let re = row.endMs, re > bgBegin { bgEnd = re }
-        else if let next = nextLeadStartMs(after: index), next > bgBegin { bgEnd = next }
-        else { bgEnd = bgBegin + 2_000 }
-
-        let currentMs = karaokePlaybackMs
-        let visible = currentMs >= bgBegin && currentMs < bgEnd
-
+        let window = chorusWindow(for: row, at: index, lyric: lyric)
         return LyricChorusBlock(
             originalText: originalText,
             translationText: translationText,
-            beginMs: bgBegin,
-            endMs: bgEnd,
-            isVisible: visible
+            beginMs: window.lowerBound,
+            endMs: window.upperBound,
+            isVisible: window.contains(karaokePlaybackMs)
         )
+    }
+
+    /// The embedded vocal has its own timing even when its lead line is inactive.
+    func isEmbeddedChorusVisible(at index: Int) -> Bool {
+        guard displayRows.indices.contains(index) else { return false }
+        guard followsPlayback else { return true }
+        let lyric = translatedLyrics.indices.contains(index) ? translatedLyrics[index] : nil
+        return chorusWindow(for: displayRows[index], at: index, lyric: lyric).contains(karaokePlaybackMs)
+    }
+
+    private func chorusWindow(for row: LyricDisplayRow, at index: Int, lyric: TranslatedLyric?) -> Range<Int> {
+        let bounds = Self.backgroundCueBounds(row.words)
+        let translationStart = lyric?.backgroundBegin.flatMap { $0.isFinite ? LyricTime.milliseconds(fromSeconds: $0) : nil }
+        let translationEnd = lyric?.backgroundEnd.flatMap { $0.isFinite ? LyricTime.milliseconds(fromSeconds: $0) : nil }
+        let start = bounds?.lowerBound ?? translationStart ?? row.startMs ?? 0
+        let end = bounds?.upperBound
+            ?? translationEnd.flatMap { $0 > start ? $0 : nil }
+            ?? row.endMs.flatMap { $0 > start ? $0 : nil }
+            ?? nextLeadStartMs(after: index).flatMap { $0 > start ? $0 : nil }
+            ?? (min(start, Int.max - 2_000) + 2_000)
+        return start..<end
+    }
+
+    nonisolated static func backgroundCueBounds(_ words: [LyricDisplayWord]) -> Range<Int>? {
+        var start = Int.max
+        var end = Int.min
+        for word in words where word.isBackground && word.endMs > word.startMs {
+            start = min(start, word.startMs)
+            end = max(end, word.endMs)
+        }
+        return start < end ? start..<end : nil
     }
 
     /// Next non-secondary lead row start after the given index, or nil.

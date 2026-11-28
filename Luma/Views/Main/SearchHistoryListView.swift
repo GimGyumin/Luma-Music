@@ -14,23 +14,34 @@ struct SearchHistoryListView: View {
     var showsClearButton: Bool = true
     /// When true (macOS Search landing), render history rows inside the parent ScrollView instead of a nested List.
     var embedsInScrollView: Bool = false
+    var showsOfflineEmptyState: Bool
 
     @Environment(\.appContainer) private var container
     @State private var rowsData: [SearchHistoryRowData] = []
     @State private var revision = 0
     @State private var showClearConfirm = false
 
-    init(serverId: String, path: Binding<NavigationPath>, showsClearButton: Bool = true, embedsInScrollView: Bool = false) {
+    init(serverId: String, path: Binding<NavigationPath>, showsClearButton: Bool = true, embedsInScrollView: Bool = false, showsOfflineEmptyState: Bool = false) {
         self.serverId = serverId
         self._path = path
         self.showsClearButton = showsClearButton
         self.embedsInScrollView = embedsInScrollView
+        self.showsOfflineEmptyState = showsOfflineEmptyState
     }
 
     var body: some View {
         Group {
             if embedsInScrollView {
                 embeddedHistory(rowsData: rowsData)
+            } else if rowsData.isEmpty, showsOfflineEmptyState {
+                ContentUnavailableView {
+                    Label(
+                        String(localized: "No Recent Searches", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale),
+                        systemImage: "magnifyingglass"
+                    )
+                } description: {
+                    Text(String(localized: "Your recent searches will appear here.", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale))
+                }
             } else if rowsData.isEmpty {
                 EmptyStateView(
                     systemImage: "magnifyingglass",

@@ -23,7 +23,7 @@ extension URLSession: ArtistImageHTTPClient {}
 actor ExternalArtistImageResolver {
     private let httpClient: any ArtistImageHTTPClient
     /// Keys: "mbid:<mbid>" or "name:<normalized-name>"
-    private var cache: [String: URL?] = [:]
+    private var cache: [String: URL] = [:]
     private var inflight: [String: Task<URL?, Never>] = [:]
     private var lastMBRequest: Date = .distantPast
 
@@ -71,7 +71,7 @@ actor ExternalArtistImageResolver {
         inflight[key] = task
         let result = await task.value
         inflight.removeValue(forKey: key)
-        cache[key] = result
+        if let result { cache[key] = result }
         return result
     }
 

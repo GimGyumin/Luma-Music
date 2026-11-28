@@ -179,6 +179,52 @@ struct AMLLPortTests {
         #expect(vm.activeLineIndices.isEmpty)
     }
 
+    @Test @MainActor func nextLeadStartTakesFocusEvenWhilePreviousVocalsContinue() throws {
+        let container = try AppContainer(inMemory: true, engine: FakePlaybackEngine())
+        let vm = LyricsViewModel(songId: "overlap-gap", serverId: UUID(), lyricsService: container.lyricsService,
+            playerService: container.playerService, playerState: container.playerState)
+        let doc = try AppleLyricTTMLParser.parse(string: """
+        <tt xmlns="http://www.w3.org/ns/ttml"><body><div>
+        <p begin="0" end="2"><span begin="0" end="2">First</span></p>
+        <p begin="0.7" end="1.4"><span begin="0.7" end="1.4">Second</span></p>
+        <p begin="2.3" end="3"><span begin="2.3" end="3">Third</span></p>
+        </div></body></tt>
+        """)
+        vm.lyricDocument = doc
+        vm.displayRows = [
+            LyricDisplayRow(sourceLineIndex: 0, text: "First", startMs: 0, endMs: 2_000,
+                cueLine: nil, isSecondaryAgent: false, speakerSide: .leading,
+                words: [.init(text: "Chorus", startMs: 500, endMs: 1_600, role: .background)],
+                preservesSourceTiming: true),
+            LyricDisplayRow(sourceLineIndex: 1, text: "Second", startMs: 700, endMs: 1_400,
+                cueLine: nil, isSecondaryAgent: false, speakerSide: .leading, preservesSourceTiming: true),
+            LyricDisplayRow(sourceLineIndex: 2, text: "Third", startMs: 2_300, endMs: 3_000,
+                cueLine: nil, isSecondaryAgent: false, speakerSide: .leading, preservesSourceTiming: true)
+        ]
+        vm.hasTimedPlayback = true
+        vm.state = .loaded(StructuredLyrics(lang: "en", synced: true, line: [
+            Line(value: "First", start: 0), Line(value: "Second", start: 700), Line(value: "Third", start: 2_300)
+        ]))
+        vm.update(elapsedMs: 699)
+        #expect(vm.scrollLineIndex == 0)
+        #expect(vm.activeLineIndices == [0])
+        vm.update(elapsedMs: 700)
+        #expect(vm.scrollLineIndex == 1)
+        #expect(vm.activeLineIndices == [1])
+        #expect(vm.emphasizedLineIndices == [1])
+        #expect(vm.isEmbeddedChorusVisible(at: 0))
+        vm.update(elapsedMs: 1_500)
+        #expect(vm.activeLineIndices.isEmpty)
+        #expect(vm.scrollLineIndex == 1)
+        vm.update(elapsedMs: 1_600)
+        #expect(!vm.isEmbeddedChorusVisible(at: 0))
+        vm.synchronizeSeekClock(to: 0.6)
+        #expect(vm.scrollLineIndex == 0)
+        vm.synchronizeSeekClock(to: 0.7)
+        #expect(vm.scrollLineIndex == 1)
+        #expect(vm.activeLineIndices == [1])
+    }
+
     @Test @MainActor func bundledLicenseIsPresent() throws {
         let url = try #require(Bundle.main.url(forResource: "AMLL-AGPL-3.0", withExtension: "txt"))
         #expect(try String(contentsOf: url, encoding: .utf8).contains("GNU AFFERO GENERAL PUBLIC LICENSE"))

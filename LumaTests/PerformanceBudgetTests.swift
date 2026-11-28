@@ -29,10 +29,44 @@ struct PerformanceBudgetTests {
         #expect(!budget(memory: true).allowsArtworkMotion)
     }
 
-    @Test func auxiliaryStreamOnlyDecodesForUnconstrainedVisibleVisuals() {
+    @Test func lowPowerFreezesOnlyAmbientMotion() {
+        let normal = budget()
+        let lowPower = budget(lowPower: true)
+        #expect(LyricifyScenePolicy.motionEnabled(
+            isPresented: true, animated: true, reduceMotion: false, budget: normal))
+        #expect(LyricifyScenePolicy.pulseEnabled(
+            isPresented: true, animated: true, isPlaying: true, audioReaction: 0.3,
+            reduceMotion: false, budget: normal))
+        // Low Power keeps the same material and measured pulse; only the
+        // rotation/Mesh clock is allowed to stop.
+        #expect(!LyricifyScenePolicy.motionEnabled(
+            isPresented: true, animated: true, reduceMotion: false, budget: lowPower))
+        #expect(LyricifyScenePolicy.pulseEnabled(
+            isPresented: true, animated: true, isPlaying: true, audioReaction: 0.3,
+            reduceMotion: false, budget: lowPower))
+        // Reduce Motion and a hidden/paused surface still opt out.
+        #expect(!LyricifyScenePolicy.pulseEnabled(
+            isPresented: true, animated: true, isPlaying: true, audioReaction: 0.3,
+            reduceMotion: true, budget: normal))
+        #expect(!LyricifyScenePolicy.pulseEnabled(
+            isPresented: false, animated: true, isPlaying: true, audioReaction: 0.3,
+            reduceMotion: false, budget: normal))
+        #expect(!LyricifyScenePolicy.pulseEnabled(
+            isPresented: true, animated: true, isPlaying: false, audioReaction: 0.3,
+            reduceMotion: false, budget: normal))
+        #expect(!LyricifyScenePolicy.pulseEnabled(
+            isPresented: true, animated: false, isPlaying: true, audioReaction: 0.3,
+            reduceMotion: false, budget: normal))
+    }
+
+    @Test func auxiliaryStreamFollowsTheVisibleBeatPolicy() {
+        // Gapless AVPlayer has no audible-item tap. Keep the real PCM decoder alive
+        // whenever the visible pulse is allowed, including Low Power and fair heat.
         #expect(budget().allowsAuxiliaryStreamingDecoder)
-        for limited in [budget(lowPower: true), budget(thermal: .fair), budget(thermal: .serious),
-                        budget(thermal: .critical), budget(active: false), budget(memory: true),
+        #expect(budget(lowPower: true).allowsAuxiliaryStreamingDecoder)
+        #expect(budget(thermal: .fair).allowsAuxiliaryStreamingDecoder)
+        for limited in [budget(thermal: .serious), budget(thermal: .critical),
+                        budget(active: false), budget(memory: true),
                         budget(reduceMotion: true)] {
             #expect(!limited.allowsAuxiliaryStreamingDecoder)
         }

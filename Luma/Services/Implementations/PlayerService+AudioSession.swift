@@ -209,6 +209,7 @@ extension PlayerService {
         if systemPlayback.isActive {
             if systemEngine.state != .playing {
                 systemEngine.resume()
+                Task { @MainActor in PlaybackBeatMeter.shared.setEnabled(true) }
                 Logger.player.info("[INTERRUPTION] AVPlayer resumed")
             }
             startProgressTimer()

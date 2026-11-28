@@ -104,7 +104,7 @@ extension NowPlayingSnapshot {
         Self(title: title, artist: artist, album: album, duration: duration, position: position,
              playbackRate: playbackRate, artworkURL: artworkURL ?? previous?.artworkURL,
              artworkHeaders: artworkURL == nil ? (previous?.artworkHeaders ?? artworkHeaders) : artworkHeaders,
-             coverArtId: coverArtId, albumId: albumId, isLiveStream: isLiveStream,
+             coverArtId: coverArtId ?? previous?.coverArtId, albumId: albumId ?? previous?.albumId, isLiveStream: isLiveStream,
              radioStationName: radioStationName, isrc: isrc, trackId: trackId,
              queueIndex: queueIndex, queueCount: queueCount, publication: publication, timestamp: timestamp)
     }

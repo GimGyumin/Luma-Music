@@ -6,7 +6,7 @@
 import Foundation
 import MediaPlayer
 import OSLog
-#if os(iOS)
+#if os(iOS) && !targetEnvironment(macCatalyst)
 import UIKit
 #endif
 
@@ -21,7 +21,7 @@ extension NowPlayingService {
             Task { await self?.refreshDownloadedArtwork(coverID: coverID) }
         }
 
-        #if os(iOS)
+        #if os(iOS) && !targetEnvironment(macCatalyst)
         if #available(iOS 27.0, *) {
             // Siri relevance is independent of the system playback session. MediaPlayer
             // alone owns metadata and commands; do not create a second MediaSession.
@@ -92,7 +92,7 @@ extension NowPlayingService {
             }
         }
 
-        #if os(iOS)
+        #if os(iOS) && !targetEnvironment(macCatalyst)
         // Retry deferred lock-screen artwork once the app returns to the foreground.
         installForegroundArtworkRetryObserver()
         #endif
@@ -156,7 +156,7 @@ extension NowPlayingService {
     // MARK: - Remote command availability
 
     func reassertRemoteCommands() async {
-        #if os(iOS)
+        #if os(iOS) && !targetEnvironment(macCatalyst)
         if #available(iOS 27.0, *) {
             await MainActor.run { (NowPlayingMetadataSink.native as? LumaNativeMediaSession)?.reassert() }
             return
@@ -181,7 +181,7 @@ extension NowPlayingService {
     }
 
     func updateRemoteCommandsAvailability(isLiveStream: Bool) async {
-        #if os(iOS)
+        #if os(iOS) && !targetEnvironment(macCatalyst)
         if #available(iOS 27.0, *) { return } // Derived from native content/selection.
         #endif
         await MainActor.run {
@@ -251,7 +251,7 @@ private enum RemoteCommandDebugLog {
     nonisolated static let queue = DispatchQueue(label: "com.kyumin.luma.rcc-debug-log", qos: .utility)
 
     nonisolated static func log(_ message: String) {
-        #if os(iOS)
+        #if os(iOS) && !targetEnvironment(macCatalyst)
         // Cheap in-memory flag check on the caller; when disabled (the default) we do zero work and zero I/O.
         guard UserDefaults.standard.bool(forKey: enabledKey) else { return }
         let line = "\(Date()): \(message)\n"

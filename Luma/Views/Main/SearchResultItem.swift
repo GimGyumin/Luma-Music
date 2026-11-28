@@ -99,6 +99,19 @@ struct SearchResultLabel: View {
     var zoomNamespace: Namespace.ID? = nil
 
     var body: some View {
+        #if os(macOS)
+        HStack(spacing: 10) {
+            CoverArtCard(id: item.coverArtId, size: 40, cornerRadius: isArtist ? 20 : 5)
+                .lumaMatchedTransitionSource(id: zoomSourceID, in: zoomNamespace)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(item.title).font(.system(size: 13)).lineLimit(1)
+                Text(item.subtitle).font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(1)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(.vertical, 4)
+        .contentShape(Rectangle())
+        #else
         HStack(spacing: 14) {
             CoverArtCard(id: item.coverArtId, size: 60, cornerRadius: isArtist ? 30 : 5)
                 .lumaMatchedTransitionSource(id: zoomSourceID, in: zoomNamespace)
@@ -110,6 +123,7 @@ struct SearchResultLabel: View {
         }
         .padding(.vertical, 8)
         .contentShape(Rectangle())
+        #endif
     }
 
     private var isArtist: Bool {

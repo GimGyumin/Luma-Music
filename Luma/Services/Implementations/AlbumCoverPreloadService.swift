@@ -702,7 +702,8 @@ final class AlbumCoverPreloadService {
         artworkImageCache: ArtworkImageCache,
         dominantColorExtractor: DominantColorExtractor?,
         originalURL: URL? = nil,
-        allowNetwork: Bool = false
+        allowNetwork: Bool = false,
+        retryVisibleArtwork: Bool = false
     ) async -> Bool {
         let token = artworkImageCache.palettePreparationToken(for: coverArtId)
         let palette: ArtworkPalette
@@ -712,7 +713,9 @@ final class AlbumCoverPreloadService {
             palette = cached
         } else {
             let image: PlatformImage?
-            if originalURL == nil {
+            if originalURL == nil, retryVisibleArtwork {
+                image = await artworkImageCache.loadVisibleArtwork(coverArtId: coverArtId, tier: .thumb, allowNetwork: allowNetwork)
+            } else if originalURL == nil {
                 image = await artworkImageCache.load(coverArtId: coverArtId, tier: .thumb, allowNetwork: allowNetwork)
             } else { image = nil }
             guard !Task.isCancelled else { return false }

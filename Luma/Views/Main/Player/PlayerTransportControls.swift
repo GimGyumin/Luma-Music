@@ -24,9 +24,18 @@ struct ScrubberView: View {
     var isExpensiveNetwork: Bool = false
     var phoneLandscape: Bool = false
     var immersivePortrait: Bool = false
+    /// Wide iPad / desktop player: Apple Music’s thinner scrubber with a
+    /// bare lossless mark and a small position knob.
+    var widePlayer: Bool = false
     /// Artwork-derived tint for the unfilled track. Nil keeps the neutral
     /// white-opacity track used by the other players.
     var backgroundTint: Color? = nil
+    /// Phone portrait: artwork-aware resting/pressed colours for the track and
+    /// time labels. Other players keep their existing palette.
+    var sliderPalette: ImmersiveSliderPalette? = nil
+    /// Lyric/queue transitions reset any interrupted seek visual so one surface
+    /// cannot leave the other with a pressed-looking bar.
+    var playerSurface: PlayerSurface? = nil
 
     @State private var isDragging = false
     @State private var isSeeking = false
@@ -79,26 +88,41 @@ struct ScrubberView: View {
                         }
                     }
                 },
-                trackColor: backgroundTint?.opacity(0.45) ?? contentColor.opacity(0.22),
-                fillColor: contentColor.opacity(0.95),
-                height: phoneLandscape || immersivePortrait ? 18 : 24,
-                trackHeight: 7,
-                isInteracting: isDragging || isSeeking
+                trackColor: sliderPalette?.track
+                    ?? backgroundTint?.opacity(0.45)
+                    ?? contentColor.opacity(0.22),
+                pressedTrackColor: sliderPalette?.pressedTrack,
+                fillColor: sliderPalette?.normalFill ?? contentColor.opacity(0.95),
+                pressedFillColor: sliderPalette?.pressedFill,
+                height: widePlayer ? 20 : (phoneLandscape || immersivePortrait ? 18 : 24),
+                trackHeight: widePlayer ? 4 : 7,
+                activeTrackHeight: widePlayer ? 7 : 12,
+                isInteracting: isDragging || isSeeking,
+                showsThumb: widePlayer,
+                interactionResetToken: playerSurface
             )
 
             ScrubberTimeLabels(
                 playerState: playerState,
                 effectiveDuration: effectiveDuration,
                 overridePosition: (isDragging || isSeeking) ? displayPosition : nil,
-                color: secondaryContentColor,
-                qualityColor: phoneLandscape
+                color: isDragging
+                    ? (sliderPalette?.pressedTime ?? secondaryContentColor)
+                    : (sliderPalette?.normalTime ?? secondaryContentColor),
+                qualityColor: phoneLandscape || widePlayer
                     ? ImmersivePlayerInk.quality
                     : (immersivePortrait ? ImmersivePlayerInk.quality : contentColor),
                 quality: playbackQuality,
                 showsRemainingMinus: true,
                 compactQualityChip: immersivePortrait,
-                plainQualityChip: phoneLandscape
+                plainQualityChip: phoneLandscape || widePlayer,
+                // Restore the release player's tappable quality capsule. Landscape
+                // stays inline without a detail sheet; portrait and wide players
+                // open the existing centered quality card.
+                qualityChipInteractive: !phoneLandscape,
+                timeFont: widePlayer ? .system(size: 13, weight: .medium) : .lumaCaption
             )
+            .animation(.easeInOut(duration: 0.18), value: isDragging)
         }
         .onChange(of: playerState.currentTrack?.id) { _, _ in
             seekTask?.cancel()
@@ -107,6 +131,12 @@ struct ScrubberView: View {
             isSeeking = false
             displayPosition = playerState.position
             // Retain the original gesture's identity until its release is discarded.
+        }
+        .onChange(of: playerSurface) { _, _ in
+            // A surface switch must never carry a cancelled drag's visual state
+            // into lyrics or queue. The seek itself (if any) is not cancelled.
+            isDragging = false
+            isSeeking = false
         }
     }
 }
@@ -120,9 +150,11 @@ struct ScrubberTimeLabels: View {
     var quality: AudioQualityKind? = nil
     var showsRemainingMinus: Bool = false
     var compactQualityChip: Bool = false
-    /// Landscape uses Apple Music's flat mark + title; the portrait player keeps
-    /// the tappable frosted chip.
+    /// Landscape displays the format inline without a detail button.
     var plainQualityChip: Bool = false
+    /// The wide player keeps the detail sheet reachable while dropping the pill fill.
+    var qualityChipInteractive: Bool = true
+    var timeFont: Font = .lumaCaption
 
     private var hasPlayableDuration: Bool {
         playerState.currentTrack != nil && effectiveDuration > 0 && !playerState.isLiveStream
@@ -130,30 +162,36 @@ struct ScrubberTimeLabels: View {
 
     var body: some View {
         let shown = overridePosition ?? playerState.pendingSeekPosition ?? playerState.position
-        HStack {
+        HStack(spacing: 8) {
             Text(hasPlayableDuration
                  ? Duration.seconds(shown).formatted(.time(pattern: .minuteSecond))
                  : "--:--")
-                .font(.lumaCaption)
+                .font(timeFont)
                 .foregroundStyle(color)
                 .monospacedDigit()
-            Spacer(minLength: 8)
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
+                .frame(maxWidth: .infinity, alignment: .leading)
             if let quality {
                 AudioQualityLabelView(
                     quality: quality,
                     foreground: qualityColor,
-                    interactive: !plainQualityChip,
+                    interactive: qualityChipInteractive,
                     usesGlass: false,
-                    compact: compactQualityChip
+                    style: quality == .dolbyAtmos && (compactQualityChip || plainQualityChip) ? .scrubberAtmos : .pill,
+                    compact: compactQualityChip,
+                    showsChipBackground: !plainQualityChip
                 )
             }
-            Spacer(minLength: 8)
             Text(hasPlayableDuration
                  ? (showsRemainingMinus ? "−" : "") + Duration.seconds(max(effectiveDuration - shown, 0)).formatted(.time(pattern: .minuteSecond))
                  : "--:--")
-                .font(.lumaCaption)
+                .font(timeFont)
                 .foregroundStyle(color)
                 .monospacedDigit()
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
+                .frame(maxWidth: .infinity, alignment: .trailing)
         }
     }
 }
@@ -163,12 +201,20 @@ struct ProgressSlider: View {
     let total: TimeInterval
     let onEditingChanged: (Bool) -> Void
     var trackColor: Color = Color.white.opacity(0.2)
+    var pressedTrackColor: Color? = nil
     var fillColor: Color = Color.white.opacity(0.95)
+    /// Brighter fill while the finger is down. Nil keeps the resting fill.
+    var pressedFillColor: Color? = nil
     var height: CGFloat = 32
     var trackHeight: CGFloat = 5
     var activeTrackHeight: CGFloat = 12
     var dragMinimumDistance: CGFloat = 0
     var isInteracting: Bool = false
+    /// Small Apple Music–style position knob. The gesture remains on the full
+    /// track so the knob does not shrink the touch target.
+    var showsThumb: Bool = false
+    /// Changing this value clears a drag that was cancelled by a surface switch.
+    var interactionResetToken: AnyHashable? = nil
     /// Volume-style behaviour: pressing only shows the active (thicker) bar — the value never jumps
     /// to the touch point. It moves *relative* to the value the press started from, so a tap (or a
     /// finger wobble while holding) cannot slam the volume. Progress scrubbers keep the default
@@ -187,15 +233,28 @@ struct ProgressSlider: View {
         GeometryReader { geo in
             let trackW = geo.size.width
             let barHeight = isDragging ? activeTrackHeight : trackHeight
+            let fillWidth = progressWidth(in: trackW)
+            let thumbSize: CGFloat = isDragging ? 12 : 8
+            let resolvedTrack = isDragging ? (pressedTrackColor ?? trackColor) : trackColor
+            let resolvedFill = isDragging ? (pressedFillColor ?? fillColor) : fillColor
 
             ZStack(alignment: .leading) {
                 Capsule()
-                    .fill(trackColor)
+                    .fill(resolvedTrack)
 
                 Capsule()
-                    .fill(fillColor)
-                    .frame(width: progressWidth(in: trackW))
+                    .fill(resolvedFill)
+                    .frame(width: fillWidth)
                     .animation(nil, value: value)
+
+                if showsThumb {
+                    Circle()
+                        .fill(resolvedFill)
+                        .frame(width: thumbSize, height: thumbSize)
+                        .shadow(color: .black.opacity(0.22), radius: 3, y: 1)
+                        .offset(x: max(0, fillWidth - thumbSize / 2))
+                        .animation(.spring(response: 0.24, dampingFraction: 0.8), value: isDragging)
+                }
             }
             .frame(height: barHeight)
             .animation(.spring(response: 0.28, dampingFraction: 0.78), value: isDragging)
@@ -247,6 +306,11 @@ struct ProgressSlider: View {
             @unknown default: break
             }
         }
+        .onChange(of: interactionResetToken) { _, _ in
+            isDragging = false
+            dragValue = nil
+            dragAnchor = nil
+        }
     }
 
     private func progressWidth(in totalWidth: CGFloat) -> CGFloat {
@@ -267,6 +331,9 @@ struct PlaybackControlsView: View {
     var showsShuffleRepeat: Bool = false
     var compactLayout: Bool = false
     var spreadsTransport: Bool = false
+    /// Wide iPad / desktop player: slightly larger primary glyphs and a wider
+    /// shuffle–transport–repeat rhythm under the album column.
+    var widePlayer: Bool = false
     /// Phone portrait Music.app rhythm: tighter row, slightly smaller glyphs,
     /// while keeping the 64/88pt hit targets.
     var phonePortraitControls: Bool = false
@@ -276,18 +343,20 @@ struct PlaybackControlsView: View {
 
     private var previousNextIconSize: CGFloat {
         if compactLayout { return 32 }
+        if widePlayer { return 38 }
         if phonePortraitControls && spreadsTransport { return ImmersivePlayerMetrics.transportSkipGlyph }
         return phonePortraitControls ? 30 : 36
     }
 
     private var playIconSize: CGFloat {
         if compactLayout { return 40 }
-        return phonePortraitControls ? 38 : 44
+        if widePlayer { return 46 }
+        return phonePortraitControls ? ImmersivePlayerMetrics.transportPlayGlyph : 44
     }
 
     private var controlsSpacing: CGFloat {
         if compactLayout { return 12 }
-        if showsShuffleRepeat { return LumaSpacing.xl }
+        if showsShuffleRepeat { return widePlayer ? LumaSpacing.xxl : LumaSpacing.xl }
         return phonePortraitControls ? LumaSpacing.xxl : LumaSpacing.xxxxl
     }
 

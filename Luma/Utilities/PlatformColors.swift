@@ -11,6 +11,16 @@ import AppKit
 #endif
 
 nonisolated enum PlatformColors {
+    static var secondarySystemBackground: Color {
+        #if canImport(UIKit)
+        Color(UIColor.secondarySystemBackground)
+        #elseif canImport(AppKit)
+        Color(NSColor.controlBackgroundColor)
+        #else
+        Color.gray.opacity(0.12)
+        #endif
+    }
+
     static var systemBackground: Color {
         #if canImport(UIKit)
         Color(UIColor.systemBackground)

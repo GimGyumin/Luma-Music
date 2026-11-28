@@ -12,6 +12,7 @@ struct PlaybackSettingsView: View {
 
     #if os(iOS)
     @ObservedObject private var musicHaptics = MusicHapticsController.shared
+    @State private var showHapticsInstructions = false
     #endif
 
     private var crossfade: CrossfadeSettings? { container?.crossfadeSettings }
@@ -32,6 +33,11 @@ struct PlaybackSettingsView: View {
         .navigationBarTitleDisplayMode(.inline)
         #endif
         #if os(iOS)
+        .alert("Music Haptics", isPresented: $showHapticsInstructions) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text("Open the Settings app, then choose Accessibility > Music Haptics to turn it on.")
+        }
         .onChange(of: appleMusic.musicHapticsEnabled, initial: true) { _, _ in
             musicHaptics.refresh()
         }
@@ -90,7 +96,7 @@ struct PlaybackSettingsView: View {
             )
 
             SettingsActionRow("Accessibility Settings") {
-                MusicHapticsController.shared.openSystemSettings()
+                showHapticsInstructions = true
             }
         } header: {
             SettingsSectionHeader("Haptics")

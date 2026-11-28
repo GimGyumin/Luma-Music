@@ -207,6 +207,7 @@ extension PlayerService {
             // Flip the visible track *now*. Resolving the stream below can wait on the network
             // (Jellyfin playbackInfo, credentials, a slow server), and making the title and
             // artwork wait for it is what made a skip feel like it took seconds to change track.
+            if state.currentTrack?.id == song.id { state.trackRestartRevision &+= 1 }
             state.currentTrack = song
             state.currentPlaybackTrack = nil
             // Take the scrubber with it. Leaving the outgoing track's duration/position in place
@@ -451,6 +452,7 @@ extension PlayerService {
         // overwritten by this block.
         let isLimitedNetwork = await MainActor.run { serverService.state.isLimitedNetwork }
         guard await commitPresentation(context, { state in
+            if state.currentTrack?.id == song.id, state.position > 0 { state.trackRestartRevision &+= 1 }
             state.currentTrack = song
             state.duration = duration
             state.position = 0

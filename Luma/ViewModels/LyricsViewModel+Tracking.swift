@@ -64,9 +64,14 @@ extension LyricsViewModel {
         if amllTransitionIsSeek != amllSeeking { amllTransitionIsSeek = amllSeeking }
         if amllSeeking { amllSeekRevision &+= 1 }
         let usesAMLL = lyricDocument?.timing == .word && !amllDisplayIndices.isEmpty
-        let timedLines = usesAMLL ? amllActiveRows(at: baseMs, seeking: amllSeeking)
-            : playbackTimeline.activeRows(for: baseMs)
         let adjustedMs = baseMs
+        let emphasis = emphasisTimeline.sync(adjustedMs, seeking: amllSeeking)
+        let emphasized = Set(emphasis.playing.compactMap {
+            emphasisDisplayIndices.indices.contains($0) ? emphasisDisplayIndices[$0] : nil
+        })
+        let timedLines = usesAMLL
+            ? amllActiveRows(at: adjustedMs, seeking: amllSeeking, emphasized: emphasized)
+            : playbackTimeline.activeRows(for: adjustedMs)
 
         var newPrimary = timedLines.primary
         var newActive = timedLines.indices
@@ -84,9 +89,7 @@ extension LyricsViewModel {
             newActive = []
         }
 
-        let emphasis = emphasisTimeline.sync(adjustedMs, seeking: amllSeeking)
-        let newEmphasis: Set<Int> = instrumentalGapProgress != nil ? [] : Set(
-            emphasis.playing.compactMap { emphasisDisplayIndices.indices.contains($0) ? emphasisDisplayIndices[$0] : nil })
+        let newEmphasis: Set<Int> = instrumentalGapProgress != nil ? [] : emphasized
         if emphasizedLineIndices != newEmphasis { emphasizedLineIndices = newEmphasis }
 
         let newKaraoke = Self.karaokeByteEnds(
@@ -97,6 +100,7 @@ extension LyricsViewModel {
 
         // Line selection, instrumental gaps and word fill share the filtered clock.
         if karaokePlaybackMs != adjustedMs {
+            if adjustedMs < karaokePlaybackMs { lastPresentedLyricFrameMs = nil }
             let now = CACurrentMediaTime()
             let expected = LyricPresentationClock.time(sampleMs: karaokeFrameTimeMs,
                 sampledAt: karaokeSampleHostTime, now: now, advancing: isPlaying)
@@ -128,16 +132,22 @@ extension LyricsViewModel {
         amllForceSeek = true
     }
 
-    private func amllActiveRows(at time: Int, seeking: Bool) -> (primary: Int?, indices: Set<Int>) {
+    private func amllActiveRows(at time: Int, seeking: Bool, emphasized: Set<Int>) -> (primary: Int?, indices: Set<Int>) {
         let snapshot = amllTimeline.sync(time, seeking: seeking)
-        // Vocal membership expires at the source end time. AMLL's lingering highlight
-        // is useful for scroll focus, but must not keep finished vocals bright.
-        let indices = Set(snapshot.playing.compactMap { amllDisplayIndices.indices.contains($0) ? amllDisplayIndices[$0] : nil })
-        let primary = indices.contains(where: { !displayRows[$0].isSecondaryAgent })
-            ? indices.filter { !displayRows[$0].isSecondaryAgent }.min() : indices.min()
-        let focus = amllDisplayIndices.indices.contains(snapshot.scrollIndex)
-            ? amllDisplayIndices[snapshot.scrollIndex] : nil
-        return (primary ?? (snapshot.ended ? nil : focus), indices)
+        // AMLL includes embedded chorus in its end time for instrumental gap detection.
+        // Lead word fill expires at either the lead's own end or its next phrase.
+        let indices = Set(snapshot.playing.compactMap { entry -> Int? in
+            guard amllDisplayIndices.indices.contains(entry) else { return nil }
+            let index = amllDisplayIndices[entry]
+            let row = displayRows[index]
+            return row.isSecondaryAgent || (time < (row.endMs ?? time) && emphasized.contains(index))
+                ? index : nil
+        })
+        guard !snapshot.ended else { return (nil, indices) }
+        let focus = playbackTimeline.latestStartedLead(at: time)
+            ?? indices.min()
+            ?? (amllDisplayIndices.indices.contains(snapshot.scrollIndex) ? amllDisplayIndices[snapshot.scrollIndex] : nil)
+        return (focus, indices)
     }
 
     private func applyAMLLInterlude(at time: Int) {
@@ -152,13 +162,16 @@ extension LyricsViewModel {
         if abs((instrumentalGapProgress ?? -1) - progress) > 0.005 { instrumentalGapProgress = progress }
     }
 
-    /// Read-only frame clock. The tracking loop owns line membership; only the active
-    /// text renderer extrapolates between samples. No Observation state changes here.
+    /// Only text renderers extrapolate between ticks. Cache the last frame without
+    /// publishing state so a late tick or a pause cannot undo visible word progress.
     func presentationTimeMs(at hostTime: CFTimeInterval = CACurrentMediaTime()) -> Int {
         let advancing = isShown && isActive && isPlaying
             && lyricSeekTargetMs == nil && playerState.pendingSeekPosition == nil
-        return LyricPresentationClock.time(sampleMs: karaokeFrameTimeMs,
-            sampledAt: karaokeSampleHostTime, now: hostTime, advancing: advancing)
+        let time = LyricPresentationClock.time(sampleMs: karaokeFrameTimeMs,
+            sampledAt: karaokeSampleHostTime, now: hostTime, advancing: advancing,
+            previousMs: lastPresentedLyricFrameMs)
+        lastPresentedLyricFrameMs = time
+        return time
     }
 
     func clearLineHighlight() {
@@ -169,6 +182,7 @@ extension LyricsViewModel {
         karaokeByteEnds = [:]
         karaokePlaybackMs = 0
         karaokeFrameTimeMs = 0
+        lastPresentedLyricFrameMs = nil
     }
 
     nonisolated static func karaokeByteEnds(
@@ -347,6 +361,8 @@ extension LyricsViewModel {
     func synchronizeSeekClock(to seconds: TimeInterval) {
         guard seconds.isFinite else { return }
         amllForceSeek = true
+        observedTrackRestartRevision = playerState.trackRestartRevision
+        lastPresentedLyricFrameMs = nil
         let target = LyricTime.milliseconds(fromSeconds: max(0, seconds))
         lastPositionSampleMs = target
         lastPositionSampleAt = CACurrentMediaTime()
@@ -468,22 +484,29 @@ extension LyricsViewModel {
             while !Task.isCancelled {
                 // Keep the weak owner weak across suspension; a dismissed lyrics
                 // screen must not be kept alive by its own tracking task.
-                guard self?.performTrackingTick() == true else { return }
-                let intervalNs = LumaPerformance.lyricsTickIntervalNs(karaokePlayback: karaokePlayback)
+                let budget = LumaPerformance.lyricsTickIntervalNs(karaokePlayback: karaokePlayback)
+                guard let intervalNs = self?.performTrackingTick(budget: budget) else { return }
                 try? await Task.sleep(nanoseconds: intervalNs)
             }
         }
     }
 
-    private func performTrackingTick() -> Bool {
-        guard isShown, isActive, isPlaying, followsPlayback else { return false }
-        update(elapsedMs: interpolatedElapsedMs())
-        return true
+    private func performTrackingTick(budget: UInt64) -> UInt64? {
+        guard isShown, isActive, isPlaying, followsPlayback else { return nil }
+        if observedTrackRestartRevision != playerState.trackRestartRevision {
+            synchronizeSeekClock(to: playerState.pendingSeekPosition ?? playerState.position)
+        } else {
+            update(elapsedMs: interpolatedElapsedMs())
+        }
+        guard lyricSeekTargetMs == nil, playerState.pendingSeekPosition == nil else { return budget }
+        // Wake at nearby lyric boundaries without turning line-only timing into a frame loop.
+        return LyricScrollCadence.trackingDelay(budget: budget, milliseconds: karaokePlaybackMs,
+            nextStart: playbackTimeline.nextStart(after: karaokePlaybackMs))
     }
 
-    /// Returns the best estimate of the current playback position in ms.
-    /// Accepts forward progress unconditionally; only filters out backward
-    /// jumps that are clearly stale pre-seek artifacts.
+    /// A fresh transport sample can lag behind the bounded estimate already on screen.
+    /// Keep the last displayed position until playback catches up. Explicit seeks and
+    /// track restarts rebase the clock separately.
     func interpolatedElapsedMs() -> Int {
         if let target = lyricSeekTargetMs ?? playerState.pendingSeekPosition.map({ LyricTime.milliseconds(fromSeconds: $0) }) {
             // File parsers and AVPlayer can publish a stale clock during repositioning.
@@ -499,20 +522,11 @@ extension LyricsViewModel {
         if nowMs != lastPositionSampleMs {
             lastPositionSampleMs = nowMs
             lastPositionSampleAt = now
-            // Fresh engine samples are authoritative. Ignore only tiny backward
-            // quantization jitter; corrections larger than 120 ms commonly mean the
-            // interpolated lyric clock advanced during buffering and must be pulled back.
-            if nowMs >= lastDisplayedPositionMs || (lastDisplayedPositionMs - nowMs) > 120 {
-                lastDisplayedPositionMs = nowMs
-            }
-            return lastDisplayedPositionMs
         }
 
-        // No new sample — interpolate forward from the last known position.
-        // The service samples at 500 ms. A frozen engine clock must not let
-        // lyrics run seconds ahead and then jump backward when buffering ends.
-        let interpolated = nowMs + min(750, max(0, Int((now - lastPositionSampleAt) * 1000)))
-        lastDisplayedPositionMs = max(interpolated, lastDisplayedPositionMs)
+        lastDisplayedPositionMs = LyricPresentationClock.time(sampleMs: nowMs,
+            sampledAt: lastPositionSampleAt, now: now, advancing: true,
+            previousMs: lastDisplayedPositionMs, predictionLimitMs: 750)
         return lastDisplayedPositionMs
     }
 
@@ -532,9 +546,10 @@ nonisolated enum LyricPresentationClock {
         return expectedMs + min(2, max(-2, correction))
     }
 
-    static func time(sampleMs: Int, sampledAt: Double, now: Double, advancing: Bool) -> Int {
-        guard advancing, now.isFinite, sampledAt.isFinite else { return sampleMs }
-        // Bound extrapolation if the main actor or audio sampling stalls.
-        return sampleMs + Int(min(80, max(0, (now - sampledAt) * 1000)))
+    static func time(sampleMs: Int, sampledAt: Double, now: Double, advancing: Bool,
+                     previousMs: Int? = nil, predictionLimitMs: Int = 80) -> Int {
+        let predictionMs = advancing && now.isFinite && sampledAt.isFinite
+            ? Int(min(Double(predictionLimitMs), max(0, (now - sampledAt) * 1000))) : 0
+        return max(sampleMs + predictionMs, previousMs ?? sampleMs)
     }
 }

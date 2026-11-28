@@ -25,6 +25,11 @@ struct PlaylistCoverThumbnail: View {
     let coverArtId: String
     let title: String
     let size: CGFloat
+    /// The live-gradient cover normally draws its own title. Home's editorial
+    /// cards put the title over a bottom gradient instead, so they turn this off.
+    var showsTitleOverlay: Bool = true
+    /// 12 pt for cards, smaller for sidebar/list thumbnails.
+    var cornerRadius: CGFloat = LumaCornerRadius.large
 
     #if os(iOS)
     @Environment(\.appContainer) private var container
@@ -48,13 +53,15 @@ struct PlaylistCoverThumbnail: View {
         ZStack {
             if let spec {
                 PlaylistGradientView(spec: spec)
-                titleOverlay
+                if showsTitleOverlay {
+                    titleOverlay
+                }
             } else {
                 CoverArtView(id: coverArtId, size: Int(size * 2))
             }
         }
         .frame(width: size, height: size)
-        .clipShape(RoundedRectangle(cornerRadius: LumaCornerRadius.large, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
         .task(id: "\(playlistId):\(serverId?.uuidString ?? "-"):\(coverArtUploadVersion)") {
             spec = resolveSpec()
         }

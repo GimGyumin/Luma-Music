@@ -17,7 +17,9 @@ extension View {
             prompt: Text(prompt)
         )
         #else
-        searchable(text: text, prompt: Text(prompt))
+        // macOS library roots put their search field in `MacLibraryHeader`,
+        // not in the window toolbar.
+        self
         #endif
     }
 }

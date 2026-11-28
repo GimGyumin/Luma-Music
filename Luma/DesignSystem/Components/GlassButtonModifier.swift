@@ -80,41 +80,12 @@ extension View {
         }
     }
 
-    /// Soft panel for cards / accessory chrome. Cheap path uses material, not Liquid Glass.
-    @ViewBuilder
-    func lumaGlassPanel(cornerRadius: CGFloat = 16) -> some View {
-        if !LumaPerformance.preferCheapChrome,
-           #available(macOS 26.0, iOS 26.0, *) {
-            self.glassEffect(Glass.regular, in: .rect(cornerRadius: cornerRadius))
-        } else {
-            self.background {
-                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    .fill(.ultraThinMaterial)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                            .strokeBorder(.primary.opacity(0.12), lineWidth: 0.5)
-                    )
-            }
-        }
-    }
-
     /// Over-cover HERO round button: transparent tap area + soft shadow for glyph legibility.
     func lumaHeroButton(size: CGFloat = 44) -> some View {
         self
             .shadow(color: .black.opacity(0.28), radius: 3, y: 1)
             .frame(width: size, height: size)
             .contentShape(Circle())
-    }
-
-    /// Circular control without Liquid Glass — soft fill for over-cover chrome (player star / more).
-    func lumaPlainCircleButton(size: CGFloat = 44, fill: Color) -> some View {
-        self
-            .frame(width: size, height: size)
-            .contentShape(Circle())
-            .background {
-                Circle()
-                    .fill(fill)
-            }
     }
 
     /// Capsule control without Liquid Glass (queue shuffle / repeat / auto-extend pills).

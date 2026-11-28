@@ -33,22 +33,6 @@ public enum LumaColors {
     /// toolbar buttons. Brand blue stays opt-in through `accent`/`lumaAccent`; destructive
     /// roles keep the system red.
     public static var controlAccent: Color { .primary }
-    
-    // MARK: — Backgrounds
-    public static let backgroundPrimary = Color("LumaBackgroundPrimary")
-    public static let backgroundSecondary = Color("LumaBackgroundSecondary")
-    public static let backgroundTertiary = Color("LumaBackgroundTertiary")
-    
-    // MARK: — Text (Apple semantic labels — readable in light/dark; not brand accent)
-    public static var textPrimary: Color { SemanticLabel.primary }
-    public static var textSecondary: Color { SemanticLabel.secondary }
-    public static var textTertiary: Color { SemanticLabel.tertiary }
-
-    /// Secondary album metadata stays consistent across words and quality marks.
-    public static func albumMetadataInk(on background: Color, increasedContrast: Bool) -> Color {
-        let ink: Color = prefersLightControl(on: background) ? .white : .black
-        return increasedContrast ? ink : ink.opacity(0.70)
-    }
 
     /// System label / status colors for descriptions, guidance, and warnings.
     public enum SemanticLabel {

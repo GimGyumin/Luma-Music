@@ -13,7 +13,7 @@ struct LumaWidgetsBundle: WidgetBundle {
         RecentWidget()
         RecommendationsWidget()
         PinnedWidget()
-        #if os(iOS)
+        #if os(iOS) && !targetEnvironment(macCatalyst)
         LibraryPreparationLiveActivity()
         #endif
     }

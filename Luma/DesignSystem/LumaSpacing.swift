@@ -4,6 +4,9 @@
 // See LICENSE file in the project root for full license information.
 
 import SwiftUI
+#if os(iOS)
+import UIKit
+#endif
 
 // MARK: - Spacing scale (4pt grid)
 
@@ -31,6 +34,29 @@ enum LumaCornerRadius {
     static let large: CGFloat     = 12   // full-player cover art, sheets
     static let hero: CGFloat      = 20   // Wrapped stat hero, year card
     static let pill: CGFloat      = 999  // capsule buttons
+}
+
+// MARK: - Dashboard geometry
+
+/// Shared geometry for the Home / Discover media shelves.
+///
+/// 12.9-inch iPad reference: a 320 pt sidebar leaves 1,046 pt of content;
+/// after 16 pt side insets, five 184 pt covers and four 24 pt gaps fit almost
+/// exactly. A fixed cover size means an 11-inch iPad naturally shows four
+/// cards while a 13-inch iPad shows five, without device-specific breakpoints.
+enum LumaDashboardLayout {
+    static let regularItemSize: CGFloat = 184
+    static let regularItemSpacing: CGFloat = 24
+
+    /// True only for the regular-width iPad layout the reference describes.
+    /// macOS, iPhone, and compact iPad windows keep their existing geometry.
+    static func usesIPadLayout(for sizeClass: UserInterfaceSizeClass?) -> Bool {
+        #if os(iOS)
+        return sizeClass == .regular && UIDevice.current.userInterfaceIdiom == .pad
+        #else
+        return false
+        #endif
+    }
 }
 
 /// Settings proportions shared by the root, subpages, and choice lists.
@@ -65,7 +91,6 @@ enum LumaAlbumLayout {
         case .photographic: return photographicHeadroom
         }
     }
-    static let fadedTopSample: CGFloat = 0.06
     static let fadedTopBlend: CGFloat = 0.04
     static let fadedControlSide: CGFloat = 52
     static let fadedPlayWidth: CGFloat = 160
@@ -80,15 +105,6 @@ enum LumaAlbumLayout {
 /// Luma shadow values. In dark mode, shadows are invisible against black backgrounds;
 /// use `LumaCoverModifier` (via `.lumaCoverStyle()`) which switches to a thin
 /// border in dark mode automatically.
-enum LumaShadow {
-    static let artworkTextRadius: CGFloat = 2
-    static let artworkTextY: CGFloat = 1
-    static let artworkTextOpacity: Double = 0.5
-    static let coverRadius: CGFloat  = 8
-    static let coverY: CGFloat       = 4
-    static let coverOpacity: Double  = 0.15
-}
-
 // MARK: - Wide / desktop detail layout
 
 /// Shared sizing for macOS + iPad regular detail/player surfaces (not iPhone compact).
@@ -97,10 +113,13 @@ enum LumaWideLayout {
     static let heroCoverArtSize: CGFloat = 280
     /// Sidebar column width (cover + horizontal padding).
     static let detailSidebarWidth: CGFloat = 320
-    /// Full-player cover cap on wide layouts (iPad / macOS).
-    static let playerCoverCap: CGFloat = 480
     /// Full-player cover cap on iPhone landscape.
     static let playerCoverCapCompactHeight: CGFloat = 240
+    /// Wide player: air between the player column and the lyric column, as a
+    /// fraction of the window width (Music.app leaves a generous gap).
+    static let playerColumnGapFraction: CGFloat = 0.12
+    /// Wide player: upper bound for the sleeve so it stays balanced on large Macs.
+    static let playerCoverMax: CGFloat = 700
     /// Reserved height under NavigationSplitView content for the floating bottom player bar.
     static let playerBarReservedHeight: CGFloat = 120
 
@@ -167,13 +186,19 @@ struct ContentWidthModifier: ViewModifier {
     @ViewBuilder
     func body(content: Content) -> some View {
         #if os(macOS)
-        content
-            .containerRelativeFrame(.horizontal, alignment: .center) { total, _ in
-                switch style {
-                case .fill:     return max(320, total - 48)
-                case .readable: return readableWidth(total)
-                }
-            }
+        // Resolve width from the actual split-view detail column. Window-relative
+        // sizing (containerRelativeFrame) overflows the sidebar and the docked
+        // lyrics panel, pushing content underneath both.
+        switch style {
+        case .fill:
+            content
+                .padding(.horizontal, 8)
+        case .readable:
+            content
+                .frame(maxWidth: 1080)
+                .frame(maxWidth: .infinity)
+                .padding(.horizontal, 24)
+        }
         #else
         if horizontalSizeClass == .regular, style == .readable {
             // iPad at full width (or the wide half of Split View) gets the same readable cap as macOS;
@@ -219,17 +244,6 @@ extension View {
 
     func lumaContentWidth(_ style: LumaContentWidthStyle = .fill) -> some View {
         modifier(ContentWidthModifier(style: style))
-    }
-
-    /// Match upstream album pages: keep the system top-edge effect out of the
-    /// cover/zoom surface, including while the navigation bar is transitioning.
-    @ViewBuilder
-    func lumaHideTopScrollEdgeEffect() -> some View {
-        if #available(iOS 26.0, macOS 26.0, *) {
-            scrollEdgeEffectHidden(true, for: .top)
-        } else {
-            self
-        }
     }
 
     /// Album artwork can remain unobscured until content scrolls under the bar.

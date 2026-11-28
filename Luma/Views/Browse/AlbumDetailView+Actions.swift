@@ -35,7 +35,6 @@ extension AlbumDetailContentView {
     @ViewBuilder
     var albumMoreMenu: some View {
         let songs = displaySongs()
-        let nowPlayingTitle = container?.playerState.currentTrack?.title
         Menu {
             ControlGroup {
                 Button {
@@ -43,7 +42,7 @@ extension AlbumDetailContentView {
                         songToAddToPlaylist = first
                     }
                 } label: {
-                    Label(String(localized: "Add to Playlist…", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale), systemImage: "plus")
+                    DestinationMenuLabel.addToPlaylist(systemImage: "plus")
                 }
                 .disabled(songs.isEmpty || !isOnline)
 
@@ -109,21 +108,14 @@ extension AlbumDetailContentView {
             Button {
                 Task { await container?.playerService.playNext(songs) }
             } label: {
-                Label(String(localized: "Play Next", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale), systemImage: "text.line.first.and.arrowtriangle.forward")
+                DestinationMenuLabel.playNext(after: container?.playerState.currentTrack?.title)
             }
             .disabled(songs.isEmpty)
 
             Button {
                 Task { await container?.playerService.addToQueue(songs) }
             } label: {
-                if let nowPlayingTitle, !nowPlayingTitle.isEmpty {
-                    Label(
-                        String(format: String(localized: "Play Later: %@", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale), nowPlayingTitle),
-                        systemImage: "text.line.last.and.arrowtriangle.forward"
-                    )
-                } else {
-                    Label(String(localized: "Add to Queue", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale), systemImage: "text.line.last.and.arrowtriangle.forward")
-                }
+                DestinationMenuLabel.addToQueue(systemImage: "text.line.last.and.arrowtriangle.forward")
             }
             .disabled(songs.isEmpty)
 

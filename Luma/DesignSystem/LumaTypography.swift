@@ -17,8 +17,6 @@ import SwiftUI
 extension Font {
     // MARK: Headings (SF Pro Rounded)
 
-    /// Full-player track title. ~28pt. Rounded, bold.
-    static let lumaPlayerTitle = Font.system(.title, design: .rounded, weight: .bold)
     static let lumaImmersivePlayerTitle = Font.system(size: 20, weight: .semibold)
     static let lumaImmersivePlayerArtist = Font.system(size: 20, weight: .regular)
 
@@ -51,9 +49,4 @@ extension Font {
 
     /// Very small labels (track count badge, etc.). ~11pt. Regular.
     static let lumaCaption2 = Font.system(.caption2, design: .default, weight: .regular)
-
-    // MARK: Lyrics
-
-    /// Lyric line text in the full-player lyrics view. ~28pt. Rounded, semibold.
-    static let lumaLyricsLine = Font.system(.title, design: .rounded, weight: .semibold)
 }

@@ -23,6 +23,8 @@ final class AppContainer {
     // before actors are initialized (actors receive them via init injection).
     let playerState = PlayerState()
     let serverState = ServerState()
+    /// Keeps lyric translation/pronunciation visibility across full-player opens.
+    let lyricsPresentationState = LyricsPresentationState()
     let cacheSettings = CacheSettings()
     let streamingSettings = StreamingSettings()
 

@@ -311,6 +311,23 @@ struct NetworkSpeedProbeTests {
         #expect(await sampler.callCount == 3)
     }
 
+    @Test func remeasuresWhenAccountOrNetworkChanges() async {
+        let sampler = FakeSpeedSampler(rate: 250_000)
+        let probe = NetworkSpeedProbe(sampler: sampler)
+        let serverId = UUID()
+        let first = NetworkSpeedProbe.Scope(accountRevision: 1, networkRevision: 1)
+        let newNetwork = NetworkSpeedProbe.Scope(accountRevision: 1, networkRevision: 2)
+        let newAccount = NetworkSpeedProbe.Scope(accountRevision: 2, networkRevision: 2)
+
+        _ = await probe.measurement(serverId: serverId, url: url, headers: [:], scope: first)
+        #expect(await probe.freshRate(serverId: serverId, scope: newNetwork) == nil)
+        _ = await probe.measurement(serverId: serverId, url: url, headers: [:], scope: newNetwork)
+        #expect(await probe.freshRate(serverId: serverId, scope: newAccount) == nil)
+        _ = await probe.measurement(serverId: serverId, url: url, headers: [:], scope: newAccount)
+        _ = await probe.measurement(serverId: serverId, url: url, headers: [:], scope: newAccount)
+        #expect(await sampler.callCount == 3)
+    }
+
     @Test func failedSampleIsNotCached() async {
         let sampler = FakeSpeedSampler(rate: nil)
         let probe = NetworkSpeedProbe(sampler: sampler, ttl: 300, maxBytes: 1_024, budget: 1)

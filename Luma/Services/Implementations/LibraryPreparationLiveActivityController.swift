@@ -7,7 +7,7 @@ import Foundation
 import Observation
 import OSLog
 
-#if os(iOS)
+#if os(iOS) && !targetEnvironment(macCatalyst)
 import ActivityKit
 #endif
 
@@ -18,7 +18,7 @@ import ActivityKit
 /// ended when the pass finishes or fails. It never drives the pass itself: the preparation service
 /// reports progress and this renders it.
 ///
-/// The whole ActivityKit path is inside `#if os(iOS)`: macOS has no Live Activities, so the macOS
+/// The whole ActivityKit path is inside `#if os(iOS) && !targetEnvironment(macCatalyst)`: macOS has no Live Activities, so the macOS
 /// build compiles this file down to nothing and cannot verify it.
 @MainActor
 @Observable
@@ -36,14 +36,14 @@ final class LibraryPreparationLiveActivityController {
     /// True while an activity is on screen. The preparation pass uses this to skip bridging artwork
     /// that would never be displayed.
     var isPresenting: Bool {
-        #if os(iOS)
+        #if os(iOS) && !targetEnvironment(macCatalyst)
         activity != nil
         #else
         false
         #endif
     }
 
-    #if os(iOS)
+    #if os(iOS) && !targetEnvironment(macCatalyst)
     private var activity: Activity<LibraryPreparationActivityAttributes>?
     private var lastPushedAt = Date.distantPast
     /// ActivityKit budgets updates; a cover pass can move several times a second, so intermediate
@@ -55,7 +55,7 @@ final class LibraryPreparationLiveActivityController {
 
     /// Reuses an interrupted pass's activity and removes duplicate activities after relaunch.
     func reconcileOnLaunch() {
-        #if os(iOS)
+        #if os(iOS) && !targetEnvironment(macCatalyst)
         let existing = Activity<LibraryPreparationActivityAttributes>.activities
             .filter { $0.activityState == .active || $0.activityState == .stale }
         activity = existing.first
@@ -73,7 +73,7 @@ final class LibraryPreparationLiveActivityController {
         phaseTitle: String,
         serverName: String
     ) {
-        #if os(iOS)
+        #if os(iOS) && !targetEnvironment(macCatalyst)
         // Every rejection below is logged: "the activity just doesn't appear" is otherwise
         // impossible to diagnose from a device log.
         guard isEnabled else {
@@ -162,7 +162,7 @@ final class LibraryPreparationLiveActivityController {
         #endif
     }
 
-    #if os(iOS)
+    #if os(iOS) && !targetEnvironment(macCatalyst)
     private func prepareArtwork(_ state: LibraryPreparationActivityAttributes.ContentState, coverID: String?, activityID: String) async -> LibraryPreparationActivityAttributes.ContentState {
         var result = state
         if let coverID, let asset = await artworkProvider?(coverID) {
@@ -185,7 +185,7 @@ final class LibraryPreparationLiveActivityController {
     /// Removes the activity — used when a pass is cancelled or the user turns the feature off.
     func end(dismissImmediately: Bool = false) {
         estimator = PreparationETA()
-        #if os(iOS)
+        #if os(iOS) && !targetEnvironment(macCatalyst)
         guard let activity else { return }
         self.activity = nil
         lastArtwork = nil

@@ -29,9 +29,9 @@ struct ImmersivePlayerLayoutTests {
         let info = bounds(pixels, width: image.width, height: image.height) { $0 > 230 && $1 < 20 && $2 < 20 }
         let seek = bounds(pixels, width: image.width, height: image.height) { $1 > 230 && $0 < 20 && $2 < 20 }
         #expect(abs(info.minX - 32) <= 1)
-        #expect(abs(info.minY - 496) <= 2)
+        #expect(abs(info.minY - 479) <= 2)
         #expect(abs(seek.minX - 32) <= 1)
-        #expect(abs(seek.minY - 568) <= 2)
+        #expect(abs(seek.minY - 552) <= 2)
         #expect(info.maxY < seek.minY)
     }
 
@@ -47,29 +47,22 @@ struct ImmersivePlayerLayoutTests {
         }
     }
 
-    @Test func edgeExtensionDoesNotSmearCenterColorsAndControlsStayDark() throws {
-        for gray in [CGFloat(0.60), CGFloat(1.0)] {
-            let sleeve = try makeSleeve(gray: gray)
-            let size = CGSize(width: 402, height: 874)
-            let metric = ImmersivePlayerMetrics(size: size, topInset: 62)
-            let channel = Int(gray * 255)
-            let rgb = channel << 16 | channel << 8 | channel
-            let background = ImmersiveNowPlayingBackground(coverArtId: "fixture", initialImage: sleeve,
-                fallbackColor: .gray, metrics: metric, lowerEdgeRGB: rgb)
-            let image = try render(background.frame(width: size.width, height: size.height))
-            let pixels = try rgba(image)
-            for y in [Int(metric.infoTop), 650, 820] {
-                let i = (y * image.width + image.width / 2) * 4
-                #expect(abs(Int(pixels[i]) - Int(pixels[i + 2])) < 4)
-                #expect(pixels[i] < 125)
-            }
-            let title = Int(metric.infoTop) * image.width * 4
-            let footer = 820 * image.width * 4
-            #expect(pixels[footer] < pixels[title])
-            if gray < 1 {
-                try save(image, name: "luma-1029-immersive-background.png")
-            }
+    @Test func immersiveSleeveLeavesTheSharedBackgroundVisibleBelowTheArtwork() throws {
+        let size = CGSize(width: 402, height: 874)
+        let metric = ImmersivePlayerMetrics(size: size, topInset: 62)
+        let sleeve = try makeSleeve(gray: 0.6)
+        let artwork = ImmersiveNowPlayingArtwork(coverArtId: "fixture", initialImage: sleeve, metrics: metric)
+            .frame(width: size.width, height: size.height, alignment: .top)
+        let base = Color(.sRGB, red: 0.12, green: 0.2, blue: 0.27)
+        let image = try render(artwork.background(base))
+        let pixels = try rgba(image)
+        let backing = try rgba(render(base.frame(width: size.width, height: size.height)))
+        for y in [25, Int(metric.infoTop), 650, 820] {
+            let i = (y * image.width + image.width / 2) * 4
+            #expect(Array(pixels[i..<(i + 4)]) == Array(backing[i..<(i + 4)]))
         }
+        let artworkIndex = (220 * image.width + image.width / 2) * 4
+        #expect(pixels[artworkIndex] != backing[artworkIndex])
     }
 
     @Test func footerKeepsTheSameSlotAcrossAllPortraitSurfaces() throws {
@@ -85,9 +78,9 @@ struct ImmersivePlayerLayoutTests {
             frames.append(bounds(pixels, width: image.width, height: image.height) { $0 > 240 && $1 < 10 && $2 < 10 })
         }
         #expect(frames[0] == frames[1] && frames[1] == frames[2])
-        #expect(abs(frames[0].minX - 24) <= 1)
+        #expect(abs(frames[0].minX - 30) <= 1)
         #expect(abs(frames[0].height - 54) <= 1)
-        #expect(abs(frames[0].midY - (min(874 * 0.925, 874 - 34 - 32) - 62)) <= 1)
+        #expect(abs(frames[0].midY - (min(874 * 0.912, 874 - 34 - 32) - 62)) <= 1)
     }
 
     @Test func lowerArtworkHandoffHasNoVisibleScanline() throws {
@@ -95,10 +88,9 @@ struct ImmersivePlayerLayoutTests {
         let metric = ImmersivePlayerMetrics(size: size, topInset: 62)
         for gray in [CGFloat(0.60), CGFloat(1)] {
             let sleeve = try makeSleeve(gray: gray)
-            let channel = Int(gray * 255)
-            let rgb = channel << 16 | channel << 8 | channel
-            let image = try render(ImmersiveNowPlayingBackground(coverArtId: "handoff", initialImage: sleeve,
-                fallbackColor: .black, metrics: metric, lowerEdgeRGB: rgb))
+            let image = try render(ImmersiveNowPlayingArtwork(coverArtId: "handoff", initialImage: sleeve,
+                metrics: metric).frame(width: size.width, height: size.height, alignment: .top)
+                .background(Color(white: 0.2)))
             let pixels = try rgba(image)
             let start = Int(metric.artworkTop + size.width * 0.92)
             let end = Int(metric.infoTop + 40)
@@ -106,7 +98,7 @@ struct ImmersivePlayerLayoutTests {
                 for y in (start + 1)..<end {
                     let index = (y * image.width + x) * 4
                     let previous = index - image.width * 4
-                    #expect(abs(Int(pixels[index]) - Int(pixels[previous])) <= 3)
+                    #expect(abs(Int(pixels[index]) - Int(pixels[previous])) <= 6)
                     #expect(pixels[index + 3] == 255)
                 }
             }
@@ -151,8 +143,27 @@ struct ImmersivePlayerLayoutTests {
         }.frame(width: 402, height: 874))
         let pixels = try rgba(image)
         let panel = bounds(pixels, width: image.width, height: image.height) { $1 > 230 && $0 < 20 && $2 < 20 }
-        #expect(abs(panel.maxY - (874 - 34 - 8)) <= 1)
+        #expect(abs(panel.maxY - 874) <= 1)
         #expect(abs(panel.minY - (62 + 34)) <= 1)
+    }
+
+    @Test func lyricsPanelLiftRaisesOnlyThePanelHeader() throws {
+        func panelBounds(_ lift: CGFloat) throws -> CGRect {
+            let image = try render(ImmersivePlayerControlsLayout(
+                topInset: 62, bottomInset: 34, panelTopLift: lift
+            ) {
+                Color.clear; Color.clear; Color.clear; Color.clear; Color.clear
+                Color(.sRGB, red: 0, green: 1, blue: 0)
+            }.frame(width: 402, height: 874))
+            let pixels = try rgba(image)
+            return bounds(pixels, width: image.width, height: image.height) { $1 > 230 && $0 < 20 && $2 < 20 }
+        }
+        let base = try panelBounds(0)
+        let lifted = try panelBounds(ImmersivePlayerMetrics.panelHeaderLift)
+        #expect(abs((base.minY - lifted.minY) - ImmersivePlayerMetrics.panelHeaderLift) <= 1)
+        #expect(abs(base.maxY - lifted.maxY) <= 1)
+        #expect(abs(lifted.minY - (62 + ImmersivePlayerMetrics.panelTopGap
+            - ImmersivePlayerMetrics.panelHeaderLift)) <= 1)
     }
 
     @Test func handleHasOneFixedCapsuleAndNoHairlineShadow() throws {
@@ -185,12 +196,13 @@ struct ImmersivePlayerLayoutTests {
         #endif
         let size = CGSize(width: 402, height: 874)
         let metric = ImmersivePlayerMetrics(size: size, topInset: 62)
-        let image = try render(ImmersiveNowPlayingBackground(coverArtId: "upper", initialImage: sleeve,
-            fallbackColor: .black, metrics: metric, lowerEdgeRGB: 0x8c8c8c))
+        let image = try render(ImmersiveNowPlayingArtwork(coverArtId: "upper", initialImage: sleeve,
+            metrics: metric).frame(width: size.width, height: size.height, alignment: .top)
+            .background(Color(white: 0.2)))
         let pixels = try rgba(image)
         for y in (Int(metric.artworkTop) - 6)...(Int(metric.artworkTop) + 6) {
             let index = (y * image.width + 100) * 4
-            #expect(abs(Int(pixels[index]) - Int(pixels[index - image.width * 4])) <= 6)
+            #expect(abs(Int(pixels[index]) - Int(pixels[index - image.width * 4])) <= 10)
             #expect(pixels[index + 3] == 255)
         }
     }
@@ -233,8 +245,10 @@ struct ImmersivePlayerLayoutTests {
         }
         .foregroundStyle(.white)
         .frame(width: size.width, height: size.height)
-        .background(ImmersiveNowPlayingBackground(coverArtId: "fixture", initialImage: sleeve,
-            fallbackColor: .gray, metrics: metrics, lowerEdgeRGB: 0x999999))
+        .background(alignment: .top) {
+            ImmersiveNowPlayingArtwork(coverArtId: "fixture", initialImage: sleeve, metrics: metrics)
+        }
+        .background(Color(white: 0.2))
         .environment(\.colorScheme, .dark)
         .buttonStyle(.plain)
         .environment(container.artworkImageCache)

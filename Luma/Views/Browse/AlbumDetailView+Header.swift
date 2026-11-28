@@ -53,7 +53,6 @@ extension AlbumDetailContentView {
                 heroHeight: heroHeight,
                 contentBelow: true,
                 fillCover: true,
-                meltTargetColor: atmosphere.isThemed ? atmosphere.pageColor : nil,
                 showBlurredMelt: false,
                 showsFloatingShadow: false,
                 coverShadowColor: atmosphere.coverShadowColor,
@@ -61,9 +60,13 @@ extension AlbumDetailContentView {
                 floatingHorizontalPadding: LumaAlbumLayout.coverSideInset,
                 floatingTopPadding: LumaSpacing.xxl,
                 contentTopPadding: LumaSpacing.xxl,
-                contentBottomPadding: LumaSpacing.xxl
+                contentBottomPadding: LumaSpacing.xxl,
+                floatingCoverReveal: albumArtworkReveal
             ) {
                 albumHeaderInformation(vm: vm, songs: songs)
+                    .modifier(AlbumDetailSectionReveal(
+                        visible: albumContentVisible, stage: .header
+                    ))
             }
         }
     }

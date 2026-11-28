@@ -7,13 +7,27 @@ import Synchronization
 nonisolated final class NativePlaybackMeterTap: @unchecked Sendable {
     private final class Context {
         let active = Atomic<Bool>(false)
+        let supplementary: Bool
         var format = AudioStreamBasicDescription()
         let mediaOffset = Atomic<Double>(0)
+        let processCount = Atomic<UInt64>(0)
+        let forwardCount = Atomic<UInt64>(0)
+        let forwardFrames = Atomic<UInt64>(0)
+
+        init(supplementary: Bool) {
+            self.supplementary = supplementary
+        }
     }
-    private let context = Context()
+    private let context: Context
     private var tap: MTAudioProcessingTap?
 
-    init?() {
+    /// `trackMix` selects the iOS 27 preferred-format tap, which is required when the
+    /// input parameters use `AVAudioMixInputParametersTrackID.mixID`. A per-track tap
+    /// keeps the regular creation path; the preferred-format call leaves a track tap's
+    /// format undefined and can leave it silent.
+    init?(trackMix: Bool = false, supplementary: Bool = false) {
+        let context = Context(supplementary: supplementary)
+        self.context = context
         var callbacks = MTAudioProcessingTapCallbacks(
             version: kMTAudioProcessingTapCallbacksVersion_0,
             clientInfo: Unmanaged.passUnretained(context).toOpaque(),
@@ -30,19 +44,23 @@ nonisolated final class NativePlaybackMeterTap: @unchecked Sendable {
             },
             unprepare: { _ in },
             process: { tap, frames, _, list, framesOut, flagsOut in
+                let context = Unmanaged<Context>.fromOpaque(MTAudioProcessingTapGetStorage(tap)).takeUnretainedValue()
+                context.processCount.wrappingAdd(1, ordering: .relaxed)
                 var timeRange = CMTimeRange.invalid
                 let status = MTAudioProcessingTapGetSourceAudio(tap, frames, list, flagsOut, &timeRange, framesOut)
                 guard status == noErr, framesOut.pointee > 0 else { return }
-                let context = Unmanaged<Context>.fromOpaque(MTAudioProcessingTapGetStorage(tap)).takeUnretainedValue()
                 guard context.active.load(ordering: .relaxed) else { return }
+                context.forwardCount.wrappingAdd(1, ordering: .relaxed)
+                context.forwardFrames.wrappingAdd(UInt64(framesOut.pointee), ordering: .relaxed)
                 PlaybackBeatMeter.enqueue(bufferList: UnsafePointer(list), format: context.format,
                                           frameCount: framesOut.pointee,
-                                          mediaTime: timeRange.start.isNumeric ? timeRange.start.seconds + context.mediaOffset.load(ordering: .relaxed) : nil)
+                                          mediaTime: timeRange.start.isNumeric ? timeRange.start.seconds + context.mediaOffset.load(ordering: .relaxed) : nil,
+                                          supplementary: context.supplementary)
             }
         )
         var created: MTAudioProcessingTap?
         let status: OSStatus
-        if #available(iOS 27, macOS 27, *) {
+        if #available(iOS 27, macOS 27, *), trackMix {
             // A nil preferred format retains the device-optimized PCM layout. On iOS 27
             // track-mix taps also support unprotected HLS; no separate decoder is needed.
             status = MTAudioProcessingTapCreateWithPreferredFormat(kCFAllocatorDefault, &callbacks,
@@ -66,6 +84,9 @@ nonisolated final class NativePlaybackMeterTap: @unchecked Sendable {
 
     func setActive(_ active: Bool) { context.active.store(active, ordering: .relaxed) }
     func setMediaOffset(_ offset: Double) { context.mediaOffset.store(offset, ordering: .relaxed) }
+    var processCount: UInt64 { context.processCount.load(ordering: .relaxed) }
+    var forwardCount: UInt64 { context.forwardCount.load(ordering: .relaxed) }
+    var forwardedFrames: UInt64 { context.forwardFrames.load(ordering: .relaxed) }
     deinit { context.active.store(false, ordering: .relaxed) }
 }
 
@@ -88,6 +109,11 @@ nonisolated struct NativePlaybackAnalysisSource: @unchecked Sendable {
 /// queue cannot install a per-item audio mix. It never changes the audible item.
 @MainActor
 final class NativePlaybackAnalysisPlayer {
+    /// The background pulse tolerates a late analysis window; it cannot tolerate a
+    /// permanently silent one. Keep drift bounded without turning sub-frame sync into
+    /// an activation requirement.
+    private static let driftTolerance = 0.1
+    private static let correctionInterval: TimeInterval = 0.5
     private var source: NativePlaybackAnalysisSource?
     private var player: AVPlayer?
     private var meter: NativePlaybackMeterTap?
@@ -116,7 +142,7 @@ final class NativePlaybackAnalysisPlayer {
                 let track = try? await asset.loadTracks(withMediaType: .audio).first
                 guard !Task.isCancelled, let self, let current = self.source,
                       current.hasSameItem(as: next), current.seekSequence == next.seekSequence,
-                      let meter = NativePlaybackMeterTap() else { return }
+                      let meter = NativePlaybackMeterTap(supplementary: true) else { return }
                 let trackID: CMPersistentTrackID
                 if let track {
                     trackID = track.trackID
@@ -127,22 +153,34 @@ final class NativePlaybackAnalysisPlayer {
                 meter.setMediaOffset(self.timelineOffset)
                 meter.attach(to: item, trackID: trackID)
                 let player = AVPlayer(playerItem: item)
+                // A track tap sits upstream of the player's output gain, so muting the
+                // silent decoder does not suppress the decoded buffers. A zero-volume
+                // player, by contrast, can be rendered at a reduced rate.
                 player.isMuted = true
                 player.allowsExternalPlayback = false
                 self.player = player
                 self.meter = meter
-                self.seek(to: current.position - self.timelineOffset)
+                // Prepare an asset before the audible clock reaches the captured
+                // position. Seeking to the *latest* source position avoids starting
+                // hundreds of milliseconds behind and then being held inactive by the
+                // drift gate below.
+                let target = self.source?.position ?? current.position
+                self.seek(to: target - self.timelineOffset)
             }
             return
         }
         source = next
         guard let player else { return }
         let drift = abs(player.currentTime().seconds + timelineOffset - next.position)
-        let windowDuration = Double(PlaybackPCMWindow.count) / 44100
-        if !seeking, drift > windowDuration && ProcessInfo.processInfo.systemUptime - lastSeekTime >= 1 {
+        // A silent decoder and the audible player are independent clocks. Correct large
+        // drift, but keep the tap active while the decoder plays: gating analysis on
+        // sub-frame sync left the tap active for only a few milliseconds after each seek,
+        // which is too short for the Lyricify confirmation/decay window.
+        if !seeking, drift > Self.driftTolerance,
+           ProcessInfo.processInfo.systemUptime - lastSeekTime >= Self.correctionInterval {
             seek(to: next.position - timelineOffset)
         }
-        meter?.setActive(!seeking && drift <= windowDuration && player.timeControlStatus == .playing)
+        meter?.setActive(!seeking && player.timeControlStatus == .playing)
     }
 
     /// Request a nearby OpenSubsonic slice instead of seeking across an unseekable
@@ -188,5 +226,14 @@ final class NativePlaybackAnalysisPlayer {
         player = nil
         meter = nil
         source = nil
+    }
+
+    var debugSummary: String {
+        let time = player?.currentTime().seconds ?? -1
+        let status = player?.timeControlStatus.rawValue ?? -1
+        return "source=\(source != nil) player=\(player != nil) status=\(status) "
+            + "time=\(String(format: "%.2f", time)) seeking=\(seeking) "
+            + "tap_process=\(meter?.processCount ?? 0) tap_forward=\(meter?.forwardCount ?? 0) "
+            + "frames=\(meter?.forwardedFrames ?? 0)"
     }
 }

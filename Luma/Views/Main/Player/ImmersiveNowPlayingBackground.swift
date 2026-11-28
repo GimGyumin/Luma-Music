@@ -5,8 +5,46 @@
 
 import SwiftUI
 
+/// The immersive sleeve sits above the shared Lyricify surface.
+struct ImmersiveNowPlayingArtwork: View {
+    let coverArtId: String
+    let initialImage: PlatformImage?
+    let metrics: ImmersivePlayerMetrics
+
+    var body: some View {
+        let width = metrics.size.width
+        Group {
+            if let initialImage {
+                Image(platformImage: initialImage).resizable().scaledToFit()
+            } else {
+                CoverArtView(id: coverArtId, size: ArtworkTier.hero.decodePixels, tier: .hero,
+                             contentMode: .fit)
+            }
+        }
+        .frame(width: width, height: width)
+        .clipped()
+        .mask {
+            LinearGradient(stops: [
+                .init(color: .clear, location: 0),
+                .init(color: .black, location: ImmersivePlayerMetrics.upperArtworkBlend),
+                .init(color: .black, location: ImmersivePlayerMetrics.blendStart),
+                .init(color: .black.opacity(0.85), location: 0.82),
+                .init(color: .black.opacity(0.15), location: 0.96),
+                .init(color: .clear, location: 1)
+            ], startPoint: .top, endPoint: .bottom)
+        }
+        .padding(.top, metrics.artworkTop)
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+}
+
 /// A sharp sleeve below the status area, with extensions sampled from its edges.
 /// The lower extension never includes the center portrait or stretched lettering.
+///
+/// This is the Release player background used when the lyrics surface is off.
+/// It deliberately stays separate from the Lyricify material: the player keeps a
+/// stable, artwork-led backdrop while lyrics/queue use the animated background.
 struct ImmersiveNowPlayingBackground: View {
     let coverArtId: String
     let initialImage: PlatformImage?
@@ -44,9 +82,17 @@ struct ImmersiveNowPlayingBackground: View {
                     ], startPoint: .top, endPoint: .bottom)
                 }
             edgeStrip(width: width, lower: false)
-                .scaleEffect(x: 1, y: (metrics.artworkTop + width * ImmersivePlayerMetrics.upperArtworkBlend * 2)
-                             / max(1, width * ImmersivePlayerMetrics.edgeBand), anchor: .top)
-                .frame(width: width, height: metrics.artworkTop + width * ImmersivePlayerMetrics.upperArtworkBlend * 2, alignment: .top)
+                .scaleEffect(
+                    x: 1,
+                    y: (metrics.artworkTop + width * ImmersivePlayerMetrics.upperArtworkBlend * 2)
+                        / max(1, width * ImmersivePlayerMetrics.edgeBand),
+                    anchor: .top
+                )
+                .frame(
+                    width: width,
+                    height: metrics.artworkTop + width * ImmersivePlayerMetrics.upperArtworkBlend * 2,
+                    alignment: .top
+                )
                 .clipped()
                 .blur(radius: width * ImmersivePlayerMetrics.upperArtworkBlend, opaque: true)
             artwork(width: width)
@@ -71,10 +117,6 @@ struct ImmersiveNowPlayingBackground: View {
         }
         .frame(width: width, height: height, alignment: .top)
         .clipped()
-        // The sleeve, its two blurred edge extensions, and the scrim are
-        // static for a given track/viewport. Rasterize them once instead of
-        // asking Core Animation to re-composite the large blurs every frame.
-        .drawingGroup()
         .allowsHitTesting(false)
         .accessibilityHidden(true)
     }
@@ -87,8 +129,8 @@ struct ImmersiveNowPlayingBackground: View {
                 CoverArtView(id: coverArtId, size: ArtworkTier.hero.decodePixels, tier: .hero, contentMode: .fit)
             }
         }
-            .frame(width: width, height: width)
-            .clipped()
+        .frame(width: width, height: width)
+        .clipped()
     }
 
     private func edgeStrip(width: CGFloat, lower: Bool) -> some View {

@@ -72,10 +72,9 @@ extension LyricsViewModel {
     /// Backing that outlives its lead stays visible as its own smaller active row
     /// (Apple Music independent line lifecycle) while scroll follows the newest lead.
     func shouldHideStandaloneBacking(at index: Int) -> Bool {
-        if isUserScrolling { return false }
-        // Background singers appear only during their own timed phrase. Browsing
-        // untimed lyrics still shows the complete text.
+        // Keep timed backing vocals inside their own phrase, including while browsing.
         if followsPlayback, isSecondaryAgent(at: index), !activeLineIndices.contains(index) { return true }
+        if isUserScrolling { return false }
         guard let primary = currentLineIndex, primary != index else { return false }
         guard activeLineIndices.contains(index) else { return false }
         return shouldStackUnderLead(index, primary: primary)
@@ -200,13 +199,6 @@ extension LyricsViewModel {
         resumeTask?.cancel()
         resumeTask = nil
         followState = .userDragging
-    }
-
-    /// Driven by lyrics `ScrollView` geometry. Scrolling is interaction, so it must keep
-    /// player chrome visible; FullPlayerView may hide it only after the inactivity timeout.
-    func userScrolledLyrics(from _: CGFloat, to _: CGFloat) {
-        if prefersHiddenChrome { prefersHiddenChrome = false }
-        userStartedScrolling()
     }
 
     func userStoppedScrolling() {

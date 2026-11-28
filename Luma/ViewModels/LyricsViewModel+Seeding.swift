@@ -21,10 +21,8 @@ extension LyricsViewModel {
             areTranslationsVisible = false
         }
 
-        let pronunciationLines = lyricsList.flatMap {
-            LyricsLayerAligner.pronunciation(for: structured, in: $0)?.line
-        } ?? []
-        let pronunciations = LyricsLayerAligner.align(primary: structured.line, secondary: pronunciationLines)
+        let pronunciationTrack = lyricsList.flatMap { LyricsLayerAligner.pronunciation(for: structured, in: $0) }
+        let pronunciations = LyricsLayerAligner.align(primary: structured.line, secondary: pronunciationTrack?.line ?? [])
 
         // Phase D: TTML parsing + display-row adaptation run OFF the MainActor —
         // synchronous SAX + row building is CPU-bound and blocks SwiftUI ticks.
@@ -35,30 +33,67 @@ extension LyricsViewModel {
         var parseResult = DiagnosticsResult.failure
         defer { parseTrace.finish(Task.isCancelled ? .cancelled : parseResult) }
         let preferredLanguages = [LyricsTranslationSettings.shared.targetLanguage] + Locale.preferredLanguages
-        let buildTask = Task.detached(priority: .userInitiated) { () -> (document: LyricDocument?, rows: [LyricDisplayRow], fallback: [String?], englishOnly: Bool) in
+        let wantsKoreanPronunciation = AppLanguage.current == .korean
+            || LyricsTranslationSettings.normalizedLanguageCode(
+                LyricsTranslationSettings.shared.targetLanguage
+            ) == "ko"
+        let buildTask = Task.detached(priority: .userInitiated) { () -> (
+            document: LyricDocument?, rows: [LyricDisplayRow], readings: [[LyricDisplayWord]],
+            pairs: [[LyricPronunciationPair]], fallback: [String?], englishOnly: Bool
+        ) in
             var document = LyricDocumentBuilder.build(preferringTTML: ttmlData, structured: structured)
             document?.selectTranslation(preferredLanguages: preferredLanguages)
             document?.preferredPronunciationLanguages = preferredLanguages
             let rows = document.map { LyricDisplayBuilder.rows(from: $0) } ?? []
             let documentLines = document?.allLines ?? []
+            let serverReadingRows = pronunciationTrack.flatMap { track in
+                track.cueLine.isEmpty ? nil : LyricDisplayBuilder.rows(from: track)
+            } ?? []
+            let readings = rows.enumerated().map { index, row -> [LyricDisplayWord] in
+                guard !Task.isCancelled else { return [] }
+                if documentLines.indices.contains(index),
+                   let pronunciation = document?.pronunciation(for: documentLines[index]),
+                   !pronunciation.words.isEmpty {
+                    return pronunciation.words.map {
+                        LyricDisplayWord(text: $0.text, startMs: LyricTime.milliseconds(fromSeconds: $0.begin),
+                            endMs: LyricTime.milliseconds(fromSeconds: $0.end), role: $0.role, preservesSourceSpacing: true)
+                    }
+                }
+                return Self.serverReadingWords(for: row, in: serverReadingRows)
+            }
+            let pairs = rows.enumerated().map { index, row in
+                guard document?.timing == .word, !Task.isCancelled else { return [LyricPronunciationPair]() }
+                return LyricPronunciationPair.matching(original: row.words, reading: readings[index])
+            }
+            let texts = rows.map(\.text)
+            let sample = texts.lazy.filter { !$0.isEmpty }.prefix(12).joined(separator: "\n")
+            let rawLanguage = (document?.language ?? structured.lang ?? "")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .lowercased()
+            let unknownLanguage = ["", "und", "xxx", "unknown", "auto", "null"].contains(rawLanguage)
+            let englishTag = rawLanguage == "en" || rawLanguage == "eng" || rawLanguage.hasPrefix("en-")
+            let detectedLanguage = sample.isEmpty ? nil : NLLanguageRecognizer.dominantLanguage(for: sample)
+            let isEnglishLyrics = englishTag || (unknownLanguage && detectedLanguage == .english)
+            let metadata = LyricsLanguage.normalizedLanguageCode(document?.language ?? structured.lang)
+            let englishOnly = !sample.isEmpty && !LyricsLanguage.needsTranslation(lines: texts, targetCode: "en")
+                && (metadata == "en" || detectedLanguage == .english)
+
             var cached: [String: String] = [:]
             let fallback = rows.enumerated().map { index, row -> String? in
                 guard !Task.isCancelled, !row.isSecondaryAgent else { return nil }
                 if pronunciations.indices.contains(row.sourceLineIndex),
                    !pronunciations[row.sourceLineIndex].trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return nil }
-                if documentLines.indices.contains(index),
-                   let provided = document?.pronunciation(for: documentLines[index]), !provided.main.isEmpty { return nil }
+                if readings[index].contains(where: { !$0.isBackground && !$0.text.allSatisfy(\.isWhitespace) }) { return nil }
                 if let value = cached[row.text] { return value.isEmpty ? nil : value }
-                let value = LyricPronunciationFallback.text(row.text, language: document?.language ?? structured.lang)
+                let value = LyricPronunciationFallback.text(
+                    row.text,
+                    language: document?.language ?? structured.lang,
+                    allowEnglish: isEnglishLyrics && wantsKoreanPronunciation
+                )
                 cached[row.text] = value ?? ""
                 return value
             }
-            let texts = rows.map(\.text)
-            let sample = texts.lazy.filter { !$0.isEmpty }.prefix(12).joined(separator: "\n")
-            let metadata = LyricsLanguage.normalizedLanguageCode(document?.language ?? structured.lang)
-            let englishOnly = !sample.isEmpty && !LyricsLanguage.needsTranslation(lines: texts, targetCode: "en")
-                && (metadata == "en" || NLLanguageRecognizer.dominantLanguage(for: sample) == .english)
-            return (document, rows, fallback, englishOnly)
+            return (document, rows, readings, pairs, fallback, englishOnly)
         }
         let parsed = await withTaskCancellationHandler {
             await buildTask.value
@@ -72,17 +107,8 @@ extension LyricsViewModel {
         hasEnglishOnlyLyrics = parsed.englishOnly
         displayRows = parsed.rows
         let documentLines = parsed.document?.allLines ?? []
-        pronunciationRows = documentLines.map { line in
-            guard let pronunciation = parsed.document?.pronunciation(for: line) else { return [] }
-            return pronunciation.words.map {
-                LyricDisplayWord(text: $0.text, startMs: LyricTime.milliseconds(fromSeconds: $0.begin),
-                    endMs: LyricTime.milliseconds(fromSeconds: $0.end), role: $0.role, preservesSourceSpacing: true)
-            }
-        }
-        pronunciationPairs = displayRows.enumerated().map { index, row in
-            guard pronunciationRows.indices.contains(index) else { return [] }
-            return LyricPronunciationPair.matching(original: row.words, reading: pronunciationRows[index])
-        }
+        pronunciationRows = parsed.readings
+        pronunciationPairs = parsed.pairs
         rebuildInstrumentalGapCache()
 
         var serverTranslations: [String] = Array(repeating: "", count: structured.line.count)
@@ -140,8 +166,12 @@ extension LyricsViewModel {
             }
             let embeddedPronunciation = documentLines.indices.contains(displayIndex)
                 ? lyricDocument?.pronunciation(for: documentLines[displayIndex]) : nil
-            let suppliedPronunciation = embeddedPronunciation.map { row.isSecondaryAgent ? $0.background : $0.main }
-                ?? ((!row.isSecondaryAgent && sourceIndex < pronunciations.count) ? pronunciations[sourceIndex] : "")
+            let providedText = embeddedPronunciation.map { row.isSecondaryAgent ? $0.background : $0.main }
+            let serverWords = parsed.readings[displayIndex].filter { $0.isBackground == row.isSecondaryAgent }
+            let timedText = LyricKaraokeSpacing.sourceTexts(serverWords, secondary: row.isSecondaryAgent)
+                .joined().trimmingCharacters(in: .whitespacesAndNewlines)
+            let plainText = (!row.isSecondaryAgent && sourceIndex < pronunciations.count) ? pronunciations[sourceIndex] : ""
+            let suppliedPronunciation = providedText ?? (timedText.isEmpty ? plainText : timedText)
             let fallback = parsed.fallback.indices.contains(displayIndex) ? parsed.fallback[displayIndex] : nil
             let usesFallback = suppliedPronunciation.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && fallback != nil
             let pronunciation = usesFallback ? fallback! : suppliedPronunciation
@@ -174,11 +204,39 @@ extension LyricsViewModel {
             replaceTranslatedLyrics(results)
         }
 
-        // Don't auto-show — let the toggle button control visibility.
+        // English lyrics show their generated Korean reading by default, matching
+        // the reference presentation. The player's Hide pronunciation action writes
+        // this preference back so the choice survives the next song.
+        let autoShowEnglish = (UserDefaults.standard.object(
+            forKey: Self.englishPronunciationPreferenceKey
+        ) as? Bool) ?? true
+        if autoShowEnglish, parsed.englishOnly, !generated.isEmpty {
+            arePronunciationsVisible = true
+        }
     }
 
     /// Prefer a server `kind=translation` track over client machine translation.
     // MARK: Helpers
+
+    /// OpenSubsonic can return a TTML reading as a separate pronunciation track.
+    /// Use its line clock to find the corresponding row before comparing the spans.
+    nonisolated private static func serverReadingWords(for row: LyricDisplayRow, in readings: [LyricDisplayRow]) -> [LyricDisplayWord] {
+        guard let start = row.startMs else { return [] }
+        var best: LyricDisplayRow?
+        var bestDistance = 251
+        for candidate in readings where candidate.isSecondaryAgent == row.isSecondaryAgent {
+            guard let candidateStart = candidate.startMs,
+                  candidate.words.contains(where: { $0.endMs > $0.startMs }) else { continue }
+            let distance = abs(start - candidateStart)
+            if distance < bestDistance {
+                best = candidate
+                bestDistance = distance
+            } else if distance == bestDistance {
+                best = nil
+            }
+        }
+        return best?.words ?? []
+    }
 
     func applyCurrentLanguage() async {
         let syncTrace = DiagnosticsCenter.shared.begin(.lyricsSyncReady)

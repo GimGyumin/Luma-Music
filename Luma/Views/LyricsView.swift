@@ -4,6 +4,16 @@
 // See LICENSE file in the project root for full license information.
 
 import SwiftUI
+
+#if targetEnvironment(macCatalyst)
+/// Apple Translation is not available at the Catalyst deployment target.
+/// The view keeps a placeholder configuration so its non-translation states
+/// still compile and the provider reports an inline failure instead.
+private struct MacCatalystTranslationConfiguration {}
+private typealias LumaTranslationConfiguration = MacCatalystTranslationConfiguration
+#else
+private typealias LumaTranslationConfiguration = TranslationSession.Configuration
+#endif
 import Translation
 import SwiftSonic
 import OSLog
@@ -22,20 +32,27 @@ struct LyricsView: View {
     /// Apple Music–style full player uses centered lines; iOS / side panels stay leading.
     var lineAlignment: HorizontalAlignment = .leading
     var density: LyricsViewportDensity = .compact
+    /// Wide iPad / desktop player: give the active line more stage presence.
+    var wideStage = false
     /// Short phone-landscape viewports must account for the whole translated row.
     var usesMeasuredScrollAnchor = false
     var phoneLandscape = false
     /// Height of player chrome drawn over the bottom of this view (scrubber / transport).
     /// Applied as scroll content margins so auto-scroll anchors above the obscured region.
     var bottomChromeInset: CGFloat = 0
-    /// Reveals the full-player transport while the user taps or browses the lyrics.
+    var extendsToBottomEdge = false
+    /// Reveals the full-player transport when the user taps the lyrics.
     var onInteraction: (() -> Void)? = nil
+    var onChromeScroll: ((LyricsChromeScrollAction) -> Void)? = nil
     /// When chrome is hidden, the first tap only reveals it. It must not also seek
     /// to a partially obscured line under the returning transport controls.
     var consumesLineTapToRevealChrome = false
     /// Compact player keeps its lazy lyric tree mounted across cover morphs. Other hosts
     /// retain the normal appearance lifecycle by leaving this nil.
     var presentationIsVisible: Bool? = nil
+    /// Docked 258 pt macOS column: Music uses a compact left-aligned lyric stack there,
+    /// not the large centered full-player treatment.
+    var dockedPanel = false
     @State private var visibilityOwner = UUID()
     @ObservedObject private var settings = LyricsTranslationSettings.shared
     @AppStorage("luma.lyrics.largerText") private var largerLyricsText = "lyrics"
@@ -44,7 +61,7 @@ struct LyricsView: View {
     @ScaledMetric(relativeTo: .largeTitle) private var scaledPrimarySize: CGFloat = 36
     @State private var governor = PerformanceGovernor.shared
 
-    @State private var translationConfiguration: TranslationSession.Configuration?
+    @State private var translationConfiguration: LumaTranslationConfiguration?
     @State private var translationStrategy: LyricsTranslationStrategy = .standard
     @State private var translationSourceLanguageCode: String?
     /// Bumped whenever the Apple session must die; in-flight work checks this before touching `session`.
@@ -54,17 +71,17 @@ struct LyricsView: View {
     @State private var viewportHeight: CGFloat = 0
     @State private var rowHeights: [Int: CGFloat] = [:]
     @State private var visibleReadingRows: Set<Int> = []
-    @State private var lastAMLLSeekRevision = 0
+    @State private var lastFollowRequest: LyricFollowRequest?
+    @State private var scrollMotion = LyricScrollMotion()
     @State private var lineCascade = LyricLineCascade()
     @State private var lyricsEnterTrace: PerformanceTrace?
     @State private var lyricsFirstRenderTrace: PerformanceTrace?
     /// Slow lyrics browsing must not summon the player chrome. A deliberate
     /// scroll (points/second) above this threshold reveals it once. Raised from
     /// 420 so ordinary reading-speed drags stay calm; only a clear flick reveals.
-    private nonisolated static let chromeRevealVelocity: CGFloat = 650
     /// Per-scroll velocity sampling lives in a reference box: mutating it must
     /// not invalidate this view's body at scroll cadence.
-    @State private var scrollRevealTracker = LyricsScrollRevealTracker()
+    @State private var chromeScrollTracker = LyricsChromeScrollTracker()
 
     private var lineFrameAlignment: Alignment {
         lineAlignment == .center ? .center : .leading
@@ -103,11 +120,14 @@ struct LyricsView: View {
 
     /// Primary lyric point size — match Apple Music's large heavy lyric type.
     private var primaryFontSize: CGFloat {
+        if dockedPanel { return 17 }
         let scale = scaledPrimarySize / 36
         if phoneLandscape { return 34 * scale }
         switch density {
         case .compact: return scaledPrimarySize
-        case .spacious: return (viewModel.usesSpeakerLayout ? 40 : 38) * scale
+        case .spacious:
+            let base: CGFloat = viewModel.usesSpeakerLayout ? 40 : 38
+            return (wideStage ? base + 2 : base) * scale
         }
     }
 
@@ -117,14 +137,22 @@ struct LyricsView: View {
             && governor.budget.allowsLyricScrollMotion
     }
 
+    private var allowsAdaptiveScroll: Bool {
+        presentationIsVisible != false && viewModel.isShown && viewModel.isPlaying
+            && scenePhase == .active && !reduceMotion && governor.budget.allowsLyricScrollMotion
+    }
+
     /// Fixed spacing — never derived from viewport height (that feedback loop cooked the main thread).
     private var lineStackSpacing: CGFloat {
+        if dockedPanel { return 20 }
         if viewModel.usesSpeakerLayout {
             return density == .compact ? 44 : 40
         }
         switch density {
         case .compact: return 32
-        case .spacious: return translationsLikelyVisible ? 28 : 32
+        case .spacious:
+            if wideStage { return translationsLikelyVisible ? 30 : 36 }
+            return translationsLikelyVisible ? 28 : 32
         }
     }
 
@@ -132,7 +160,7 @@ struct LyricsView: View {
     private var scrollBottomPadding: CGFloat {
         let last = viewModel.translatedLyrics.indices.last { !viewModel.shouldHideStandaloneBacking(at: $0) }
         let height = last.flatMap { rowHeights[$0] } ?? primaryFontSize * 2.4
-        return max(density == .spacious ? 160 : 120,
+        return max(dockedPanel ? 90 : (density == .spacious ? 160 : 120),
             LyricScrollGeometry.trailingSpace(viewportHeight: viewportHeight, bottomInset: bottomChromeInset,
                 rowHeight: height, anchor: scrollAnchor(for: last).y))
     }
@@ -144,6 +172,9 @@ struct LyricsView: View {
     }
 
     private func scrollAnchor(for index: Int?) -> UnitPoint {
+        if dockedPanel {
+            return UnitPoint(x: 0.5, y: 0.18)
+        }
         guard viewportHeight > 0, density == .compact || usesMeasuredScrollAnchor else {
             return UnitPoint(x: 0.5, y: density == .compact ? 0.22 : 0.28)
         }
@@ -209,34 +240,42 @@ struct LyricsView: View {
                             EmptyView()
                         } else {
                             let rowAlign = rowAlignment(at: index)
-                            LyricsPlaybackLineRow(
-                                viewModel: viewModel,
-                                index: index,
-                                line: line,
-                                showTranslation: shouldShowTranslation(for: line),
-                                pronunciationText: viewModel.arePronunciationsVisible ? line.pronunciationText : "",
-                                prefersPronunciationAsPrimary: largerLyricsText == "pronunciation",
-                                reduceMotion: reduceMotion,
-                                alignment: rowAlign.horizontal,
-                                textAlignment: rowAlign.text,
-                                primaryFontSize: primaryFontSize,
-                                usesSpeakerLayout: viewModel.usesSpeakerLayout,
-                                horizontalInset: phoneLandscape ? 0 : (density == .compact ? 32 : 16),
-                                onTap: {
-                                    HapticFeedback.lyricTap.trigger()
-                                    if consumesLineTapToRevealChrome {
-                                        onInteraction?()
-                                    } else {
-                                        viewModel.userTapped(lineIndex: index)
+                            // Measure the layout box outside the row's visual cascade.
+                            ZStack(alignment: rowAlign.frame) {
+                                LyricsPlaybackLineRow(
+                                    viewModel: viewModel,
+                                    index: index,
+                                    line: line,
+                                    showTranslation: shouldShowTranslation(for: line),
+                                    pronunciationText: viewModel.arePronunciationsVisible ? line.pronunciationText : "",
+                                    prefersPronunciationAsPrimary: largerLyricsText == "pronunciation",
+                                    reduceMotion: reduceMotion,
+                                    alignment: rowAlign.horizontal,
+                                    textAlignment: rowAlign.text,
+                                    primaryFontSize: primaryFontSize,
+                                    stageEmphasis: wideStage,
+                                    usesSpeakerLayout: viewModel.usesSpeakerLayout,
+                                    horizontalInset: phoneLandscape ? 0 : (dockedPanel ? 10 : (density == .compact ? 32 : 16)),
+                                    onTap: {
+                                        HapticFeedback.lyricTap.trigger()
+                                        if consumesLineTapToRevealChrome {
+                                            onInteraction?()
+                                        } else {
+                                            viewModel.userTapped(lineIndex: index)
+                                        }
                                     }
-                                }
-                            )
-                            .onGeometryChange(for: CGFloat.self) { geometry in
-                                geometry.size.height.rounded(.up)
-                            } action: { height in
-                                guard rowHeights[index] != height else { return }
-                                rowHeights[index] = height
+                                )
+                                .modifier(LyricLineCascadeModifier(motion: lineCascade, row: index,
+                                    enabled: allowsLineCascade))
                             }
+                            .onGeometryChange(for: LyricScrollMotion.Row.self) { geometry in
+                                let frame = geometry.frame(in: .named(LyricScrollMotion.coordinateSpace))
+                                return LyricScrollMotion.Row(top: frame.minY, height: frame.height.rounded(.up))
+                            } action: { row in
+                                scrollMotion.measure(row, at: index)
+                                if rowHeights[index] != row.height { rowHeights[index] = row.height }
+                            }
+                            .onDisappear { scrollMotion.forget(index) }
                             .onScrollVisibilityChange(threshold: 0.01) { visible in
                                 if visible { visibleReadingRows.insert(index) }
                                 else { visibleReadingRows.remove(index) }
@@ -245,8 +284,6 @@ struct LyricsView: View {
                                     viewModel.unsyncedScrollIndex = first
                                 }
                             }
-                            .modifier(LyricLineCascadeModifier(motion: lineCascade, row: index,
-                                enabled: allowsLineCascade))
                         }
 
                         if viewModel.instrumentalGapAfterIndex == index,
@@ -282,12 +319,24 @@ struct LyricsView: View {
                         .id("translation-attribution")
                     }
                 }
+                // A vertical ScrollView proposes the viewport width, but a stack that
+                // only wraps its rows would collapse to the longest lyric and make a
+                // trailing-aligned wide player look left-heavy. Fill the viewport so
+                // right-aligned lyrics end at the lyric column's margin.
+                .frame(maxWidth: .infinity)
                 .animation(
                     reduceMotion ? nil : .easeInOut(duration: 0.38),
                     value: viewModel.areTranslationsVisible
                 )
                 .padding(.top, density == .spacious ? 8 : 40)
                 .padding(.bottom, scrollBottomPadding)
+                .background(alignment: .topLeading) {
+                    LyricScrollProbe(motion: scrollMotion)
+                        .frame(width: 0, height: 0)
+                        .allowsHitTesting(false)
+                        .accessibilityHidden(true)
+                }
+                .coordinateSpace(name: LyricScrollMotion.coordinateSpace)
             }
             .onGeometryChange(for: CGFloat.self) { geometry in
                 geometry.size.height.rounded(.up)
@@ -297,55 +346,77 @@ struct LyricsView: View {
             .lumaHideScrollEdgeEffects()
             .contentMargins(.bottom, bottomChromeInset, for: .scrollContent)
             .contentMargins(.bottom, bottomChromeInset, for: .scrollIndicators)
-            .lumaContentEdgeFade(top: 52, bottom: phoneLandscape ? 120 : 88)
+            .lumaContentEdgeFade(top: 52, bottom: extendsToBottomEdge ? 24 : (phoneLandscape ? 120 : 88))
             .onScrollPhaseChange { _, phase in
+                scrollMotion.updateReaderPhase(phase)
                 if phase == .interacting {
+                    scrollMotion.stop()
                     lineCascade = LyricLineCascade()
-                    scrollRevealTracker.reset()
+                    chromeScrollTracker.beginDrag()
                     viewModel.userStartedScrolling()
-                    // While chrome is visible, any scroll resets the 5-second idle
-                    // timer. While it is hidden, only a deliberate scroll should
-                    // reveal it; the velocity check below owns that decision.
-                    if !consumesLineTapToRevealChrome {
-                        onInteraction?()
-                    }
-                } else if phase == .idle {
-                    viewModel.userStoppedScrolling()
-                    scrollRevealTracker.reset()
+                } else {
+                    chromeScrollTracker.endDrag()
+                    if phase == .idle { viewModel.userStoppedScrolling() }
                 }
             }
             .onScrollGeometryChange(for: CGFloat.self) { geometry in
-                geometry.contentOffset.y
-            } action: { _, offset in
-                // Track velocity only while hidden chrome could be revealed.
-                // Writing a `@State` sample on every scroll tick invalidated
-                // this whole view at scroll cadence even though the value was
-                // never read by the body.
-                guard consumesLineTapToRevealChrome, viewModel.isUserScrolling else {
-                    scrollRevealTracker.reset()
-                    return
-                }
-                if scrollRevealTracker.observe(offset: offset, now: CACurrentMediaTime()) {
-                    onInteraction?()
-                }
+                let maximum = max(0, geometry.contentSize.height + geometry.contentInsets.top
+                    + geometry.contentInsets.bottom - geometry.containerSize.height)
+                return min(max(0, geometry.contentOffset.y + geometry.contentInsets.top), maximum)
+            } action: { previous, offset in
+                scrollMotion.observeReaderOffset(offset)
+                guard let onChromeScroll,
+                      let action = chromeScrollTracker.observe(
+                        delta: offset - previous, now: CACurrentMediaTime(), isHidden: consumesLineTapToRevealChrome
+                      ) else { return }
+                onChromeScroll(action)
             }
             .simultaneousGesture(
                 TapGesture().onEnded { onInteraction?() }
             )
             .onChange(of: scrollRequest, initial: true) { _, request in
-                guard let request else { return }
+                guard let request else {
+                    scrollMotion.stop()
+                    if presentationIsVisible == false { lastFollowRequest = nil }
+                    return
+                }
                 follow(request, proxy: proxy)
             }
+            .onChange(of: allowsAdaptiveScroll) { _, enabled in
+                if enabled, let request = scrollRequest, request == lastFollowRequest,
+                   case .line(.some) = request.target {
+                    follow(request, proxy: proxy, correctingLayout: true)
+                } else if !enabled {
+                    scrollMotion.stop()
+                }
+            }
+            .onChange(of: governor.budget.isLowPowerMode) { _, lowPower in
+                scrollMotion.updateFrameRate(lowPower: lowPower)
+            }
+            .onChange(of: reduceMotion) { _, reduced in
+                guard reduced, let request = scrollRequest else { return }
+                follow(request, proxy: proxy, correctingLayout: true)
+            }
+            .onDisappear { scrollMotion.stop() }
             .task(id: presentationIsVisible) {
                 guard presentationIsVisible != false else { return }
                 // The retained ScrollView can discard its offset while hidden. Restore
                 // after the presentation layout has materialized even if the line is unchanged.
                 await Task.yield()
                 guard !Task.isCancelled else { return }
+                let openingRequest = scrollRequest
+                let openingUnsyncedIndex = viewModel.unsyncedScrollIndex
                 restorePresentation(proxy: proxy)
+                guard presentationIsVisible == true else { return }
+                // Revisit only the original opening target if the retained layout settled late.
                 do { try await Task.sleep(for: .milliseconds(180)) } catch { return }
-                guard !Task.isCancelled else { return }
-                restorePresentation(proxy: proxy)
+                guard !Task.isCancelled, scrollRequest == openingRequest,
+                      viewModel.unsyncedScrollIndex == openingUnsyncedIndex else { return }
+                if let openingRequest, lastScrollLayout != scrollLayout {
+                    follow(openingRequest, proxy: proxy, correctingLayout: true)
+                } else if openingRequest == nil {
+                    restorePresentation(proxy: proxy)
+                }
             }
             .task(id: scrollLayout) {
                 // Chrome animates the viewport through intermediate heights. Correct
@@ -370,18 +441,6 @@ struct LyricsView: View {
                 if viewModel.followState == .reacquiringFollow { viewModel.followState = .followingPlayback }
             }
         }
-    }
-
-    /// Pure threshold used by the scroll-reveal gesture. Kept separate so the
-    /// slow-browse / deliberate-scroll behavior can be regression-tested without
-    /// a live scroll view.
-    nonisolated static func shouldRevealChrome(
-        offsetDelta: CGFloat,
-        elapsed: CFTimeInterval,
-        threshold: CGFloat = chromeRevealVelocity
-    ) -> Bool {
-        let seconds = max(elapsed, 1.0 / 240.0)
-        return abs(offsetDelta) / seconds >= threshold
     }
 
     private var lyricsAreLoaded: Bool {
@@ -426,6 +485,7 @@ struct LyricsView: View {
     var body: some View {
         ZStack {
             stateContent
+                .ignoresSafeArea(.container, edges: extendsToBottomEdge ? .bottom : [])
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             if let message = viewModel.translationErrorMessage {
@@ -556,6 +616,7 @@ struct LyricsView: View {
         .onReceive(NotificationCenter.default.publisher(for: .lumaRoutePickerDidDismiss)) { _ in
             viewModel.resumeTranslationAfterRoutePickerIfNeeded()
         }
+        #if !targetEnvironment(macCatalyst)
         .translationTask(translationConfiguration) { session in
             let epoch = await MainActor.run { translationEpoch }
             let requestID = await MainActor.run { viewModel.appleTranslationRequestID }
@@ -659,6 +720,7 @@ struct LyricsView: View {
                 await viewModel.failAppleTranslation(error: error, requestID: requestID)
             }
         }
+        #endif
     }
 
     @MainActor
@@ -678,12 +740,13 @@ struct LyricsView: View {
         } else {
             target = .line(viewModel.scrollLineIndex)
         }
-        return LyricFollowRequest(target: target, restoreToken: viewModel.scrollRestoreToken)
+        return LyricFollowRequest(target: target, restoreToken: viewModel.scrollRestoreToken,
+            seekRevision: viewModel.amllSeekRevision)
     }
 
     private func restorePresentation(proxy: ScrollViewProxy) {
         if let request = scrollRequest {
-            follow(request, proxy: proxy, correctingLayout: true)
+            follow(request, proxy: proxy)
         } else if !viewModel.followsPlayback, let index = viewModel.unsyncedScrollIndex,
                   viewModel.displayRows.indices.contains(index) {
             proxy.scrollTo(index, anchor: .top)
@@ -691,12 +754,18 @@ struct LyricsView: View {
     }
 
     private func follow(_ request: LyricFollowRequest, proxy: ScrollViewProxy, correctingLayout: Bool = false) {
-        let returningFromGap = lastScrollLayout != nil && lastAutoScrolledIndex == nil
+        let priorRequest = lastFollowRequest
+        guard correctingLayout || priorRequest != request else { return }
+        let returningFromGap: Bool
+        if case .gap? = priorRequest?.target { returningFromGap = true }
+        else { returningFromGap = false }
+        lastFollowRequest = request
         lastScrollLayout = scrollLayout
         let tapped = viewModel.pendingSeekScrollIndex
         if tapped != nil { viewModel.pendingSeekScrollIndex = nil }
         switch tapped.map({ LyricFollowRequest.Target.line($0) }) ?? request.target {
         case .gap:
+            scrollMotion.stop()
             lastAutoScrolledIndex = nil
             lineCascade = LyricLineCascade()
             withAnimation(reduceMotion ? nil : LumaAnimation.lyricScroll) {
@@ -707,40 +776,85 @@ struct LyricsView: View {
         case .line(let index?):
             let previous = lastAutoScrolledIndex
             lastAutoScrolledIndex = index
-            let seeking = tapped != nil || returningFromGap || viewModel.followState == .reacquiringFollow
-                || viewModel.playerState.pendingSeekPosition != nil || lastAMLLSeekRevision != viewModel.amllSeekRevision
-            lastAMLLSeekRevision = viewModel.amllSeekRevision
+            let restoring = priorRequest?.restoreToken != request.restoreToken
+            let changedSeek = (priorRequest?.seekRevision ?? 0) != request.seekRevision
+            let seeking = tapped != nil || (returningFromGap && priorRequest != request) || changedSeek
+                || (viewModel.followState == .reacquiringFollow && restoring)
+                || viewModel.playerState.pendingSeekPosition != nil
             scroll(to: index, from: previous, proxy: proxy, seeking: seeking, correctingLayout: correctingLayout)
         }
     }
 
     private func scroll(to index: Int, from previous: Int?, proxy: ScrollViewProxy, seeking: Bool, correctingLayout: Bool) {
-        let interval: Double? = index > 0 && viewModel.displayRows.indices.contains(index)
-            ? viewModel.displayRows[index].startMs.flatMap { start in
-                viewModel.displayRows[index - 1].startMs.map { Double(start - $0) }
-            } : nil
+        let rows = viewModel.displayRows
+        let currentStart = rows.indices.contains(index) ? rows[index].startMs : nil
+        let previousStart = previous.flatMap { rows.indices.contains($0) ? rows[$0].startMs : nil }
+        let playbackTime = viewModel.karaokePlaybackMs
+        let clock = max(playbackTime, currentStart ?? playbackTime)
+        let nextStart = viewModel.playbackTimeline.nextStart(after: clock, leadOnly: true)
+            ?? viewModel.playbackTimeline.nextStart(after: clock)
+        let cadence = LyricScrollCadence(previousStart: previousStart, currentStart: currentStart,
+            nextStart: nextStart, playbackTime: playbackTime)
+        let anchor = scrollAnchor(for: index)
         let travel = LyricLineCascade.measuredTravel(previous: previous, target: index,
             heights: rowHeights, spacing: lineStackSpacing, viewportHeight: viewportHeight)
-        let distance = previous.flatMap { rowHeights[$0].map { $0 + lineStackSpacing } }
-        let nativeSpring = LyricScrollConfiguration.spring(intervalMs: interval, distance: distance)
+        if !seeking, allowsAdaptiveScroll, let previous,
+           let response = scrollMotion.move(to: index, anchor: anchor.y, viewport: viewportHeight,
+               cadence: cadence, lowPower: governor.budget.isLowPowerMode,
+               forwardOnly: !correctingLayout && index >= previous) {
+            if !correctingLayout {
+                updateLineCascade(to: index, travel: travel, spring: adaptiveSpring(response))
+            }
+            return
+        }
+
+        // An unseen row, a seek or an accessibility restore belongs to the native reader.
+        scrollMotion.stop()
         let style = LyricScrollTiming.style(previous: previous, target: index,
             seeking: seeking || correctingLayout, reduceMotion: reduceMotion)
         let animation: Animation?
         switch style {
-        case .stationary: animation = nil
-        case .glide: animation = .smooth(duration: 0.46)
-        case .spring: animation = .interpolatingSpring(nativeSpring)
+        case .stationary:
+            lineCascade = LyricLineCascade()
+            animation = nil
+        case .glide:
+            lineCascade = LyricLineCascade()
+            animation = .smooth(duration: 0.46)
+        case .spring:
+            let distance = previous.flatMap { rowHeights[$0].map { $0 + lineStackSpacing } } ?? primaryFontSize * 2
+            let response = LyricScrollTrajectory.response(from: .init(offset: 0, velocity: 0),
+                to: Double(distance), cadence: cadence)
+            let spring = adaptiveSpring(response)
+            updateLineCascade(to: index, travel: travel, spring: spring)
+            animation = .interpolatingSpring(spring)
         }
-        if style == .spring, allowsLineCascade, density == .compact, !viewModel.usesSpeakerLayout, let travel {
-            lineCascade.retarget(to: index, travel: travel, spring: nativeSpring, now: CACurrentMediaTime())
+        withAnimation(animation) { proxy.scrollTo(index, anchor: anchor) }
+    }
+
+    private func adaptiveSpring(_ response: Double) -> Spring {
+        Spring(mass: 1, stiffness: response * response, damping: 2 * response, allowOverDamping: true)
+    }
+
+    private func updateLineCascade(to index: Int, travel: CGFloat?, spring: Spring) {
+        if allowsLineCascade, density == .compact, !viewModel.usesSpeakerLayout, let travel {
+            lineCascade.retarget(to: index, travel: travel, spring: spring, now: CACurrentMediaTime())
         } else {
             lineCascade = LyricLineCascade()
         }
-        withAnimation(animation) { proxy.scrollTo(index, anchor: scrollAnchor(for: index)) }
     }
 
     @MainActor
     private func triggerAppleTranslation(requestID: Int) async {
+        #if targetEnvironment(macCatalyst)
+        await viewModel.failAppleTranslation(
+            message: String(
+                localized: "Apple Translation is unavailable in this Mac build. Choose another translation provider.",
+                bundle: AppUILanguage.localizationBundle,
+                locale: AppUILanguage.locale
+            ),
+            requestID: requestID
+        )
+        #else
         guard requestID == viewModel.appleTranslationRequestID,
               viewModel.isTranslating, !Task.isCancelled,
               AppleIntelligenceLyricsTranslator.normalizedPrompt(viewModel.effectiveAppleIntelligencePrompt).isEmpty else { return }
@@ -793,8 +907,10 @@ struct LyricsView: View {
             lineCount: viewModel.displayRows.count,
             cacheHit: false
         )
+        #endif
     }
 
+    #if !targetEnvironment(macCatalyst)
     @MainActor
     private func retryAppleTranslation(after failedStrategy: LyricsTranslationStrategy) {
         guard case .loaded = viewModel.state else { return }
@@ -824,35 +940,53 @@ struct LyricsView: View {
         }
         translationConfiguration = configuration
     }
+    #endif
 
 }
 
-/// Samples scroll offset/time without touching SwiftUI state. The view keeps
-/// one instance alive via `@State`; mutations stay out of the invalidation graph.
-@MainActor
-final class LyricsScrollRevealTracker {
-    private var lastOffset: CGFloat?
-    private var lastSampleTime: CFTimeInterval = 0
+enum LyricsChromeScrollAction: Equatable {
+    case hide
+    case reveal
+}
 
-    func reset() {
-        lastOffset = nil
-        lastSampleTime = 0
+/// Keeps scroll samples outside SwiftUI observation and allows one transition per drag.
+@MainActor
+final class LyricsChromeScrollTracker {
+    private var isDragging = false
+    private var didChangeChrome = false
+    private var lastSampleTime: CFTimeInterval?
+    private var travel: CGFloat = 0
+
+    func beginDrag() {
+        isDragging = true
+        didChangeChrome = false
+        lastSampleTime = nil
+        travel = 0
     }
 
-    /// Returns true when the current sample crosses the deliberate-scroll
-    /// threshold. The sample is recorded even when it does not reveal chrome.
-    func observe(offset: CGFloat, now: CFTimeInterval) -> Bool {
-        defer {
-            lastOffset = offset
-            lastSampleTime = now
+    func endDrag() {
+        isDragging = false
+    }
+
+    func observe(delta: CGFloat, now: CFTimeInterval, isHidden: Bool) -> LyricsChromeScrollAction? {
+        guard isDragging, !didChangeChrome, delta.isFinite, now.isFinite else { return nil }
+        let previousTime = lastSampleTime
+        lastSampleTime = now
+        guard let previousTime, now > previousTime, now - previousTime <= 0.16 else {
+            travel = 0
+            return nil
         }
-        guard let previousOffset = lastOffset, lastSampleTime > 0 else {
-            return false
+        let directedDelta = isHidden ? -delta : delta
+        let speed = directedDelta / max(now - previousTime, 1.0 / 120)
+        let minimumSpeed: CGFloat = isHidden ? 350 : 460
+        guard speed >= minimumSpeed else {
+            travel = 0
+            return nil
         }
-        return LyricsView.shouldRevealChrome(
-            offsetDelta: offset - previousOffset,
-            elapsed: now - lastSampleTime
-        )
+        travel += directedDelta
+        guard travel >= 14 else { return nil }
+        didChangeChrome = true
+        return isHidden ? .reveal : .hide
     }
 }
 
@@ -863,6 +997,7 @@ private struct LyricFollowRequest: Equatable {
     }
     let target: Target
     let restoreToken: Int
+    let seekRevision: Int
 }
 
 private struct LyricLayoutConfiguration: Equatable {

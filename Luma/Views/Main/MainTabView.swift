@@ -4,6 +4,7 @@
 // See LICENSE file in the project root for full license information.
 
 import SwiftUI
+import SwiftData
 import SwiftSonic
 import OSLog
 #if os(iOS)
@@ -14,6 +15,9 @@ struct MainTabView: View {
     @Environment(\.appContainer) private var container
     #if os(iOS)
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.displayScale) private var displayScale
+    @AppStorage("coverArtUploadVersion") private var sidebarCoverVersion = 0
+    @State private var sidebarArtwork = SidebarArtworkStore()
     #endif
     @State private var searchPath = NavigationPath()
     #if os(macOS)
@@ -25,9 +29,12 @@ struct MainTabView: View {
     @State private var recentlyAddedPath = NavigationPath()
     @State private var artistsPath = NavigationPath()
     @State private var albumsPath = NavigationPath()
-    @State private var favoritesPath = NavigationPath()
     @State private var playlistsPath = NavigationPath()
+    @State private var playlistPaths: [String: NavigationPath] = [:]
+    @State private var songsPath = NavigationPath()
+    @State private var pinPaths: [String: NavigationPath] = [:]
     @State private var downloadsPath = NavigationPath()
+    @Query(sort: \PinnedItem.sortOrder) private var allPinnedItems: [PinnedItem]
     @State private var selectedTab: AppTab = .home
     @State private var mountedTabs: Set<AppTab> = [.home]
     @State private var showingFullPlayer = false
@@ -35,13 +42,17 @@ struct MainTabView: View {
     @State private var openPlayerWithQueue = false
     @State private var openPlayerLyricsMode: LumaLyricsViewMode = .lyrics
     @State private var showAccountSheet = false
+    @State private var showAudioQualitySettings = false
+    /// The quality card can request settings while the player cover is still up.
+    /// Present after the cover finishes dismissing, not during its transition.
+    @State private var pendingAudioQualitySettings = false
     @State private var showCreatePlaylist = false
+    @State private var showSidebarEditor = false
     /// Path change requested from the full player / a notification, applied after the player's cover is
     /// completely gone. `mode` decides whether the tab's existing stack is preserved.
     @State private var pendingNavigation: (destination: HomeDestination, tab: AppTab, mode: NavigationMode)?
     @Namespace private var playerZoom
     private let fullPlayerZoomID = "full-player"
-    @State private var tabBarChrome = TabBarChromeState()
     /// Identity of this `tabs` hierarchy, so a device log can tell a re-render from a rebuild.
     @State private var tabsInstanceID = UUID()
 
@@ -55,7 +66,12 @@ struct MainTabView: View {
 
     private enum AppTab: Hashable {
         case home, discover, library, search
-        case recentlyAdded, artists, albums, favorites, playlists, downloads
+        case recentlyAdded, artists, albums, songs, playlists, downloads
+        /// A server playlist opened from its own sidebar row. The string is the
+        /// playlist id, so each row keeps an independent navigation path.
+        case playlist(String)
+        /// A pinned album, artist, or playlist promoted into the Library sidebar.
+        case pin(String)
     }
 
     /// Whether a deferred navigation replaces the tab's stack or pushes onto it.
@@ -71,6 +87,14 @@ struct MainTabView: View {
         Binding(
             get: { selectedTab },
             set: { newValue in
+                #if os(iOS)
+                if case .pin(let id) = newValue,
+                   let pin = sidebarPinnedItems.first(where: { $0.id == id }),
+                   PinnedItemType(rawValue: pin.itemType) == .song {
+                    playPinnedSong(pin)
+                    return
+                }
+                #endif
                 guard newValue != selectedTab else {
                     #if os(macOS)
                     if newValue == .search {
@@ -86,12 +110,113 @@ struct MainTabView: View {
     }
 
     private var accountDisplayName: String {
-        container?.serverState.activeServer?.username
-            ?? String(localized: "Account", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale)
+        let username = container?.serverState.activeServer?.username.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return username.isEmpty
+            ? String(localized: "Account", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale)
+            : username
     }
 
     private func tabVisualsPresented(_ tab: AppTab) -> Bool {
         selectedTab == tab && !showingFullPlayer && !showAccountSheet && !showCreatePlaylist
+    }
+
+    @ViewBuilder
+    private func pinnedItemRootView(_ pin: PinnedItem) -> some View {
+        switch PinnedItemType(rawValue: pin.itemType) {
+        case .album:
+            AlbumDetailView(albumId: pin.itemId, albumName: pin.displayName, coverArtId: pin.coverArtId)
+        case .artist:
+            ArtistDetailView(artistId: pin.itemId, artistName: pin.displayName, coverArtId: pin.coverArtId)
+        case .playlist:
+            PlaylistDetailView(playlistId: pin.itemId, name: pin.displayName, coverArtId: pin.coverArtId)
+        case .song, .none:
+            EmptyView()
+        }
+    }
+
+    #if os(iOS)
+    /// Server playlists exposed as first-class sidebar rows under “All Playlists”.
+    /// Only present on a regular-width iPad where the sidebar hierarchy is shown.
+    private var sidebarPlaylists: [Playlist] {
+        guard showsSidebarLibrarySections else { return [] }
+        return container?.homeDiscoveryFeed.playlists ?? []
+    }
+
+    private var sidebarPlaylistIDs: [String] {
+        sidebarPlaylists.map(\.id)
+    }
+
+    /// The active account's pins, in Home's order. An empty result removes the
+    /// entire Pinned group, not just its rows. Song rows play without leaving the current tab.
+    private var sidebarPinnedItems: [PinnedItem] {
+        guard showsSidebarLibrarySections,
+              let sid = container?.serverState.activeServer?.id else { return [] }
+        return allPinnedItems.filter {
+            $0.serverId == sid && PinnedItemType(rawValue: $0.itemType) != nil
+        }
+    }
+
+    private var sidebarPinnedIDs: [String] {
+        sidebarPinnedItems.map(\.id)
+    }
+
+    private var sidebarArtworkScope: SidebarArtworkStore.Scope {
+        .init(serverID: container?.serverState.activeServer?.id,
+              accountRevision: container?.serverState.accountRevision ?? 0,
+              coverVersion: sidebarCoverVersion, displayScale: displayScale)
+    }
+
+    private var sidebarArtworkRequest: SidebarArtworkStore.Request? {
+        guard showsSidebarLibrarySections else { return nil }
+        let entries = sidebarPinnedItems.map { pin in
+            SidebarArtworkStore.Entry(coverArtID: pin.coverArtId ?? pin.itemId,
+                playlistID: pin.itemType == PinnedItemType.playlist.rawValue ? pin.itemId : nil,
+                isArtist: pin.itemType == PinnedItemType.artist.rawValue)
+        } + sidebarPlaylists.map {
+            SidebarArtworkStore.Entry(coverArtID: $0.coverArt ?? $0.id, playlistID: $0.id)
+        }
+        var seen = Set<SidebarArtworkStore.Entry>()
+        return .init(scope: sidebarArtworkScope, entries: entries.filter { seen.insert($0).inserted },
+                     networkRevision: container?.serverState.artworkNetworkRevision ?? 0)
+    }
+
+    private func playPinnedSong(_ pin: PinnedItem) {
+        guard let container,
+              let identity = try? container.serverState.requestIdentity(for: pin.serverId) else { return }
+        let songID = pin.itemId
+        let title = pin.displayName
+        let artist = pin.displaySubtitle
+        let coverArtID = pin.coverArtId
+        Task {
+            let downloaded = await container.downloadService.isDownloaded(songId: songID, serverId: identity.serverID)
+            guard !Task.isCancelled, container.serverState.requestIsCurrent(identity) else { return }
+            do {
+                let song = DisplayableSong(id: songID, title: title,
+                    artist: artist.isEmpty ? nil : artist, isDownloaded: downloaded, coverArtId: coverArtID)
+                try await container.playerService.play(tracks: [song], startIndex: 0)
+            } catch is CancellationError {
+                return
+            } catch {
+                guard container.serverState.requestIsCurrent(identity) else { return }
+                container.toastService.showError(String(localized: "Unable to load tracks.", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale))
+                Logger.player.error("[PLAYBACK] sidebar pinned song failed: \(error, privacy: .public)")
+            }
+        }
+    }
+    #endif
+
+    private func playlistPathBinding(_ id: String) -> Binding<NavigationPath> {
+        Binding(
+            get: { playlistPaths[id] ?? NavigationPath() },
+            set: { playlistPaths[id] = $0 }
+        )
+    }
+
+    private func pinPathBinding(_ id: String) -> Binding<NavigationPath> {
+        Binding(
+            get: { pinPaths[id] ?? NavigationPath() },
+            set: { pinPaths[id] = $0 }
+        )
     }
 
     // MARK: - Tabs View
@@ -114,9 +239,9 @@ struct MainTabView: View {
                 .onChange(of: searchPath.count) { old, new in logPathChange(.search, from: old, to: new) }
             }
 
-            Tab("Home", systemImage: "house.fill", value: AppTab.home) {
+            Tab("Home", systemImage: homeTabSymbol, value: AppTab.home) {
                 NavigationStack(path: $homePath) {
-                    reachabilityGated { DashboardHomeView() }
+                    DashboardHomeView()
                         // Destination registration must survive cellular/reachability changes.
                         .navigationDestination(for: HomeDestination.self) { destination in
                             homeDestinationView(destination)
@@ -127,9 +252,9 @@ struct MainTabView: View {
                 .onChange(of: homePath.count) { old, new in logPathChange(.home, from: old, to: new) }
             }
 
-            Tab("Discover", systemImage: "square.grid.2x2.fill", value: AppTab.discover) {
+            Tab(discoverTabTitle, systemImage: discoverTabSymbol, value: AppTab.discover) {
                 NavigationStack(path: $discoverPath) {
-                    reachabilityGated { DiscoverView() }
+                    DiscoverView()
                         // Destination registration must survive cellular/reachability changes.
                         .navigationDestination(for: HomeDestination.self) { destination in
                             homeDestinationView(destination)
@@ -155,8 +280,39 @@ struct MainTabView: View {
                 .onChange(of: libraryPath.count) { old, new in logPathChange(.library, from: old, to: new) }
             }
             #if os(iOS)
+            .hidden(showsSidebarLibrarySections)
+            #endif
+            #if os(iOS)
             if showsSidebarLibrarySections {
                 TabSection(String(localized: "Library", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale)) {
+                    // Pinned albums/artists/playlists sit above the library rows,
+                    // matching Music's sidebar. Each keeps its own navigation path.
+                    if !sidebarPinnedItems.isEmpty {
+                        TabSection {
+                            ForEach(sidebarPinnedItems) { pin in
+                                Tab(value: AppTab.pin(pin.id)) {
+                                    NavigationStack(path: pinPathBinding(pin.id)) {
+                                        lazySidebarRoot(when: .pin(pin.id)) {
+                                            pinnedItemRootView(pin)
+                                        }
+                                        .navigationDestination(for: HomeDestination.self) { libraryDestinationView($0) }
+                                    }
+                                    .environment(\.detailNavigationPath, pinPathBinding(pin.id))
+                                    .environment(\.playbackVisualsPresented, tabVisualsPresented(.pin(pin.id)))
+                                    .onChange(of: pinPaths[pin.id]?.count ?? 0) { old, new in
+                                        logPathChange(.pin(pin.id), from: old, to: new)
+                                    }
+                                } label: {
+                                    PinnedSidebarLabel(pin: pin, artwork: sidebarArtwork, scope: sidebarArtworkScope)
+                                }
+                                .tabPlacement(.sidebarOnly)
+                            }
+                        } header: {
+                            Label(String(localized: "Pinned", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale), systemImage: "pin")
+                        }
+                        .customizationID("luma.sidebar.pinned")
+                    }
+
                     Tab("Recently Added", systemImage: "clock", value: AppTab.recentlyAdded) {
                         NavigationStack(path: $recentlyAddedPath) {
                             lazySidebarRoot(when: .recentlyAdded) { RecentlyAddedAlbumsView() }
@@ -184,14 +340,14 @@ struct MainTabView: View {
                         .environment(\.playbackVisualsPresented, tabVisualsPresented(.albums))
                         .onChange(of: albumsPath.count) { old, new in logPathChange(.albums, from: old, to: new) }
                     }
-                    Tab("Favorites", systemImage: "star", value: AppTab.favorites) {
-                        NavigationStack(path: $favoritesPath) {
-                            lazySidebarRoot(when: .favorites) { FavoritesView() }
+                    Tab("Songs", systemImage: "music.note", value: AppTab.songs) {
+                        NavigationStack(path: $songsPath) {
+                            lazySidebarRoot(when: .songs) { SongsListView() }
                                 .navigationDestination(for: HomeDestination.self) { libraryDestinationView($0) }
                         }
-                        .environment(\.detailNavigationPath, $favoritesPath)
-                        .environment(\.playbackVisualsPresented, tabVisualsPresented(.favorites))
-                        .onChange(of: favoritesPath.count) { old, new in logPathChange(.favorites, from: old, to: new) }
+                        .environment(\.detailNavigationPath, $songsPath)
+                        .environment(\.playbackVisualsPresented, tabVisualsPresented(.songs))
+                        .onChange(of: songsPath.count) { old, new in logPathChange(.songs, from: old, to: new) }
                     }
                     Tab("Downloads", systemImage: "arrow.down.circle", value: AppTab.downloads) {
                         NavigationStack(path: $downloadsPath) {
@@ -207,7 +363,7 @@ struct MainTabView: View {
                 .defaultVisibility(.hidden, for: .tabBar)
 
                 TabSection(String(localized: "Playlists", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale)) {
-                    Tab("All Playlists", systemImage: "square.grid.2x2", value: AppTab.playlists) {
+                    Tab("All Playlists", systemImage: "square.grid.3x3", value: AppTab.playlists) {
                         NavigationStack(path: $playlistsPath) {
                             lazySidebarRoot(when: .playlists) { PlaylistListView() }
                                 .navigationDestination(for: HomeDestination.self) { libraryDestinationView($0) }
@@ -216,6 +372,28 @@ struct MainTabView: View {
                         .environment(\.playbackVisualsPresented, tabVisualsPresented(.playlists))
                         .onChange(of: playlistsPath.count) { old, new in logPathChange(.playlists, from: old, to: new) }
                     }
+
+                    // Server playlists sit directly below “All Playlists”, each with
+                    // its live cover thumbnail and title. They are sidebar-only so the
+                    // iPhone tab bar keeps its compact five-destination layout.
+                    ForEach(sidebarPlaylists) { playlist in
+                        Tab(value: AppTab.playlist(playlist.id)) {
+                            NavigationStack(path: playlistPathBinding(playlist.id)) {
+                                lazySidebarRoot(when: .playlist(playlist.id)) {
+                                    PlaylistDetailView(playlist: playlist)
+                                }
+                                .navigationDestination(for: HomeDestination.self) { libraryDestinationView($0) }
+                            }
+                            .environment(\.detailNavigationPath, playlistPathBinding(playlist.id))
+                            .environment(\.playbackVisualsPresented, tabVisualsPresented(.playlist(playlist.id)))
+                            .onChange(of: playlistPaths[playlist.id]?.count ?? 0) { old, new in
+                                logPathChange(.playlist(playlist.id), from: old, to: new)
+                            }
+                        } label: {
+                            PlaylistSidebarLabel(playlist: playlist, artwork: sidebarArtwork, scope: sidebarArtworkScope)
+                        }
+                        .tabPlacement(.sidebarOnly)
+                    }
                 }
                 .sectionActions {
                     Button(String(localized: "New Playlist", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale), systemImage: "plus") {
@@ -223,59 +401,60 @@ struct MainTabView: View {
                     }
                 }
                 .defaultVisibility(.hidden, for: .tabBar)
+                .customizationID("luma.sidebar.playlists")
             }
             #endif
         }
         #if os(iOS)
         .tabViewStyle(.sidebarAdaptable)
-        .tabViewSidebarBottomBar {
-            Button {
-                showAccountSheet = true
-            } label: {
-                Label {
-                    Text(accountDisplayName)
-                        .lineLimit(1)
-                } icon: {
-                    Image(systemName: "person.crop.circle.fill")
-                        .symbolRenderingMode(.hierarchical)
+        // iPadOS starts in the full sidebar (Apple Music style) instead of the
+        // compact top tab bar. The system still remembers any later choice.
+        .defaultAdaptableTabBarPlacement(.sidebar)
+        // Keep the switch inside the sidebar chrome instead of above it. The
+        // standard toggle is removed from the content bar; `tabViewSidebar`
+        // hosts the replacement in the sidebar's own header.
+        .toolbar(removing: .sidebarToggle)
+        .contentToolbar(for: .tabViewSidebar) {
+            ToolbarItem(placement: .topBarLeading) {
+                Button {
+                    showSidebarEditor = true
+                } label: {
+                    Text(String(localized: "Edit", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale))
+                        .font(.body)
                 }
             }
-            .buttonStyle(.plain)
-            .accessibilityLabel(String(localized: "Account", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale))
+            ToolbarItem(placement: .topBarTrailing) {
+                LumaSidebarToggleButton()
+            }
         }
+        .tabViewSidebarBottomBar {
+            SidebarAccountButton(username: accountDisplayName) { showAccountSheet = true }
+        }
+        .tint(showsSidebarLibrarySections ? .blue : .lumaAccent)
         #endif
     }
 
-    /// Content that cannot be built without the active server: while it is unreachable the tab shows
-    /// the offline state rather than an empty shelf or a spinner that never resolves. Library,
-    /// Downloads and Search are deliberately excluded — they read local data.
-    ///
-    /// The offline state is painted *over* the mounted content. Swapping the root for another view
-    /// type — what this used to do — rebuilds the tab's `NavigationStack`: a link that flaps while the
-    /// user is deep in the stack (a reachability probe timing out behind an open album → artist page)
-    /// destroyed and re-created every pushed page, re-ran their `.task`s and left the interactive pop
-    /// gesture dead. A device log showed the album page under an open artist page re-running its
-    /// album + More-By + description load twice more, with the description fetch failing each time.
-    /// The overlay keeps the stack's identity: pages keep their state, tasks do not re-run, and only
-    /// what is on screen flips while the server is away. It is opaque and hit-testable, so the tab
-    /// still looks and behaves exactly as before.
-    @ViewBuilder
-    private func reachabilityGated<Content: View>(@ViewBuilder content: () -> Content) -> some View {
-        content()
-            .accessibilityHidden(container?.serverState.isServerReachable == false)
-            .overlay {
-                if container?.serverState.isServerReachable == false {
-                    ServerUnreachableView()
-                        .background(PlatformColors.systemBackground)
-                        .contentShape(Rectangle())
-                        .onAppear {
-                            Logger.ui.debug("[TABS] unreachable overlay shown — server-backed tabs covered")
-                        }
-                        .onDisappear {
-                            Logger.ui.debug("[TABS] unreachable overlay dismissed")
-                        }
-                }
-            }
+    private var homeTabSymbol: String {
+        #if os(iOS)
+        if showsSidebarLibrarySections { return "house" }
+        #endif
+        return "house.fill"
+    }
+
+    private var discoverTabSymbol: String {
+        #if os(iOS)
+        if showsSidebarLibrarySections { return "square.grid.2x2" }
+        #endif
+        return "square.grid.2x2.fill"
+    }
+
+    private var discoverTabTitle: String {
+        #if os(iOS)
+        if showsSidebarLibrarySections {
+            return String(localized: "New Music", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale)
+        }
+        #endif
+        return String(localized: "Discover", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale)
     }
 
     #if os(iOS)
@@ -288,7 +467,7 @@ struct MainTabView: View {
     ) -> some View {
         if selectedTab == tab || mountedTabs.contains(tab) {
             if serverBacked {
-                reachabilityGated { content() }
+                content().lumaServerReachability(showsDeviceOffline: false)
             } else {
                 content()
             }
@@ -368,27 +547,54 @@ struct MainTabView: View {
 
     var body: some View {
 #if os(iOS)
+        navigationObservedTabs
+#else
+        tabs
+            .safeAreaInset(edge: .bottom) {
+                MiniPlayerAccessoryView(
+                    showingFullPlayer: $showingFullPlayer
+                )
+            }
+            .lumaFullScreenCover(isPresented: $showingFullPlayer) {
+                FullPlayerView()
+                    .environment(\.playbackVisualsPresented, showingFullPlayer)
+            }
+#endif
+    }
+
+#if os(iOS)
+    // Opaque subview boundaries keep each modifier chain independently
+    // type-checkable without changing the mounted navigation hierarchy.
+    private var playerAccessoryTabs: some View {
         Group {
+            // Keep the TabView modifiers structurally stable. Album detail pages
+            // register their chrome transition from a UIKit lifecycle bridge; making
+            // `.toolbar` / `.tabBarMinimizeBehavior` depend on that observed state
+            // caused the TabView to rebuild while the album was appearing, which
+            // reattached the bridge and produced an endless willAppear/willDisappear
+            // loop (and `NavigationRequestObserver` multi-update warnings).
             if #available(iOS 26.1, *) {
                 tabs
-                    .tabBarMinimizeBehavior(selectedTab == .search || tabBarChrome.isAlbumPresented ? .never : .onScrollDown)
-                    .toolbar(tabBarChrome.isAlbumPresented ? .visible : .automatic, for: .tabBar)
-                    .tabViewBottomAccessory(isEnabled: hasPlayerContent) {
+                    .tabBarMinimizeBehavior(selectedTab == .search ? .never : .onScrollDown)
+                    .tabViewBottomAccessory(isEnabled: true) {
                         miniPlayerAccessory(usesSystemAccessory: true)
                     }
             } else if #available(iOS 26.0, *) {
                 tabs
-                    .tabBarMinimizeBehavior(selectedTab == .search || tabBarChrome.isAlbumPresented ? .never : .onScrollDown)
-                    .toolbar(tabBarChrome.isAlbumPresented ? .visible : .automatic, for: .tabBar)
+                    .tabBarMinimizeBehavior(selectedTab == .search ? .never : .onScrollDown)
                     .tabViewBottomAccessory {
-                        if hasPlayerContent { miniPlayerAccessory(usesSystemAccessory: true) }
+                        miniPlayerAccessory(usesSystemAccessory: true)
                     }
             } else {
                 tabs.safeAreaInset(edge: .bottom, spacing: 0) {
-                    if hasPlayerContent { miniPlayerAccessory(usesSystemAccessory: false) }
+                    miniPlayerAccessory(usesSystemAccessory: false)
                 }
             }
         }
+    }
+
+    private var playerPresentedTabs: some View {
+        playerAccessoryTabs
         .onReceive(NotificationCenter.default.publisher(for: .lumaOpenFullPlayer)) { _ in
             showingFullPlayer = true
         }
@@ -396,11 +602,19 @@ struct MainTabView: View {
             presentFullPlayer(lyrics: true, queue: false,
                               mode: SiriPlayerRequestStore.consumeLyrics() ?? .lyrics)
         }
+        .onReceive(NotificationCenter.default.publisher(for: .lumaOpenAudioQualitySettings)) { _ in
+            if showingFullPlayer {
+                pendingAudioQualitySettings = true
+                showingFullPlayer = false
+            } else {
+                showAudioQualitySettings = true
+            }
+        }
         .onAppear {
             guard let mode = SiriPlayerRequestStore.consumeLyrics() else { return }
             presentFullPlayer(lyrics: true, queue: false, mode: mode)
         }
-        .fullScreenCover(isPresented: $showingFullPlayer, onDismiss: fullPlayerDidDismiss) {
+        .lumaFullScreenCover(isPresented: $showingFullPlayer, onDismiss: fullPlayerDidDismiss) {
             FullPlayerView(openWithLyrics: openPlayerWithLyrics, openWithQueue: openPlayerWithQueue,
                            openWithLyricsMode: openPlayerLyricsMode)
                 .environment(\.playbackVisualsPresented, showingFullPlayer)
@@ -414,16 +628,84 @@ struct MainTabView: View {
             }
         }
         .modifier(TabBarChromeAppearance())
-        .environment(tabBarChrome)
+    }
+
+    private var sidebarObservedTabs: some View {
+        playerPresentedTabs
         .onChange(of: selectedTab) { _, tab in mountedTabs.insert(tab) }
+        .onChange(of: showsSidebarLibrarySections) { _, hidesLibraryTab in
+            // The dedicated Library hub tab is hidden on a regular-width iPad
+            // because its destinations live in the sidebar section.
+            if hidesLibraryTab, selectedTab == .library {
+                selectedTab = .recentlyAdded
+            }
+            // Playlist rows are sidebar-only; leave an invalid selection behind
+            // when the window becomes compact.
+            if !hidesLibraryTab, case .playlist = selectedTab {
+                selectedTab = .home
+            }
+        }
+        .onChange(of: sidebarPlaylistIDs) { _, ids in
+            if case .playlist(let id) = selectedTab, !ids.contains(id) {
+                selectedTab = showsSidebarLibrarySections ? .playlists : .library
+            }
+        }
+        .onChange(of: sidebarPinnedIDs) { _, ids in
+            if case .pin(let id) = selectedTab, !ids.contains(id) {
+                selectedTab = showsSidebarLibrarySections ? .recentlyAdded : .library
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .lumaPlaylistDeleted)) { _ in
+            refreshSidebarPlaylists()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .lumaPlaylistMetadataChanged)) { note in
+            guard showsSidebarLibrarySections,
+                  let serverID = note.userInfo?["serverID"] as? UUID,
+                  serverID == container?.serverState.activeServer?.id else { return }
+            refreshSidebarPlaylists()
+        }
+        .task(id: sidebarArtworkRequest) {
+            await sidebarArtwork.load(sidebarArtworkRequest, container: container)
+        }
+    }
+
+    private var sheetPresentedTabs: some View {
+        sidebarObservedTabs
         .sheet(isPresented: $showAccountSheet) {
             AccountSheetView()
                 .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
         }
-        .sheet(isPresented: $showCreatePlaylist) {
-            CreatePlaylistSheet { _ in }
+        .sheet(isPresented: $showAudioQualitySettings) {
+            if let settings = container?.streamingSettings {
+                NavigationStack {
+                    AudioQualitySettingsView(settings: settings)
+                        .toolbar {
+                            ToolbarItem(placement: .confirmationAction) {
+                                Button(String(localized: "Done", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale)) {
+                                    showAudioQualitySettings = false
+                                }
+                            }
+                        }
+                }
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
+            }
         }
+        .sheet(isPresented: $showSidebarEditor) {
+            SidebarPinsEditor()
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
+        }
+        .sheet(isPresented: $showCreatePlaylist) {
+            CreatePlaylistSheet { _ in
+                refreshSidebarPlaylists()
+            }
+        }
+    }
+
+    private var navigationObservedTabs: some View {
+        sheetPresentedTabs
         .onReceive(NotificationCenter.default.publisher(for: .lumaNavigateToArtist)) { note in
             handleNavigateToArtist(note)
         }
@@ -445,6 +727,14 @@ struct MainTabView: View {
                 selectedTab = .search
             }
         }
+        .task(id: "\(container?.serverState.activeServer?.id.uuidString ?? "-"):\(showsSidebarLibrarySections)") {
+            // The sidebar lists server playlists directly. Home normally warms
+            // this feed, but a launch straight into Search or a deep link must
+            // populate the sidebar too; the feed coalesces concurrent loads.
+            // iPad-only: the iPhone tab bar has no playlist rows.
+            guard showsSidebarLibrarySections, let container else { return }
+            await container.homeDiscoveryFeed.load()
+        }
         .background {
             SearchTabReselectObserver(isSearchSelected: selectedTab == .search) {
                 NotificationCenter.default.post(name: .lumaFocusSearch, object: nil)
@@ -453,23 +743,11 @@ struct MainTabView: View {
             .allowsHitTesting(false)
             .accessibilityHidden(true)
         }
-#else
-        tabs
-            .safeAreaInset(edge: .bottom) {
-                MiniPlayerAccessoryView(
-                    showingFullPlayer: $showingFullPlayer
-                )
-            }
-            .sheet(isPresented: $showingFullPlayer) {
-                FullPlayerView()
-                    .environment(\.playbackVisualsPresented, showingFullPlayer)
-            }
-#endif
     }
 
-#if os(iOS)
-    private var hasPlayerContent: Bool {
-        container?.playerState.currentTrack != nil || container?.playerState.isLiveStream == true
+    private func refreshSidebarPlaylists() {
+        guard showsSidebarLibrarySections, let feed = container?.homeDiscoveryFeed else { return }
+        Task { await feed.load(forceRefresh: true) }
     }
 
     private func miniPlayerAccessory(usesSystemAccessory: Bool) -> some View {
@@ -500,6 +778,11 @@ struct MainTabView: View {
             object: nil, userInfo: ["isPresented": false])
         #endif
         resetFullPlayerLaunchFlags()
+        if pendingAudioQualitySettings {
+            pendingAudioQualitySettings = false
+            showAudioQualitySettings = true
+            return
+        }
         guard let request = pendingNavigation else { return }
         pendingNavigation = nil
         Logger.ui.debug("[NAV] pending execute tab=\(String(describing: request.tab), privacy: .public) mode=\(String(describing: request.mode), privacy: .public)")
@@ -537,7 +820,14 @@ struct MainTabView: View {
         let name = note.userInfo?["name"] as? String ?? ""
         let cover = note.userInfo?["coverArtId"] as? String
         let dest = HomeDestination.playlistById(id: id, name: name, coverArtId: cover)
-        navigateReplacingPath(to: dest, tab: .library)
+        #if os(iOS)
+        // The Library hub tab is hidden in the iPad sidebar; use All Playlists
+        // as the visible destination for Siri/Spotlight playlist links.
+        let targetTab: AppTab = showsSidebarLibrarySections ? .playlists : .library
+        #else
+        let targetTab: AppTab = .library
+        #endif
+        navigateReplacingPath(to: dest, tab: targetTab)
     }
 
     /// Dismiss the player first, then navigate from its real completion callback. A fixed
@@ -612,9 +902,11 @@ struct MainTabView: View {
         case .recentlyAdded: recentlyAddedPath = path
         case .artists: artistsPath = path
         case .albums: albumsPath = path
-        case .favorites: favoritesPath = path
+        case .songs: songsPath = path
         case .playlists: playlistsPath = path
         case .downloads: downloadsPath = path
+        case .playlist(let id): playlistPaths[id] = path
+        case .pin(let id): pinPaths[id] = path
         }
     }
 
@@ -628,9 +920,17 @@ struct MainTabView: View {
         case .recentlyAdded: recentlyAddedPath.append(destination)
         case .artists: artistsPath.append(destination)
         case .albums: albumsPath.append(destination)
-        case .favorites: favoritesPath.append(destination)
+        case .songs: songsPath.append(destination)
         case .playlists: playlistsPath.append(destination)
         case .downloads: downloadsPath.append(destination)
+        case .playlist(let id):
+            var path = playlistPaths[id] ?? NavigationPath()
+            path.append(destination)
+            playlistPaths[id] = path
+        case .pin(let id):
+            var path = pinPaths[id] ?? NavigationPath()
+            path.append(destination)
+            pinPaths[id] = path
         }
     }
 
@@ -650,3 +950,210 @@ struct MainTabView: View {
     #endif
 #endif
 }
+
+#if os(iOS)
+/// A fixed, full-width account row with a blurred backdrop extending to the
+/// bottom safe area, separated from the scrolling sidebar by a fine top rule.
+private struct SidebarAccountButton: View {
+    let username: String
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 12) {
+                LumaProfileAvatar(username: username, size: 32)
+                Text(username)
+                    .font(.title3)
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 16)
+            .frame(maxWidth: .infinity, minHeight: 72, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .background(.regularMaterial, ignoresSafeAreaEdges: [.horizontal, .bottom])
+        .overlay(alignment: .top) { Divider() }
+        .accessibilityLabel(String(localized: "Account", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale))
+        .accessibilityValue(username)
+        .accessibilityIdentifier("ipad.sidebar.account")
+    }
+}
+
+/// Keep real Label semantics for native TabView title/icon extraction. Artwork
+/// rows share one icon column and row height.
+private struct SidebarArtworkLabelStyle: LabelStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        HStack(spacing: 12) {
+            configuration.icon
+                .frame(width: 30, height: 30)
+                .accessibilityHidden(true)
+            configuration.title
+                .font(.body)
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .frame(minHeight: 44)
+    }
+}
+
+/// One playlist row in the TabView sidebar: live cover thumbnail + title,
+/// matching the “All Playlists” hierarchy rather than a generic list glyph.
+private struct PlaylistSidebarLabel: View {
+    let playlist: Playlist
+    let artwork: SidebarArtworkStore
+    let scope: SidebarArtworkStore.Scope
+
+    var body: some View {
+        Label {
+            Text(playlist.name)
+        } icon: {
+            if let image = artwork.image(for: .init(coverArtID: playlist.coverArt ?? playlist.id, playlistID: playlist.id), scope: scope) {
+                Image(uiImage: image).renderingMode(.original)
+            } else {
+                Image(systemName: "music.note.list")
+            }
+        }
+        .labelStyle(SidebarArtworkLabelStyle())
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(Text(playlist.name))
+    }
+}
+
+#endif
+
+#if os(iOS)
+/// Pinned album, artist, playlist, or song in the Library sidebar section.
+private struct PinnedSidebarLabel: View {
+    let pin: PinnedItem
+    let artwork: SidebarArtworkStore
+    let scope: SidebarArtworkStore.Scope
+
+    private var type: PinnedItemType {
+        PinnedItemType(rawValue: pin.itemType) ?? .album
+    }
+
+    private var entry: SidebarArtworkStore.Entry {
+        .init(coverArtID: pin.coverArtId ?? pin.itemId,
+              playlistID: type == .playlist ? pin.itemId : nil,
+              isArtist: type == .artist)
+    }
+
+    var body: some View {
+        Label {
+            Text(pin.displayName)
+        } icon: {
+            if let image = artwork.image(for: entry, scope: scope) {
+                Image(uiImage: image).renderingMode(.original)
+            } else {
+                Image(systemName: type == .artist ? "person.crop.circle" : "music.note")
+            }
+        }
+        .labelStyle(SidebarArtworkLabelStyle())
+        .padding(.leading, 12)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(Text(pin.displayName))
+    }
+}
+#endif
+
+#if os(iOS)
+/// Compact sheet for reordering or removing the pins that appear above the
+/// Library rows in the iPad sidebar.
+private struct SidebarPinsEditor: View {
+    @Environment(\.appContainer) private var container
+    @Environment(\.dismiss) private var dismiss
+    @Query(sort: \PinnedItem.sortOrder) private var allPins: [PinnedItem]
+    @State private var localPins: [PinnedItem] = []
+
+    private var activePins: [PinnedItem] {
+        guard let sid = container?.serverState.activeServer?.id else { return [] }
+        return allPins.filter {
+            $0.serverId == sid && PinnedItemType(rawValue: $0.itemType) != nil
+        }
+    }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                if localPins.isEmpty {
+                    ContentUnavailableView("Pinned", systemImage: "pin.slash")
+                } else {
+                    ForEach(localPins) { pin in
+                        HStack(spacing: 10) {
+                            PinnedEditorArtwork(pin: pin)
+                                .frame(width: 32, height: 32)
+                            Text(pin.displayName)
+                                .lineLimit(1)
+                            Spacer(minLength: 0)
+                        }
+                    }
+                    .onMove { offsets, destination in
+                        localPins.move(fromOffsets: offsets, toOffset: destination)
+                        container?.pinService.reorder(items: localPins)
+                    }
+                    .onDelete { offsets in
+                        for index in offsets {
+                            let pin = localPins[index]
+                            if let type = PinnedItemType(rawValue: pin.itemType) {
+                                container?.pinService.unpin(itemType: type, itemId: pin.itemId)
+                            }
+                        }
+                        localPins.remove(atOffsets: offsets)
+                    }
+                }
+            }
+            .environment(\.editMode, .constant(.active))
+            .navigationTitle(Text("Edit Pins"))
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(String(localized: "Done", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale)) {
+                        dismiss()
+                    }
+                }
+            }
+            .onAppear { localPins = activePins }
+            .onChange(of: allPins.map(\.id)) { _, _ in
+                localPins = activePins
+            }
+        }
+    }
+}
+
+private struct PinnedEditorArtwork: View {
+    let pin: PinnedItem
+
+    private var type: PinnedItemType {
+        PinnedItemType(rawValue: pin.itemType) ?? .album
+    }
+
+    private var shape: AnyShape {
+        type == .artist
+            ? AnyShape(Circle())
+            : AnyShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
+    }
+
+    var body: some View {
+        Group {
+            if type == .playlist {
+                PlaylistCoverThumbnail(
+                    playlistId: pin.itemId,
+                    serverId: pin.serverId,
+                    coverArtId: pin.coverArtId ?? pin.itemId,
+                    title: pin.displayName,
+                    size: 32,
+                    showsTitleOverlay: false,
+                    cornerRadius: 5
+                )
+            } else {
+                CoverArtView(id: pin.coverArtId ?? pin.itemId, size: 80)
+            }
+        }
+        .clipShape(shape)
+    }
+}
+#endif

@@ -4,6 +4,9 @@
 // See LICENSE file in the project root for full license information.
 
 import SwiftUI
+#if os(iOS)
+import UIKit
+#endif
 
 /// Account popup presented from the root-tab profile button.
 ///
@@ -84,14 +87,32 @@ struct AccountSheetView: View {
 
     // MARK: - 계정
 
+    @ViewBuilder
+    private var profileIcon: some View {
+        #if os(iOS)
+        if UIDevice.current.userInterfaceIdiom == .pad {
+            LumaProfileAvatar(username: displayName, size: 52)
+        } else {
+            legacyProfileIcon
+        }
+        #else
+        legacyProfileIcon
+        #endif
+    }
+
+    private var legacyProfileIcon: some View {
+        Image(systemName: "person.crop.circle.fill")
+            .font(.system(size: 52))
+            .symbolRenderingMode(.hierarchical)
+            .foregroundStyle(Color.secondary)
+            .accessibilityHidden(true)
+    }
+
     private var identitySection: some View {
         Section {
             NavigationLink(value: AccountSheetDestination.account) {
                 HStack(spacing: LumaSpacing.m) {
-                    Image(systemName: "person.crop.circle.fill")
-                        .font(.system(size: 52))
-                        .symbolRenderingMode(.hierarchical)
-                        .foregroundStyle(Color.secondary)
+                    profileIcon
                         .accessibilityHidden(true)
 
                     VStack(alignment: .leading, spacing: 2) {

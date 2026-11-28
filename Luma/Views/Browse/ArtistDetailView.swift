@@ -15,11 +15,16 @@ struct ArtistDetailView: View {
     @Environment(\.appContainer) private var container
     @State private var viewModel: ArtistDetailViewModel?
     @State private var selectedOutOfLibraryArtist: SimilarArtistRecommendation?
+    @State private var similarArtistsVisible = false
+
+    private var artworkNetworkRevision: UInt64 { container?.serverState.artworkNetworkRevision ?? 0 }
     @Query private var artistFavoriteMatches: [FavoriteRecord]
     @AppStorage("coverArtUploadVersion") private var coverVersion = 0
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var portrait: ArtistPortraitTreatment?
     @State private var sharpPortrait: PlatformImage?
+    @State private var portraitCoverID: String?
+    @State private var portraitPlaceholderColor: Color?
     @State private var collapsed = false
     private static let portraitCache: NSCache<NSString, ArtistPortraitTreatment> = {
         let cache = NSCache<NSString, ArtistPortraitTreatment>()
@@ -59,7 +64,7 @@ struct ArtistDetailView: View {
     // MARK: Theming — cover extract → refined Apple Music atmosphere.
     private var atmosphere: AlbumAtmosphere {
         AlbumAtmosphere.from(
-            dominantColor: portrait?.color ?? .clear,
+            dominantColor: portrait?.color ?? portraitPlaceholderColor ?? .clear,
             appearance: AlbumAtmosphere.appearance(
                 colorScheme: colorScheme,
                 increaseContrast: colorSchemeContrast == .increased
@@ -85,6 +90,7 @@ struct ArtistDetailView: View {
     }
 
     private var bodyColor: Color { atmosphere.isThemed ? atmosphere.pageColor : systemBackgroundColor }
+    private var artworkPlaceholderTint: Color { bodyColor.blended(with: headerTextColor, amount: 0.12) }
     private var headerTextColor: Color { atmosphere.contentColor }
     private var headerSecondaryColor: Color { atmosphere.secondaryContentColor }
     private var systemBackgroundColor: Color {
@@ -107,10 +113,6 @@ struct ArtistDetailView: View {
         viewModel.flatMap { latestRelease($0) }?.coverArt
     }
 
-    private let columns = [
-        GridItem(.adaptive(minimum: 150, maximum: 200), spacing: LumaSpacing.l)
-    ]
-
     var body: some View {
         Group {
             if let vm = viewModel {
@@ -122,7 +124,15 @@ struct ArtistDetailView: View {
                         action: .init(label: "Retry") { Task { await vm.load() } }
                     )
                 } else if vm.artist == nil {
-                    skeletonGrid
+                    if vm.isLoading {
+                        LoadingStateView()
+                    } else {
+                        EmptyStateView(
+                            systemImage: "exclamationmark.triangle",
+                            title: "Unable to Load Artist",
+                            action: .init(label: "Retry") { Task { await vm.load() } }
+                        )
+                    }
                 } else {
                     let albums = vm.artist?.album ?? []
                     if albums.isEmpty {
@@ -139,16 +149,16 @@ struct ArtistDetailView: View {
                                     if let featured = latestRelease(vm) {
                                         featuredReleaseSection(featured)
                                     }
-                                    if vm.isLoadingTopSongs {
-                                        topSongsSkeleton
-                                    } else if !vm.topSongs.isEmpty {
+                                    if !vm.topSongs.isEmpty {
                                         topSongsSection(vm: vm)
+                                            .transition(.opacity)
                                     }
                                     albumsSections
                                     if vm.isLoadingSimilarArtists || !vm.similarArtists.isEmpty {
                                         similarArtistsSection(vm: vm)
                                     }
                                 }
+                                .lumaContentReveal(isReady: !vm.topSongs.isEmpty)
                                 .padding(.vertical, LumaSpacing.l)
                                 .frame(maxWidth: .infinity)
                                 // Force the themed scheme so the shared cells contrast the tinted body.
@@ -170,20 +180,22 @@ struct ArtistDetailView: View {
                     }
                 }
             } else {
-                skeletonGrid
+                LoadingStateView()
             }
         }
         .lumaContentReveal(isReady: viewModel?.artist != nil)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .appEntityIdentifier(onscreenEntityIdentifier)
         .background { bodyColor.ignoresSafeArea() }
-        .overlay {
-            if viewModel == nil || (viewModel?.artist == nil && viewModel?.error == nil) {
-                bodyColor.ignoresSafeArea()
-                    .overlay { ProgressView().tint(headerTextColor) }
+        .task(id: "\(portraitKey):\(artworkNetworkRevision):\(viewModel?.artist != nil)") {
+            guard viewModel?.artist != nil || artist.coverArt?.isEmpty == false else { return }
+            await loadPortrait(key: portraitKey, coverID: heroCoverArtId)
+        }
+        .onChange(of: viewModel?.artist != nil) { _, ready in
+            if ready, portraitPlaceholderColor == nil, let latestReleaseCoverArtId {
+                portraitPlaceholderColor = container?.artworkImageCache.preparedPalette(for: latestReleaseCoverArtId)?.background
             }
         }
-        .task(id: portraitKey) { await loadPortrait(key: portraitKey, coverID: heroCoverArtId) }
         .navigationTitle("")
         .navigationBarTitleDisplayModeInline()
         #if os(iOS)
@@ -194,7 +206,12 @@ struct ArtistDetailView: View {
         #endif
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
+                let ready = viewModel?.artist != nil || viewModel?.error != nil
                 artistMoreMenu
+                    .opacity(ready ? 1 : 0)
+                    .allowsHitTesting(ready)
+                    .accessibilityHidden(!ready)
+                    .lumaContentReveal(isReady: ready)
                     .tint(navigationScheme.map { $0 == .dark ? Color.white : .black } ?? headerTextColor)
             }
         }
@@ -203,7 +220,7 @@ struct ArtistDetailView: View {
         } message: {
             Text(PinError.limitReached.errorDescription ?? "")
         }
-        .task {
+        .task(id: artworkNetworkRevision) {
             Logger.ui.debug(
                 "[ARTIST-PAGE] task start instance=\(pageInstanceID, privacy: .public) id=\(artist.id, privacy: .public)"
             )
@@ -218,8 +235,12 @@ struct ArtistDetailView: View {
             }
             // Skip network when popping back from an album — VM already has warm data.
             await viewModel?.load()
-            await viewModel?.loadTopSongs()
             await viewModel?.loadSimilarArtists()
+        }
+        .task(id: "\(viewModel?.artist?.name ?? ""):\(artworkNetworkRevision)") {
+            // Album and track rows can arrive while the optional biography is still loading.
+            guard let vm = viewModel, vm.artist != nil else { return }
+            await vm.loadTopSongs()
         }
         .onAppear {
             Logger.ui.debug("[NAV] artist appear instance=\(pageInstanceID, privacy: .public) artist=\(artist.id, privacy: .public)")
@@ -230,7 +251,7 @@ struct ArtistDetailView: View {
         .sheet(item: $selectedOutOfLibraryArtist) { rec in
             OutOfLibraryArtistSheet(
                 artist: rec,
-                imageURL: viewModel?.outOfLibraryArtistImages[rec.id] ?? nil,
+                imageURL: viewModel?.outOfLibraryArtistImages[rec.id],
                 providers: container?.externalProvidersStore.load() ?? []
             )
         }
@@ -363,6 +384,7 @@ struct ArtistDetailView: View {
                     Image(platformImage: sharpPortrait).resizable().scaledToFill()
                         .frame(width: geo.size.width, height: height)
                         .offset(y: shift)
+                        .transition(.opacity)
                     if let blurred = portrait?.blurred {
                         Image(decorative: blurred, scale: 1).resizable().scaledToFill()
                             .frame(width: geo.size.width, height: height)
@@ -378,6 +400,7 @@ struct ArtistDetailView: View {
                                        .init(color: bodyColor, location: 0.82 - 0.06 * blend)],
                                startPoint: .top, endPoint: .bottom)
             }
+            .lumaContentReveal(isReady: sharpPortrait != nil)
             .frame(width: geo.size.width, height: height)
             .clipped()
             .offset(y: -stretch)
@@ -387,13 +410,29 @@ struct ArtistDetailView: View {
     }
 
     private func loadPortrait(key: String, coverID: String) async {
-        let cache = container?.artworkImageCache
-        portrait = Self.portraitCache.object(forKey: key as NSString)
-        sharpPortrait = cache?.cachedImage(for: coverID, tier: .hero)
-        let image = await cache?.load(coverArtId: coverID, tier: .hero)
+        guard let cache = container?.artworkImageCache, !Task.isCancelled, key == portraitKey else { return }
+        if portraitCoverID != coverID {
+            portraitCoverID = coverID
+            portrait = nil
+            sharpPortrait = nil
+            portraitPlaceholderColor = latestReleaseCoverArtId.flatMap { cache.preparedPalette(for: $0)?.background }
+        }
+        if let prepared = Self.portraitCache.object(forKey: key as NSString) { portrait = prepared }
+        if let prepared = cache.preparedPalette(for: coverID) { portraitPlaceholderColor = prepared.background }
+        if let cached = cache.cachedImage(for: coverID, tier: .hero) {
+            sharpPortrait = cached
+        } else if portrait == nil, cache.preparedPalette(for: coverID) == nil,
+                  let thumbnail = await cache.load(coverArtId: coverID, tier: .thumb) {
+            let palette = await Task.detached(priority: .utility) {
+                AlbumColorAnalyzer.generateArtworkPalette(from: thumbnail, bottomStrip: false)
+            }.value
+            guard !Task.isCancelled, key == portraitKey else { return }
+            if let palette { portraitPlaceholderColor = palette.background }
+        }
+        let image = await cache.loadVisibleArtwork(coverArtId: coverID, tier: .hero)
         guard !Task.isCancelled, key == portraitKey, let image else { return }
         sharpPortrait = image
-        guard portrait == nil else { return }
+        guard Self.portraitCache.object(forKey: key as NSString) == nil else { return }
         let result = await Task.detached(priority: .utility) { AlbumColorAnalyzer.artistPortrait(from: image) }.value
         guard !Task.isCancelled, key == portraitKey, let result else { return }
         Self.portraitCache.setObject(result, forKey: key as NSString)
@@ -420,7 +459,7 @@ struct ArtistDetailView: View {
             sectionHeader("Latest Release")
             AlbumNavigationLink(album: album, namespace: albumZoomNamespace, sourceContext: "featured") { sourceID, namespace in
                 HStack(spacing: LumaSpacing.m) {
-                    CoverArtView(id: album.coverArt ?? album.id, size: 260, tier: .hero)
+                    CoverArtView(id: album.coverArt ?? album.id, size: 260, tier: .thumb, placeholderTint: artworkPlaceholderTint)
                         .frame(width: 120, height: 120)
                         .lumaMatchedTransitionSource(id: sourceID, in: namespace)
                         .clipShape(RoundedRectangle(cornerRadius: LumaCornerRadius.standard, style: .continuous))
@@ -470,7 +509,8 @@ struct ArtistDetailView: View {
                             showCoverArt: true,
                             showArtist: false,
                             titleColor: headerTextColor,
-                            secondaryColor: headerSecondaryColor
+                            secondaryColor: headerSecondaryColor,
+                            coverPlaceholderTint: artworkPlaceholderTint
                         )
                     }
                     .buttonStyle(.plain)
@@ -478,26 +518,6 @@ struct ArtistDetailView: View {
             }
             .padding(.horizontal, LumaSpacing.l)
         }
-    }
-
-    private var topSongsSkeleton: some View {
-        VStack(alignment: .leading, spacing: LumaSpacing.s) {
-            sectionHeader("Top Songs")
-            VStack(spacing: LumaSpacing.m) {
-                ForEach(0..<5, id: \.self) { _ in
-                    HStack(spacing: LumaSpacing.m) {
-                        SkeletonBlock(width: 44, height: 44, cornerRadius: LumaCornerRadius.standard)
-                        VStack(alignment: .leading, spacing: 6) {
-                            SkeletonBlock(width: 180, height: 13, cornerRadius: 4)
-                            SkeletonBlock(width: 120, height: 11, cornerRadius: 4)
-                        }
-                        Spacer(minLength: 0)
-                    }
-                }
-            }
-            .padding(.horizontal, LumaSpacing.l)
-        }
-        .allowsHitTesting(false)
     }
 
     /// Albums grouped by release type (Albums, Singles & EPs, Compilations, Live Album).
@@ -510,7 +530,8 @@ struct ArtistDetailView: View {
                         ForEach(items) { album in
                             AlbumNavigationLink(album: album, namespace: albumZoomNamespace, sourceContext: section.rawValue) { sourceID, namespace in
                                 VStack(alignment: .leading, spacing: LumaSpacing.xs) {
-                                    CoverArtView(id: album.coverArt ?? album.id, size: 480, tier: .hero, contentMode: .fit)
+                                    CoverArtView(id: album.coverArt ?? album.id, size: 480, tier: .thumb, contentMode: .fit,
+                                                 placeholderTint: artworkPlaceholderTint)
                                         .frame(width: 160, height: 160)
                                         .lumaMatchedTransitionSource(id: sourceID, in: namespace)
                                         .clipShape(RoundedRectangle(cornerRadius: LumaCornerRadius.large, style: .continuous))
@@ -533,40 +554,6 @@ struct ArtistDetailView: View {
                     }
                     .padding(.horizontal, LumaSpacing.l)
                 }
-            }
-        }
-    }
-
-    /// Legacy flat albums section — kept for reference, replaced by albumsSections.
-    private func albumsSection(_ albums: [AlbumID3]) -> some View {
-        VStack(alignment: .leading, spacing: LumaSpacing.s) {
-            sectionHeader("Albums")
-            ScrollView(.horizontal, showsIndicators: false) {
-                LazyHStack(alignment: .top, spacing: LumaSpacing.m) {
-                    // Most recent first (albums without a date sort last).
-                    ForEach(ArtistAlbumCategorizer.sortedByNewest(albums)) { album in
-                        AlbumNavigationLink(album: album, namespace: albumZoomNamespace, sourceContext: "all") { sourceID, namespace in
-                            VStack(alignment: .leading, spacing: LumaSpacing.xs) {
-                                CoverArtView(id: album.coverArt ?? album.id, size: 480, tier: .hero)
-                                    .frame(width: 160, height: 160)
-                                    .lumaMatchedTransitionSource(id: sourceID, in: namespace)
-                                    .clipShape(RoundedRectangle(cornerRadius: LumaCornerRadius.large, style: .continuous))
-                                Text(album.name)
-                                    .font(.lumaCellTitle)
-                                    .foregroundStyle(headerTextColor)
-                                    .lineLimit(1)
-                                if let year = album.year {
-                                    Text(verbatim: "\(year)")
-                                        .font(.lumaCaption)
-                                        .foregroundStyle(headerSecondaryColor)
-                                }
-                            }
-                            .frame(width: 160, alignment: .leading)
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-                .padding(.horizontal, LumaSpacing.l)
             }
         }
     }
@@ -645,15 +632,6 @@ struct ArtistDetailView: View {
         } catch {}
     }
 
-    private var skeletonGrid: some View {
-        ScrollView {
-            LazyVGrid(columns: columns, spacing: LumaSpacing.l) {
-                ForEach(0..<6, id: \.self) { _ in SkeletonAlbumCard() }
-            }
-            .padding(LumaSpacing.l)
-        }
-    }
-
     // MARK: - Similar Artists Section
 
     @ViewBuilder
@@ -687,16 +665,20 @@ struct ArtistDetailView: View {
                                                                                      coverArtId: nil, token: similarArtistRouteToken)) {
                                         SimilarArtistCell(
                                             recommendation: rec,
-                                            externalImageURL: vm.outOfLibraryArtistImages[rec.id] ?? nil,
-                                            onOutOfLibraryTap: { selectedOutOfLibraryArtist = rec }
+                                            externalImageURL: vm.outOfLibraryArtistImages[rec.id],
+                                            onOutOfLibraryTap: { selectedOutOfLibraryArtist = rec },
+                                            sectionVisible: similarArtistsVisible,
+                                            loadImage: { await vm.loadSimilarArtistImage(rec) }
                                         )
                                     }
                                     .buttonStyle(.plain)
                                 } else {
                                     SimilarArtistCell(
                                         recommendation: rec,
-                                        externalImageURL: vm.outOfLibraryArtistImages[rec.id] ?? nil,
-                                        onOutOfLibraryTap: { selectedOutOfLibraryArtist = rec }
+                                        externalImageURL: vm.outOfLibraryArtistImages[rec.id],
+                                        onOutOfLibraryTap: { selectedOutOfLibraryArtist = rec },
+                                        sectionVisible: similarArtistsVisible,
+                                        loadImage: { await vm.loadSimilarArtistImage(rec) }
                                     )
                                 }
                             }
@@ -707,6 +689,7 @@ struct ArtistDetailView: View {
                 }
             }
         }
+        .onScrollVisibilityChange(threshold: 0.10) { similarArtistsVisible = $0 }
     }
 }
 

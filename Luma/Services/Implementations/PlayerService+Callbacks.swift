@@ -52,9 +52,9 @@ extension PlayerService {
             return (
                 state.isLiveStream,
                 streamingSettings.formatForCurrentNetwork(
-                    isLimited: serverService.state.isExpensive || serverService.state.isNetworkConstrained
+                    isLimited: serverService.state.usesCellularQuality
                 ),
-                streamingSettings.adaptiveCeiling,
+                streamingSettings.adaptiveStreamingCeiling(isLimited: serverService.state.usesCellularQuality),
                 limited
             )
         }

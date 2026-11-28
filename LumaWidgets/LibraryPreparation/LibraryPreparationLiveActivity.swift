@@ -5,7 +5,10 @@
 import WidgetKit
 import SwiftUI
 
-#if os(iOS)
+// ActivityKit's Dynamic Island API is unavailable to native macOS and Mac Catalyst
+// builds. The iOS app keeps the Live Activity; the Mac widget extension must not
+// compile these types at all.
+#if os(iOS) && !targetEnvironment(macCatalyst)
 struct LibraryPreparationLiveActivity: Widget {
     var body: some WidgetConfiguration {
         ActivityConfiguration(for: LibraryPreparationActivityAttributes.self) { context in

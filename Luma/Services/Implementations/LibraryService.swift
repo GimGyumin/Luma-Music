@@ -99,8 +99,10 @@ actor LibraryService: LibraryServiceProtocol {
         let baseID = pairs[requested.id] ?? requested.id
         let base = baseID == requested.id ? requested : try await album(id: baseID)
         try await requireCurrent(token)
-        var entries = base.song ?? []
-        let originals = entries.map { DisplayableSong(from: $0) }
+        let originalEntries = base.song ?? []
+        var entries = originalEntries
+        var entryIDs = Set(originalEntries.map(\.id))
+        let originals = originalEntries.map { DisplayableSong(from: $0) }
         var versions = [base]
         for variant in catalog where variant.id != baseID {
             let isPairedAlbum = pairs[variant.id] == baseID
@@ -114,10 +116,12 @@ actor LibraryService: LibraryServiceProtocol {
             if let detail { versions.append(detail) }
             guard isPairedAlbum else { continue }
             for song in detail?.song ?? [] {
+                guard !entryIDs.contains(song.id) else { continue }
                 let candidate = DisplayableSong(from: song)
                 // Retain every original occurrence; only append variant-exclusive songs.
-                if !originals.contains(where: { AtmosVariantCatalogue.compatible($0, candidate) }),
-                   !entries.contains(where: { $0.id == song.id }) { entries.append(song) }
+                guard !originals.contains(where: { AtmosVariantCatalogue.compatible($0, candidate) }) else { continue }
+                entries.append(song)
+                entryIDs.insert(song.id)
             }
         }
         if let libraryIndex {
@@ -128,7 +132,7 @@ actor LibraryService: LibraryServiceProtocol {
         // Keep the stereo row and retain both physical files in the playback catalogue.
         let displayedIDs = Set(AtmosVariantCatalogue.presentedSongs(entries.map { DisplayableSong(from: $0) }).map(\.id))
         entries.removeAll { !displayedIDs.contains($0.id) }
-        if entries.map(\.id) == (base.song ?? []).map(\.id) { return base }
+        if entries.elementsEqual(originalEntries, by: { $0.id == $1.id }) { return base }
         return AtmosAlbumPolicy.combining(base, songs: entries)
     }
 

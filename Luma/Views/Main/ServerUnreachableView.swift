@@ -5,12 +5,73 @@
 
 import SwiftUI
 
-/// Full-screen "cannot reach the server" state for the tabs that need the server to show anything.
-///
-/// Library, Downloads and Search deliberately never show this: they read the local index and the
-/// download store, so they stay useful — Search falls back to those same sources — while the server
-/// is away. Recovery is automatic (`ServerReachabilityMonitor` re-pings every few seconds while it is
-/// down), so the button only short-circuits that wait.
+#if os(iOS)
+import UIKit
+#endif
+
+/// A device-wide loss of connectivity. The navigation bar and mini player belong to the tab.
+struct DeviceOfflineView: View {
+    private var message: String {
+        #if os(iOS)
+        if UIDevice.current.userInterfaceIdiom == .phone {
+            return String(localized: "Your iPhone is not connected to the internet. To connect, turn off Airplane Mode or join a Wi-Fi network.",
+                          bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale)
+        }
+        #endif
+        return String(localized: "This device is not connected to the internet. To connect, join a Wi-Fi network.",
+                      bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale)
+    }
+
+    var body: some View {
+        VStack(spacing: 4) {
+            Text(String(localized: "No Internet Connection", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale))
+                .font(.title3.weight(.semibold))
+                .accessibilityAddTraits(.isHeader)
+            Text(message)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+        }
+        .multilineTextAlignment(.center)
+        .frame(maxWidth: 325)
+        .padding(.horizontal, 24)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background { PlatformColors.systemBackground.ignoresSafeArea() }
+        .contentShape(Rectangle())
+    }
+}
+
+/// Keeps navigation and the root scroll state mounted while covering the unavailable feed.
+private struct ServerReachabilityOverlay: ViewModifier {
+    @Environment(\.appContainer) private var container
+    let showsDeviceOffline: Bool
+
+    func body(content: Content) -> some View {
+        let isOffline = container?.serverState.isOnline == false
+        let showOffline = isOffline && showsDeviceOffline
+        let serverUnreachable = !isOffline && container?.serverState.isServerReachable == false
+        let blocksContent = showOffline || serverUnreachable
+        content
+            .allowsHitTesting(!blocksContent)
+            .accessibilityHidden(blocksContent)
+            .overlay {
+                if showOffline {
+                    DeviceOfflineView()
+                } else if serverUnreachable {
+                    ServerUnreachableView()
+                        .background(PlatformColors.systemBackground)
+                        .contentShape(Rectangle())
+                }
+            }
+    }
+}
+
+extension View {
+    func lumaServerReachability(showsDeviceOffline: Bool = true) -> some View {
+        modifier(ServerReachabilityOverlay(showsDeviceOffline: showsDeviceOffline))
+    }
+}
+
+/// An active connection exists, but the configured music server could not be reached.
 struct ServerUnreachableView: View {
     @Environment(\.appContainer) private var container
     @State private var isRetrying = false
@@ -20,30 +81,23 @@ struct ServerUnreachableView: View {
         return name
     }
 
-    /// The device lost its route entirely — a different sentence from "the server is not answering".
-    private var isDeviceOffline: Bool {
-        container?.serverState.isOnline == false
-    }
-
     private func localized(_ key: String) -> String {
         String(localized: String.LocalizationValue(key), bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale)
     }
 
     var body: some View {
         VStack(spacing: LumaSpacing.l) {
-            Image(systemName: isDeviceOffline ? "wifi.slash" : "antenna.radiowaves.left.and.right.slash")
+            Image(systemName: "antenna.radiowaves.left.and.right.slash")
                 .font(.system(.largeTitle, design: .default).weight(.light))
                 .foregroundStyle(.secondary)
                 .accessibilityHidden(true)
 
             VStack(spacing: LumaSpacing.s) {
-                Text(localized(isDeviceOffline ? "No Internet Connection" : "Cannot Reach Server"))
+                Text(localized("Cannot Reach Server"))
                     .font(.lumaSectionTitle)
                     .multilineTextAlignment(.center)
 
-                Text(localized(isDeviceOffline
-                               ? "This device is not connected to a network. Connect to Wi-Fi or cellular data to load your library."
-                               : "Luma can't reach your music server. Check your network connection and that the server is running."))
+                Text(localized("Luma can't reach your music server. Check your network connection and that the server is running."))
                     .font(.lumaBody)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)

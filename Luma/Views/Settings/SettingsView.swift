@@ -81,7 +81,6 @@ struct SettingsView: View {
 
     private var downloadsSection: some View {
         Section {
-            SettingsNavigationRow("Downloaded Music") { DownloadedMusicManagementView() }
             SettingsNavigationRow("Storage") { StorageManagementView() }
             if let settings = container?.streamingSettings {
                 SettingsNavigationRow("Download Quality", value: settings.effectiveDownloadFormat.title) {
@@ -118,14 +117,13 @@ struct SettingsView: View {
     private var displaySections: some View {
         Section {
             SettingsNavigationRow("Lyrics & Translation") { LyricsSettingsView() }
-            SettingsNavigationRow("Album Artwork", value: SettingsOnOffChoice(immersiveAlbums).choiceTitle) {
-                albumArtworkSettings
-            }
         } header: {
             SettingsSectionHeader("Display & Lyrics")
         } footer: {
             SettingsSectionFooter("Customize lyrics sources, translations, and whether album covers extend across player surfaces.")
         }
+
+        albumArtworkSettings
 
         Section {
             Toggle(isOn: $listeningHistoryEnabled) {
@@ -138,8 +136,9 @@ struct SettingsView: View {
         }
     }
 
+    @ViewBuilder
     private var albumArtworkSettings: some View {
-        Form {
+        Group {
             Section {
                 Toggle(isOn: $albumFollowsAppearance) {
                     SettingsRowTitle("Match Album Background to Appearance")
@@ -169,11 +168,6 @@ struct SettingsView: View {
                 SettingsSectionFooter("The background moves with the music while Now Playing is visible.")
             }
         }
-        .formStyle(.grouped)
-        .modifier(SettingsSubpageStyle())
-        .lumaContentWidth(.readable)
-        .navigationTitle(Text("Album Artwork"))
-        .navigationBarTitleDisplayModeInline()
     }
 
     private var accountSection: some View {
@@ -198,7 +192,7 @@ struct SettingsView: View {
             SettingsNavigationRow("Current Playback") { CurrentPlaybackSettingsView() }
             SettingsNavigationRow("Sharing") { SharingSettingsView() }
             SettingsNavigationRow("Widgets") { GuideView(guide: .widgets) }
-            SettingsNavigationRow("도움말 및 지원") { HelpSettingsView() }
+            SettingsNavigationRow("Help & Support") { HelpSettingsView() }
             SettingsActionRow("System Permissions") { LumaSystemSettings.openAppSettings() }
             SettingsNavigationRow("Advanced") { AdvancedSettingsView() }
             SettingsNavigationRow("About") { AboutSettingsView() }

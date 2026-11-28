@@ -25,6 +25,22 @@ struct AlbumsListView: View {
         _albumFilter = State(initialValue: initialFilter)
     }
 
+    private var libraryGridInset: CGFloat {
+        #if os(macOS)
+        MacDesign.Metrics.libraryGridInset
+        #else
+        24
+        #endif
+    }
+
+    private var libraryGridRowGap: CGFloat {
+        #if os(macOS)
+        MacDesign.Metrics.albumGridRowGap
+        #else
+        24
+        #endif
+    }
+
     private var usesAlbumGrid: Bool {
         #if os(macOS)
         true
@@ -34,62 +50,69 @@ struct AlbumsListView: View {
     }
 
     var body: some View {
-        Group {
-            if let vm = viewModel {
-                content(vm)
-                    .transition(.opacity)
-            } else {
-                LoadingStateView()
-            }
-        }
-        .lumaContentReveal(isReady: viewModel.map { !($0.isLoading && $0.albums.isEmpty) } ?? false)
-        .navigationTitle(String(localized: "Albums", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale))
-        .navigationBarTitleDisplayModeLarge()
-        .lumaLibrarySearch(
-            text: $searchText,
-            prompt: String(localized: "Search Albums", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale)
-        )
-        .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                Menu {
-                    #if os(iOS)
-                    Picker("View", selection: $albumLayout) {
-                        Label("Grid", systemImage: "square.grid.2x2").tag(AlbumLayout.grid)
-                        Label("List", systemImage: "list.bullet").tag(AlbumLayout.list)
-                    }
-                    Divider()
-                    #endif
-                    Picker("Sort By", selection: $albumSort) {
-                        ForEach(AlbumSort.allCases, id: \.self) { option in
-                            Label(option.label, systemImage: option.systemImage).tag(option)
-                        }
-                    }
-                } label: {
-                    Image(systemName: usesAlbumGrid ? "square.grid.2x2" : "list.bullet")
-                        .renderingMode(.original)
-                        .foregroundStyle(.primary)
+        VStack(spacing: 0) {
+            #if os(macOS)
+            macHeader
+            #endif
+
+            Group {
+                if let vm = viewModel {
+                    content(vm)
+                        .transition(.opacity)
+                } else {
+                    LoadingStateView()
                 }
-                .tint(.primary)
-                .foregroundStyle(.primary)
-                .accessibilityLabel("Album view and sorting")
             }
-            ToolbarItem(placement: .primaryAction) {
-                Menu {
-                    Picker("Albums", selection: $albumFilter) {
-                        ForEach(AlbumLibraryFilter.allCases, id: \.self) { filter in
-                            Label(filter.label, systemImage: filter.systemImage).tag(filter)
+            .lumaContentReveal(isReady: viewModel.map { !($0.isLoading && $0.albums.isEmpty) } ?? false)
+            #if os(iOS)
+            .navigationTitle(String(localized: "Albums", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale))
+            .navigationBarTitleDisplayModeLarge()
+            .lumaLibrarySearch(
+                text: $searchText,
+                prompt: String(localized: "Search Albums", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale)
+            )
+            .toolbar {
+                ToolbarItem(placement: .primaryAction) {
+                    Menu {
+                        Picker("View", selection: $albumLayout) {
+                            Label("Grid", systemImage: "square.grid.2x2").tag(AlbumLayout.grid)
+                            Label("List", systemImage: "list.bullet").tag(AlbumLayout.list)
                         }
+                        Divider()
+                        Picker("Sort By", selection: $albumSort) {
+                            ForEach(AlbumSort.allCases, id: \.self) { option in
+                                Label(option.label, systemImage: option.systemImage).tag(option)
+                            }
+                        }
+                    } label: {
+                        Image(systemName: usesAlbumGrid ? "square.grid.2x2" : "list.bullet")
+                            .renderingMode(.original)
+                            .foregroundStyle(.primary)
                     }
-                } label: {
-                    Image(systemName: "ellipsis")
-                        .renderingMode(.original)
-                        .foregroundStyle(.primary)
+                    .tint(.primary)
+                    .foregroundStyle(.primary)
+                    .accessibilityLabel("Album view and sorting")
                 }
-                .tint(.primary)
-                .foregroundStyle(.primary)
-                .accessibilityLabel("Filter albums")
+                ToolbarItem(placement: .primaryAction) {
+                    Menu {
+                        Picker("Albums", selection: $albumFilter) {
+                            ForEach(AlbumLibraryFilter.allCases, id: \.self) { filter in
+                                Label(filter.label, systemImage: filter.systemImage).tag(filter)
+                            }
+                        }
+                    } label: {
+                        Image(systemName: "ellipsis")
+                            .renderingMode(.original)
+                            .foregroundStyle(.primary)
+                    }
+                    .tint(.primary)
+                    .foregroundStyle(.primary)
+                    .accessibilityLabel("Filter albums")
+                }
             }
+            #endif
         }
+        .lumaContentWidth()
         .tint(.primary)
         .task(id: container?.serverState.isOnline) {
             Logger.boot.notice("🟢 AlbumsListView task fired — activeServer=\(String(describing: container?.serverState.activeServer?.baseURL), privacy: .public) isOnline=\(String(describing: container?.serverState.isOnline), privacy: .public)")
@@ -109,6 +132,63 @@ struct AlbumsListView: View {
             container?.albumCoverPreloadService.reconcileChangedCovers()
         }
     }
+
+    #if os(macOS)
+    private var macHeader: some View {
+        let albums = viewModel.map { displayedAlbums($0.albums) } ?? []
+        return MacLibraryHeader(
+            title: String(localized: "Albums", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale),
+            searchText: $searchText,
+            searchPrompt: String(localized: "Search Albums", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale)
+        ) {
+            MacLibraryHeaderButton(
+                systemImage: "play.fill",
+                help: String(localized: "Play", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale),
+                action: { playFirstAlbum(in: albums) }
+            )
+            .disabled(albums.isEmpty)
+
+            MacLibraryHeaderButton(
+                systemImage: "shuffle",
+                help: String(localized: "Shuffle", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale),
+                action: { shuffleLibrary() }
+            )
+            .disabled(albums.isEmpty)
+
+            Menu {
+                Picker("Sort By", selection: $albumSort) {
+                    ForEach(AlbumSort.allCases, id: \.self) { option in
+                        Label(option.label, systemImage: option.systemImage).tag(option)
+                    }
+                }
+            } label: {
+                Image(systemName: "arrow.up.arrow.down")
+                    .font(.system(size: 13, weight: .medium))
+                    .frame(width: 28, height: 28)
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .accessibilityLabel(Text("Sort albums"))
+
+            Menu {
+                Picker("Albums", selection: $albumFilter) {
+                    ForEach(AlbumLibraryFilter.allCases, id: \.self) { filter in
+                        Label(filter.label, systemImage: filter.systemImage).tag(filter)
+                    }
+                }
+            } label: {
+                Image(systemName: "line.3.horizontal.decrease")
+                    .font(.system(size: 13, weight: .medium))
+                    .frame(width: 28, height: 28)
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .accessibilityLabel(Text("Filter albums"))
+        }
+    }
+    #endif
 
     @ViewBuilder
     private func content(_ vm: AlbumListViewModel) -> some View {
@@ -149,17 +229,23 @@ struct AlbumsListView: View {
     @ViewBuilder
     private func albumsGrid(_ vm: AlbumListViewModel) -> some View {
         GeometryReader { geo in
+            #if os(macOS)
+            let columns = MacDesign.Grid.columns(for: geo.size.width)
+            #else
             let count = Self.gridColumnCount(for: geo.size.width)
             let columns = Array(repeating: GridItem(.flexible(), spacing: 16), count: count)
+            #endif
             let albums = displayedAlbums(vm.albums)
             ScrollView {
                 VStack(spacing: LumaSpacing.m) {
+                    #if !os(macOS)
                     playShuffleHeader(albums: albums)
+                    #endif
                     if albums.isEmpty {
                         emptyFilteredAlbums
                             .padding(.top, LumaSpacing.xl)
                     } else {
-                        LazyVGrid(columns: columns, spacing: 24) {
+                        LazyVGrid(columns: columns, spacing: libraryGridRowGap) {
                             ForEach(albums) { album in
                                 AlbumNavigationLink(album: album, namespace: albumNamespace) { sourceID, namespace in
                                     AlbumGridCell(album: album, zoomSourceId: sourceID, zoomNamespace: namespace)
@@ -169,7 +255,7 @@ struct AlbumsListView: View {
                         }
                     }
                 }
-                .padding(.horizontal, 24)
+                .padding(.horizontal, libraryGridInset)
                 .padding(.top, LumaSpacing.s)
             }
             .refreshable { await vm.load() }

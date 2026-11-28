@@ -1,7 +1,9 @@
 import Foundation
 import OSLog
 import NaturalLanguage
+#if !targetEnvironment(macCatalyst)
 @preconcurrency import Translation
+#endif
 
 nonisolated enum LyricsTranslationStrategy: String, Sendable {
     case highFidelity
@@ -21,11 +23,13 @@ nonisolated enum LyricsTranslationStrategy: String, Sendable {
 final class LyricsTranslationService {
     static let shared = LyricsTranslationService(cache: .shared)
 
+    #if !targetEnvironment(macCatalyst)
     nonisolated struct Batch: Sendable {
         let requests: [TranslationSession.Request]
         let uniqueSources: [String]
         let sourceIndexByLine: [Int?]
     }
+    #endif
 
     private let cache: TranslationCache
 
@@ -62,6 +66,9 @@ final class LyricsTranslationService {
         targetLanguageCode: String,
         sampleText: String
     ) async -> LyricsTranslationStrategy {
+        #if targetEnvironment(macCatalyst)
+        return .standard
+        #else
         guard #available(iOS 26.4, macOS 26.4, *) else {
             return .standard
         }
@@ -84,8 +91,10 @@ final class LyricsTranslationService {
             debugLog("Apple Intelligence translation availability failed; using Translation framework lowLatency")
             return .lowLatency
         }
+        #endif
     }
 
+    #if !targetEnvironment(macCatalyst)
     nonisolated func configuration(
         sourceLanguageCode: String?,
         targetLanguageCode: String,
@@ -115,7 +124,9 @@ final class LyricsTranslationService {
 
         return TranslationSession.Configuration(source: source, target: target)
     }
+    #endif
 
+    #if !targetEnvironment(macCatalyst)
     nonisolated func translate(
         lines: [String],
         using session: TranslationSession
@@ -191,6 +202,7 @@ final class LyricsTranslationService {
             return translatedByIdentifier[String(uniqueIndex)] ?? ""
         }
     }
+    #endif
 
     func cachedTranslation(
         songID: String,

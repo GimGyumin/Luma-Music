@@ -41,6 +41,18 @@ struct NowPlayingSeekClockTests {
         #expect(paused.projectingPlayback(to: time.addingTimeInterval(100)).position == 0)
     }
 
+    @Test func partialMetadataRetainsArtworkIdentityForTheSameTrack() {
+        let original = NowPlayingSnapshot(title: "Clock", artist: nil, album: nil, duration: 180,
+            position: 0, playbackRate: 1, artworkURL: nil, artworkHeaders: [:],
+            coverArtId: "track-cover", albumId: "album", isLiveStream: false,
+            radioStationName: nil, isrc: nil, trackId: "clock")
+        let updated = snapshot(position: 42, rate: 0).preservingArtwork(from: original)
+        #expect(updated.coverArtId == "track-cover")
+        #expect(updated.albumId == "album")
+        #expect(updated.position == 42)
+        #expect(updated.playbackRate == 0)
+    }
+
     @Test func cancelledSystemCallerStillCompletesAnAcceptedZeroSeek() async throws {
         let container = try AppContainer(inMemory: true, engine: FakePlaybackEngine())
         let player = MockPlayerService()

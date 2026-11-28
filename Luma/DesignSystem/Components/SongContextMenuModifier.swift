@@ -18,11 +18,9 @@ struct SongContextMenuModifier: ViewModifier {
     let coverImage: PlatformImage?
 
     @Environment(\.appContainer) private var container
-    @Environment(ArtworkImageCache.self) private var artworkImageCache
     @State private var showPinLimitAlert = false
     @State private var pinnedSnapshot = false
     @State private var favoriteSnapshot = false
-    @State private var loadedCoverImage: PlatformImage?
     @State private var showAddToPlaylist = false
     @State private var showAtmosSelection = false
 
@@ -83,7 +81,7 @@ struct SongContextMenuModifier: ViewModifier {
                     Button {
                         showAddToPlaylist = true
                     } label: {
-                        Label("Add to Playlist…", systemImage: "text.badge.plus")
+                        DestinationMenuLabel.addToPlaylist(systemImage: "text.badge.plus")
                     }
                     .disabled(!isOnline)
 
@@ -92,19 +90,19 @@ struct SongContextMenuModifier: ViewModifier {
                     Button {
                         Task { await container?.playerService.playNext(song) }
                     } label: {
-                        Label("Play Next", systemImage: "text.line.first.and.arrowtriangle.forward")
+                        DestinationMenuLabel.playNext(after: container?.playerState.currentTrack?.title)
                     }
 
                     Button {
                         Task { await container?.playerService.addToQueue(song) }
                     } label: {
-                        Label("Add to Queue", systemImage: "text.append")
+                        DestinationMenuLabel.addToQueue()
                     }
                 }
                 .tint(.primary)
                 .foregroundStyle(.primary)
             } preview: {
-                SongContextPreview(coverImage: coverImage ?? loadedCoverImage, song: song)
+                SongContextPreview(coverImage: coverImage, song: song)
             }
             .alert("Pin Limit Reached", isPresented: $showPinLimitAlert) {
                 Button("OK", role: .cancel) {}
@@ -118,18 +116,10 @@ struct SongContextMenuModifier: ViewModifier {
                 AtmosVersionSelectionView(song: song)
             }
             .task(id: song.id) {
-                // Preload persistent state and artwork while the row is idle, so the
-                // long-press presentation performs no database or network work.
+                // Keep persistent menu state ready without fetching hidden preview artwork.
                 pinnedSnapshot = await container?.pinService.isPinnedInBackground(itemType: .song, itemId: song.id) == true
                 favoriteSnapshot = await container?.favoritesService.isFavoriteInBackground(itemType: .song, itemId: song.id) == true
-                guard !Task.isCancelled else { return }
-                guard coverImage == nil else { return }
-                let artId = song.coverArtId ?? song.id
-                if let cached = artworkImageCache.cachedImage(for: artId, tier: .thumb) {
-                    loadedCoverImage = cached
-                } else {
-                    loadedCoverImage = await artworkImageCache.load(coverArtId: artId, tier: .thumb)
-                }
+
             }
     }
 

@@ -12,23 +12,62 @@ struct DashboardHomeView: View {
     @State private var vm: DiscoverViewModel?
     @State private var loadedServerID: String?
     @State private var listenAgain: AlbumListenAgainRecommendation?
-    @State private var isLoadingListenAgain = true
+    @State private var featuredMixOrder: [PersonalMixKind] = Self.featuredMixKinds
     @State private var songToAddToPlaylist: DisplayableSong?
     @State private var isHeaderScrolled = false
+    private var isOnline: Bool { container?.serverState.isOnline != false }
+    private var homeHorizontalPadding: CGFloat {
+        #if os(macOS)
+        32
+        #else
+        16
+        #endif
+    }
+
+    private static let featuredMixKinds: [PersonalMixKind] = [.getUp, .heavyRotation, .newMusic, .essentials]
+
+    private var featuredMix: PersonalMix? {
+        guard let vm, vm.personalMixesLoaded else { return nil }
+        for kind in featuredMixOrder {
+            if let mix = vm.personalMixes.first(where: { $0.kind == kind && !$0.tracks.isEmpty }) {
+                return mix
+            }
+        }
+        return nil
+    }
 
     var body: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 32) {
-                if let container {
+                // Music's Home owns a large page header inside the scroll content;
+                // the macOS shell hides the window toolbar for this root page.
+                #if os(macOS)
+                HStack(spacing: 10) {
+                    Image(systemName: "music.note")
+                        .font(.system(size: 26, weight: .bold))
+                        .symbolRenderingMode(.monochrome)
+                    Text(String(localized: "Home", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale))
+                        .font(.system(size: 28, weight: .bold))
+                }
+                .padding(.top, 8)
+                #endif
+
+                let featuredMix = self.featuredMix
+                if let feed = container?.homeDiscoveryFeed {
+                    HomeFeaturedAlbumsShelf(listenAgain: listenAgain,
+                        recentlyAdded: feed.recentlyAdded, featuredMix: featuredMix)
+                }
+                if let vm {
+                    albumShelf("Recently Played", albums: vm.recentlyPlayed)
+                }
+                if let feed = container?.homeDiscoveryFeed {
                     HomePlaylistShelf(
-                        playlists: container.homeDiscoveryFeed.playlists,
-                        mixes: vm?.personalMixes ?? [],
-                        listenAgain: listenAgain,
-                        isLoadingListenAgain: isLoadingListenAgain,
+                        playlists: feed.playlists,
+                        mixes: (vm?.personalMixes ?? []).filter { $0.kind != featuredMix?.kind },
                         isLoadingMixes: vm?.personalMixesLoaded != true
                     )
-                    if !container.homeDiscoveryFeed.favoriteSongs.isEmpty {
-                        favoriteSongs(container.homeDiscoveryFeed.favoriteSongs)
+                    if !feed.favoriteSongs.isEmpty {
+                        favoriteSongs(feed.favoriteSongs)
                     }
                 }
                 if let vm {
@@ -39,7 +78,6 @@ struct DashboardHomeView: View {
                     } else if vm.isInitialLoading {
                         EmptyView()
                     } else {
-                        albumShelf("Recently Played", albums: vm.recentlyPlayed)
                         albumShelf("In Heavy Rotation", albums: vm.mostPlayed)
                         albumShelf("Rediscover", albums: vm.suggestedSelection)
                         if let feed = container?.homeDiscoveryFeed {
@@ -53,33 +91,41 @@ struct DashboardHomeView: View {
                     }
                 } else { EmptyView() }
             }
-            .padding(.horizontal, 16)
-            .padding(.top, 16)
+            .padding(.horizontal, homeHorizontalPadding)
+            .padding(.top, 20)
             .padding(.bottom, 32)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .miniPlayerBottomMargin()
         .navigationTitle(String(localized: "Home", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale))
-        .lumaAccountProfileToolbar(isVisible: !isHeaderScrolled)
-        .lumaScrollingRootHeader(isScrolled: $isHeaderScrolled)
+        .lumaAccountProfileToolbar(isVisible: isOnline && !isHeaderScrolled, usesInlineTitle: !isOnline)
+        .lumaScrollingRootHeader(isScrolled: $isHeaderScrolled, enabled: isOnline)
+        .lumaServerReachability()
         .lumaContentWidth(.fill)
-        .task(id: container?.serverState.activeServer?.id) {
+        .task(id: "\(container?.serverState.activeServer?.id.uuidString ?? ""):\(isOnline)") {
             guard let container else { return }
+            guard isOnline else {
+                AppBootGate.markHomeReady()
+                return
+            }
             let sid = container.serverState.activeServer?.id.uuidString
             if vm == nil || loadedServerID != sid {
                 vm = DiscoverViewModel(libraryService: container.libraryService,
                     recommendationService: container.recommendationService,
                     personalMixService: container.personalMixService, serverId: sid)
                 loadedServerID = sid
+                featuredMixOrder = Self.featuredMixKinds.shuffled()
+                listenAgain = nil
             }
-            listenAgain = nil
-            isLoadingListenAgain = true
             await loadListenAgain(container: container, serverID: sid)
+            guard !Task.isCancelled else { return }
             await vm?.loadHomeDashboard(serverId: sid)
+            guard !Task.isCancelled else { return }
             await container.homeDiscoveryFeed.load()
         }
         .refreshable { await reload(forceRefresh: true) }
         .onReceive(NotificationCenter.default.publisher(for: .lumaFavoritesChanged)) { _ in
+            guard isOnline else { return }
             Task { await container?.homeDiscoveryFeed.load(forceRefresh: true) }
         }
         .sheet(item: $songToAddToPlaylist) { song in AddToPlaylistSheet(song: song) }
@@ -112,18 +158,17 @@ struct DashboardHomeView: View {
 
     private func reload(forceRefresh: Bool) async {
         if let container {
-            if listenAgain == nil { isLoadingListenAgain = true }
             await loadListenAgain(container: container,
                                   serverID: container.serverState.activeServer?.id.uuidString)
         }
         await vm?.loadHomeDashboard(forceRefresh: forceRefresh, serverId: container?.serverState.activeServer?.id.uuidString)
         await container?.homeDiscoveryFeed.load(forceRefresh: forceRefresh)
+        if forceRefresh { featuredMixOrder.shuffle() }
     }
 
     private func loadListenAgain(container: AppContainer, serverID: String?) async {
         guard let serverID else {
             listenAgain = nil
-            isLoadingListenAgain = false
             return
         }
         let recommendation = await container.statsService
@@ -131,7 +176,6 @@ struct DashboardHomeView: View {
         guard !Task.isCancelled,
               container.serverState.activeServer?.id.uuidString == serverID else { return }
         listenAgain = recommendation
-        isLoadingListenAgain = false
     }
 
 }

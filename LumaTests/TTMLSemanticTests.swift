@@ -74,6 +74,18 @@ struct TTMLSemanticTests {
         #expect(doc.allLines.first?.mainWords.map(\.text).joined() == "안녕")
     }
 
+    @Test func inlineReadingsInheritTheirOwningSpanClockAndKeepEachWord() throws {
+        let doc = try document("""
+        <p begin="1" end="4"><span begin="1" end="2">We<span m:role="x-roman" xml:lang="ko">위</span></span>
+        <span begin="2" end="4">sing<span m:role="x-roman" xml:lang="ko">싱</span></span></p>
+        """)
+        let line = try #require(doc.allLines.first)
+        let reading = try #require(doc.pronunciation(for: line))
+        #expect(reading.words.map(\.text) == ["위", "싱"])
+        #expect(reading.words.map(\.begin) == [1, 2])
+        #expect(reading.words.map(\.end) == [2, 4])
+    }
+
     @Test func inlineLocalizationDoesNotBecomeSungText() throws {
         let doc = try document("<p begin=\"1\" end=\"3\">Hello<span m:role=\"x-translation\" xml:lang=\"ko\">안녕</span><span m:role=\"x-roman\" xml:lang=\"en-Latn\">hello</span></p>")
         let line = try #require(doc.allLines.first)

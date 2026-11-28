@@ -15,13 +15,11 @@ struct AlbumPresentationLifecycle: UIViewControllerRepresentable {
     var pageID: String = ""
     var onDeparture: () -> Void = {}
     var onReturn: () async -> Void = {}
-    var chrome: TabBarChromeState? = nil
     func makeUIViewController(context: Context) -> AlbumPresentationController {
         let controller = AlbumPresentationController()
         controller.pageID = pageID
         controller.onDeparture = onDeparture
         controller.onReturn = onReturn
-        controller.chrome = chrome
         controller.bindValuePath(context.environment.detailNavigationPath)
         return controller
     }
@@ -29,7 +27,6 @@ struct AlbumPresentationLifecycle: UIViewControllerRepresentable {
         controller.pageID = pageID
         controller.onDeparture = onDeparture
         controller.onReturn = onReturn
-        controller.chrome = chrome
         controller.bindValuePath(context.environment.detailNavigationPath)
     }
 }
@@ -38,9 +35,7 @@ final class AlbumPresentationController: UIViewController {
     var pageID: String = ""
     var onDeparture: () -> Void = {}
     var onReturn: () async -> Void = {}
-    var chrome: TabBarChromeState?
     private let sessionID = String(UUID().uuidString.prefix(8))
-    private var registeredChromePageID: String?
     private var returnTask: Task<Void, Never>?
     private var appearanceRevision = 0
     private var isVisible = false
@@ -87,6 +82,7 @@ final class AlbumPresentationController: UIViewController {
         isVisible = false
         departureCompletionPending = false
         returnTask?.cancel()
+        returnTask = nil
         captureNavigationPage()
         logPop("willDisappear")
         onDeparture()
@@ -100,10 +96,6 @@ final class AlbumPresentationController: UIViewController {
         super.viewWillAppear(animated)
         captureNavigationPage()
         logPop("willAppear")
-        // Register before the push transition begins. Keeping the tab bar out of its
-        // scroll-driven minimize mode for the page's entire lifetime prevents the
-        // zoom transition from re-showing it for a frame.
-        registerChromeIfNeeded()
         // A late appearance callback from a page that already left the stack is what
         // re-presents a completed swipe-back. committedPop is intentionally permanent
         // for this controller: a complete pop must never resume or re-enable the page.
@@ -138,13 +130,15 @@ final class AlbumPresentationController: UIViewController {
         isVisible = false
         departureCompletionPending = false
         returnTask?.cancel()
+        returnTask = nil
         // Do not mark a committed pop while a transition is still interactive. SwiftUI
         // can remove the path value as the edge-swipe begins; only the transition
         // completion can distinguish a commit from a cancelled swipe.
-        if !completionWasPending, !isInteractiveDeparture, (!isPageInStack || valuePathHasPopped) {
-            committedPop = true
-            isDismissing = true
-            endChromeIfNeeded()
+        if !completionWasPending, !isInteractiveDeparture {
+            if !isPageInStack || valuePathHasPopped {
+                committedPop = true
+                isDismissing = true
+            }
         }
         logPop("didDisappear")
         disableInteractionIfPopped()
@@ -178,7 +172,6 @@ final class AlbumPresentationController: UIViewController {
                     isDismissing = true
                     committedPop = true
                     returnTask?.cancel()
-                    endChromeIfNeeded()
                 } else {
                     // SwiftUI can commit the path removal one turn after the UIKit
                     // completion. Re-check once the stack has settled; a genuine
@@ -186,12 +179,13 @@ final class AlbumPresentationController: UIViewController {
                     DispatchQueue.main.async { [weak self] in
                         guard let self else { return }
                         Logger.ui.debug("[ALBUM-POP] settle session=\(self.sessionID, privacy: .public) album=\(self.pageID, privacy: .public) inStack=\(self.isPageInStack, privacy: .public) visible=\(self.isVisible, privacy: .public) window=\(self.page?.view.window != nil, privacy: .public)")
-                        guard !self.isVisible, !self.isPageInStack else { return }
-                        self.isDismissing = true
-                        self.committedPop = true
-                        self.returnTask?.cancel()
-                        self.disableInteractionIfPopped()
-                        self.endChromeIfNeeded()
+                        guard !self.isVisible else { return }
+                        if !self.isPageInStack || self.valuePathHasPopped {
+                            self.isDismissing = true
+                            self.committedPop = true
+                            self.returnTask?.cancel()
+                            self.disableInteractionIfPopped()
+                        }
                     }
                 }
                 disableInteractionIfPopped()
@@ -258,24 +252,7 @@ final class AlbumPresentationController: UIViewController {
         return !navigation.viewControllers.contains { $0 === page }
     }
 
-    private func registerChromeIfNeeded() {
-        guard registeredChromePageID == nil, !pageID.isEmpty, !committedPop else { return }
-        registeredChromePageID = pageID
-        chrome?.beginAlbum(pageID: pageID)
-    }
-
-    private func endChromeIfNeeded() {
-        guard let pageID = registeredChromePageID else { return }
-        registeredChromePageID = nil
-        chrome?.endAlbum(pageID: pageID)
-    }
-
-    deinit {
-        // A destroyed destination must not leave the tab bar permanently pinned.
-        guard let pageID = registeredChromePageID else { return }
-        let chrome = chrome
-        Task { @MainActor in chrome?.endAlbum(pageID: pageID) }
-    }
+    deinit {}
 
     private func captureNavigationPage() {
         var candidate = parent
@@ -301,8 +278,7 @@ final class AlbumPresentationController: UIViewController {
 
     private func resumeIfCurrent(revision: Int) {
         guard !committedPop, !isDismissing, !pageHasLeftNavigationStack, isVisible, isCurrentPage,
-              appearanceRevision == revision else { return }
-        returnTask?.cancel()
+              appearanceRevision == revision, returnTask == nil else { return }
         returnTask = Task { [weak self] in
             guard !Task.isCancelled, let self, !committedPop, !isDismissing, isVisible,
                   !pageHasLeftNavigationStack, isCurrentPage,

@@ -53,6 +53,14 @@ struct DownloadedPlayerArtworkTests {
         #expect(await service.hasArtwork)
         #expect(container.artworkImageCache.cachedImage(for: coverID, tier: .hero) != nil)
         #expect(NowPlayingMetadataSink.info?[MPMediaItemPropertyArtwork] as? MPMediaItemArtwork != nil)
+        // A system metadata reset must not leave the cached hasArtwork flag authoritative.
+        var metadata = NowPlayingMetadataSink.info
+        metadata?.removeValue(forKey: MPMediaItemPropertyArtwork)
+        NowPlayingMetadataSink.info = metadata
+        let current = try #require(await service.currentSong)
+        await service.update(with: current.updatingPlayback(position: 30, rate: 0, duration: 200))
+        #expect(NowPlayingMetadataSink.info?[MPMediaItemPropertyArtwork] is MPMediaItemArtwork)
+        #expect((NowPlayingMetadataSink.info?[MPNowPlayingInfoPropertyElapsedPlaybackTime] as? Double) == 30)
         await service.stop()
         await container.downloadService.removeCover(forId: OriginalArtwork.storageID(coverID), serverId: account.id)
     }

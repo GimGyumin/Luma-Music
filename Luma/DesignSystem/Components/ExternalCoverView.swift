@@ -13,24 +13,29 @@ struct ExternalCoverView<Placeholder: View>: View {
     @ViewBuilder let placeholder: () -> Placeholder
 
     @Environment(\.appContainer) private var container
-    @State private var image: PlatformImage?
+    @State private var loaded: (url: URL, image: PlatformImage)?
 
     var body: some View {
-        Group {
+        let image = loaded?.url == url ? loaded?.image : nil
+        ZStack {
+            if image == nil {
+                placeholder()
+            }
             if let image {
                 Image(platformImage: image)
                     .resizable()
                     .scaledToFill()
-            } else {
-                placeholder()
+                    .transition(.opacity)
             }
         }
-        .task(id: "\(url?.absoluteString ?? ""):\(container?.serverState.isCellularConnection == true):\(container?.serverState.isOnline == true)") {
-            image = nil
-            guard let url else { return }
+        .lumaContentReveal(isReady: image != nil)
+        .task(id: "\(url?.absoluteString ?? ""):\(container?.serverState.isCellularConnection == true):\(container?.serverState.artworkNetworkRevision ?? 0)") {
+            guard let url, loaded?.url != url else { return }
             let allowed = ArtworkNetworkPolicy.allowsDownload(isOnline: container?.serverState.isOnline ?? true,
                                                              isCellular: container?.serverState.isCellularConnection ?? false)
-            image = await container?.externalArtworkCache.image(for: url, allowNetwork: allowed)
+            guard let image = await container?.externalArtworkCache.image(for: url, allowNetwork: allowed),
+                  !Task.isCancelled else { return }
+            loaded = (url, image)
         }
     }
 }

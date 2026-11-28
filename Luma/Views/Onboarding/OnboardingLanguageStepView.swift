@@ -41,6 +41,9 @@ struct OnboardingLanguageStepView: View {
                             }
                             .contentShape(Rectangle())
                         }
+                        // Keep the row chrome neutral. The automatic button style tints
+                        // the label and row background with the form accent on iOS/macOS 26.
+                        .buttonStyle(.plain)
                         .accessibilityAddTraits(selection == language ? .isSelected : [])
                     }
                 } header: {

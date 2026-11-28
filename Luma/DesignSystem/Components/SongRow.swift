@@ -30,20 +30,21 @@ struct SongRow: View {
     /// Show an ellipsis in place of the track duration (album detail keeps durations in its
     /// footer instead of per-row).
     var showsEllipsisInsteadOfDuration: Bool = false
+    var coverPlaceholderTint: Color?
 
     @Environment(\.appContainer) private var container
-    @Environment(ArtworkImageCache.self) private var artworkImageCache
     var onPlay: (() -> Void)? = nil
-    @State private var coverImage: PlatformImage?
     @State private var showPinLimitAlert = false
     @State private var pinnedSnapshot = false
     @State private var favoriteSnapshot = false
     #if os(macOS)
     @State private var isHovered = false
+    private var showsDesktopAlbumControls = false
     #endif
 
-    init(song: DisplayableSong, index: Int, showCoverArt: Bool = false, showArtist: Bool = true, isFavorite: Bool = false, titleColor: Color = .primary, secondaryColor: Color = .secondary, onDownload: (() -> Void)? = nil, onRemoveDownload: (() -> Void)? = nil, isDownloading: Bool = false, onRemoveFromPlaylist: (() -> Void)? = nil, onAddToPlaylist: ((DisplayableSong) -> Void)? = nil, showsEllipsisInsteadOfDuration: Bool = false, onPlay: (() -> Void)? = nil) {
+    init(song: DisplayableSong, index: Int, showCoverArt: Bool = false, showArtist: Bool = true, isFavorite: Bool = false, titleColor: Color = .primary, secondaryColor: Color = .secondary, onDownload: (() -> Void)? = nil, onRemoveDownload: (() -> Void)? = nil, isDownloading: Bool = false, onRemoveFromPlaylist: (() -> Void)? = nil, onAddToPlaylist: ((DisplayableSong) -> Void)? = nil, showsEllipsisInsteadOfDuration: Bool = false, coverPlaceholderTint: Color? = nil, onPlay: (() -> Void)? = nil) {
         self.onPlay = onPlay
+        self.coverPlaceholderTint = coverPlaceholderTint
         self.song = song
         self.index = index
         self.showCoverArt = showCoverArt
@@ -64,6 +65,23 @@ struct SongRow: View {
         row.reservesArtistSpace = true
         row.showsEllipsisInsteadOfDuration = true
         return row
+    }
+
+    #if os(macOS)
+    func withDesktopAlbumControls() -> Self {
+        var row = self
+        row.showsDesktopAlbumControls = true
+        row.reservesArtistSpace = true
+        return row
+    }
+    #endif
+
+    private var showsMoreMenu: Bool {
+        #if os(macOS)
+        showsEllipsisInsteadOfDuration || showsDesktopAlbumControls
+        #else
+        showsEllipsisInsteadOfDuration
+        #endif
     }
 
     private var artistText: String? {
@@ -108,19 +126,7 @@ struct SongRow: View {
                         .scaleEffect(0.7)
                         .frame(width: 16, height: 16)
                 }
-                if showsEllipsisInsteadOfDuration {
-                    Menu { songMenu } label: {
-                        Image(systemName: "ellipsis")
-                            .font(.body.weight(.semibold))
-                            .foregroundStyle(titleColor)
-                            .frame(width: 44, height: 44)
-                            .contentShape(Rectangle())
-                    }
-                    .tint(titleColor)
-                    .menuStyle(.borderlessButton)
-                    .fixedSize()
-                    .accessibilityLabel(String(localized: "More", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale))
-                } else if song.duration > 0 {
+                if !showsEllipsisInsteadOfDuration, song.duration > 0 {
                     Text(Duration.seconds(song.duration).formatted(.time(pattern: .minuteSecond)))
                         #if os(macOS)
                         .font(.system(size: 12))
@@ -131,10 +137,34 @@ struct SongRow: View {
                         #endif
                         .monospacedDigit()
                 }
+                if showsMoreMenu {
+                    Menu { songMenu } label: {
+                        Image(systemName: "ellipsis")
+                            #if os(macOS)
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(showsDesktopAlbumControls ? secondaryColor : titleColor)
+                            .frame(width: showsDesktopAlbumControls ? 28 : 44,
+                                   height: showsDesktopAlbumControls ? 32 : 44)
+                            #else
+                            .font(.body.weight(.semibold))
+                            .foregroundStyle(titleColor)
+                            .frame(width: 44, height: 44)
+                            #endif
+                            .contentShape(Rectangle())
+                    }
+                    .tint(titleColor)
+                    .menuStyle(.borderlessButton)
+                    #if os(macOS)
+                    .menuIndicator(.hidden)
+                    #endif
+                    .fixedSize()
+                    .accessibilityLabel(String(localized: "More", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale))
+                }
             }
         }
         #if os(macOS)
-        .padding(.vertical, hasAlbumSubtitle ? 12 : LumaSpacing.s)
+        .padding(.vertical, showsDesktopAlbumControls ? (hasAlbumSubtitle ? 5 : 0) : (hasAlbumSubtitle ? 12 : LumaSpacing.s))
+        .frame(minHeight: showsDesktopAlbumControls ? 46 : nil)
         .padding(.trailing, LumaSpacing.s)
         #else
         .padding(.vertical, hasAlbumSubtitle ? 16 : LumaSpacing.s)
@@ -151,7 +181,6 @@ struct SongRow: View {
             pinnedSnapshot = await container?.pinService.isPinnedInBackground(
                 itemType: .song, itemId: song.id) == true
             favoriteSnapshot = isFavorite
-            coverImage = await artworkImageCache.load(coverArtId: song.effectiveCoverArtId)
         }
         .musicShareDraggable(itemID: song.id, title: song.title)
         .contextMenu {
@@ -162,7 +191,7 @@ struct SongRow: View {
                 .tint(.primary)
                 .foregroundStyle(.primary)
         } preview: {
-            SongContextPreview(coverImage: coverImage, song: song)
+            SongContextPreview(coverImage: nil, song: song)
         }
         .alert("Pin Limit Reached", isPresented: $showPinLimitAlert) {
             Button("OK", role: .cancel) {}
@@ -176,7 +205,7 @@ struct SongRow: View {
     @ViewBuilder
     private var leadingContent: some View {
         if showCoverArt {
-            CoverArtCard(id: song.effectiveCoverArtId, size: 44)
+            CoverArtCard(id: song.effectiveCoverArtId, size: 44, placeholderTint: coverPlaceholderTint)
                 .overlay {
                     // Now-playing equalizer over the thumbnail (with a scrim) for the current track —
                     // restores the playing cue lost when rows switched to album thumbnails (showCoverArt).
@@ -200,8 +229,11 @@ struct SongRow: View {
         } else {
             ZStack {
                 if isCurrentTrack {
-                    NowPlayingBarsIndicator(isPlaying: isPlaying,
-                        isBuffering: container?.playerState.playbackState == .buffering)
+                    NowPlayingBarsIndicator(
+                        isPlaying: isPlaying,
+                        isBuffering: container?.playerState.playbackState == .buffering,
+                        tint: titleColor
+                    )
                 } else {
                     Text("\(song.trackNumber ?? index)")
                         #if os(macOS)
@@ -239,13 +271,13 @@ struct SongRow: View {
             HStack(alignment: .firstTextBaseline, spacing: 4) {
                 Text(song.title)
                     #if os(macOS)
-                    .font(.system(size: 14, weight: .regular))
+                    .font(.system(size: showsDesktopAlbumControls ? 13 : 14, weight: .regular))
                     #else
                     .font(reservesArtistSpace ? .system(size: 17, weight: .regular) : .lumaCellTitle)
                     #endif
                     .foregroundStyle(titleColor)
                     #if os(macOS)
-                    .lineLimit(reservesArtistSpace ? nil : 1)
+                    .lineLimit(showsDesktopAlbumControls ? 1 : (reservesArtistSpace ? nil : 1))
                     #else
                     .lineLimit(reservesArtistSpace ? 2 : 1)
                     .lineSpacing(reservesArtistSpace ? 1 : 0)
@@ -329,13 +361,13 @@ struct SongRow: View {
             Button {
                 Task { await container?.playerService.playNext(song) }
             } label: {
-                Label("Play Next", systemImage: "text.line.first.and.arrowtriangle.forward")
+                DestinationMenuLabel.playNext(after: container?.playerState.currentTrack?.title)
             }
 
             Button {
                 Task { await container?.playerService.addToQueue(song) }
             } label: {
-                Label("Add to Queue", systemImage: "text.append")
+                DestinationMenuLabel.addToQueue()
             }
 
             Divider()
@@ -376,7 +408,7 @@ struct SongRow: View {
             Button {
                 onAddToPlaylist?(song)
             } label: {
-                Label("Add to Playlist...", systemImage: "music.note.list")
+                DestinationMenuLabel.addToPlaylist()
             }
             .disabled(!isOnline)
 

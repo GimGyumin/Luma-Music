@@ -20,10 +20,9 @@ extension AlbumDetailContentView {
                 let songs = displaySongs()
                 albumHeader(vm: viewModel, songs: songs)
                     .frame(maxWidth: .infinity)
-                    .opacity(headerRevealed ? 1 : 0)
-                    .allowsHitTesting(headerRevealed)
-                    .accessibilityHidden(!headerRevealed)
-                    .animation(reduceMotion ? nil : .easeOut(duration: 0.28), value: headerRevealed)
+                    .modifier(AlbumDetailSectionReveal(
+                        visible: !usesFullBleedArtwork || albumContentVisible, stage: .header
+                    ))
                     .background {
                         GeometryReader { geo in
                             Color.clear.preference(
@@ -33,10 +32,9 @@ extension AlbumDetailContentView {
                         }
                     }
                 albumTrackContent(songs: songs)
-                    .opacity(showsTrackContent ? 1 : 0)
-                    .allowsHitTesting(showsTrackContent)
-                    .accessibilityHidden(!showsTrackContent)
-                    .animation(reduceMotion ? nil : .easeOut(duration: 0.30), value: showsTrackContent)
+                    .modifier(AlbumDetailSectionReveal(
+                        visible: albumContentVisible, stage: .tracks
+                    ))
             }
         }
         .scrollContentBackground(.hidden)
@@ -63,18 +61,13 @@ extension AlbumDetailContentView {
         return HStack(alignment: .top, spacing: LumaSpacing.xxl) {
             desktopAlbumSidebar(vm: viewModel, songs: songs)
                 .frame(width: LumaWideLayout.detailSidebarWidth, alignment: .top)
-                .opacity(headerRevealed ? 1 : 0)
-                .allowsHitTesting(headerRevealed)
-                .accessibilityHidden(!headerRevealed)
-                .animation(reduceMotion ? nil : .easeOut(duration: 0.28), value: headerRevealed)
 
             ScrollView {
                 LazyVStack(spacing: 0) {
                     albumTrackContent(songs: songs)
-                        .opacity(showsTrackContent ? 1 : 0)
-                        .allowsHitTesting(showsTrackContent)
-                        .accessibilityHidden(!showsTrackContent)
-                        .animation(reduceMotion ? nil : .easeOut(duration: 0.30), value: showsTrackContent)
+                        .modifier(AlbumDetailSectionReveal(
+                            visible: albumContentVisible, stage: .tracks
+                        ))
                 }
                 .padding(.trailing, LumaSpacing.l)
             }
@@ -94,20 +87,26 @@ extension AlbumDetailContentView {
                 size: 600,
                 cornerRadius: LumaCornerRadius.large,
                 initialImage: effectiveInitialImage,
-                contentMode: .fill
+                contentMode: .fill,
+                reveal: albumArtworkReveal
             )
             .frame(width: coverSize, height: coverSize)
             .shadow(color: .black.opacity(0.35), radius: 24, y: 12)
 
-            albumTitleBlock(vm: vm, songs: songs, alignment: .leading)
-            albumActionBar(vm: vm, songs: songs, playMaxWidth: .infinity)
+            Group {
+                albumTitleBlock(vm: vm, songs: songs, alignment: .leading)
+                albumActionBar(vm: vm, songs: songs, playMaxWidth: .infinity)
 
-            if let description = vm?.albumDescription, !description.isEmpty {
-                albumAboutPreview(description)
-                    .padding(.horizontal, 0)
+                if let description = vm?.albumDescription, !description.isEmpty {
+                    albumAboutPreview(description)
+                        .padding(.horizontal, 0)
+                }
+
+                albumDownloadProgress(vm: vm)
             }
-
-            albumDownloadProgress(vm: vm)
+            .modifier(AlbumDetailSectionReveal(
+                visible: albumContentVisible, stage: .header
+            ))
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -115,9 +114,7 @@ extension AlbumDetailContentView {
     @ViewBuilder
     private func albumTrackContent(songs: [DisplayableSong]) -> some View {
         if viewModel == nil || (viewModel?.isPrimaryContentReady != true && viewModel?.isLoading == true) {
-            // Keep the loading page free of track-row placeholders. The header remains
-            // visible while the primary payload arrives; an empty track area is less
-            // distracting than a faint skeleton list.
+            // The background remains visible while the primary payload arrives.
             EmptyView()
         } else if let vm = viewModel {
             let serverId = container?.serverState.activeServer?.id ?? UUID()
@@ -194,4 +191,17 @@ extension AlbumDetailContentView {
     }
 }
 
+struct AlbumDetailSectionReveal: ViewModifier {
+    let visible: Bool
+    let stage: AlbumDetailRevealStage
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    func body(content: Content) -> some View {
+        content
+            .opacity(visible ? 1 : 0)
+            .allowsHitTesting(visible)
+            .accessibilityHidden(!visible)
+            .animation(reduceMotion ? nil : stage.animation, value: visible)
+    }
+}
 

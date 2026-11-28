@@ -28,6 +28,7 @@ actor MediaResolver: MediaResolverProtocol {
     private let jellyfinService: JellyfinService?
     private let speedProbe: NetworkSpeedProbe?
     private let libraryIndex: LibraryIndexService?
+    private var lastQualitySampleRequest: (identity: ServerRequestIdentity, networkRevision: UInt64, date: Date)?
 
     init(
         downloadService: any DownloadServiceProtocol,
@@ -156,32 +157,24 @@ actor MediaResolver: MediaResolverProtocol {
         // metered (cellular/hotspot) or Low Data Mode is what entitles the app to fall back to the
         // cellular format. A single slow measurement must not do that on Wi-Fi — it
         // only caps the stream below — otherwise a healthy home Wi-Fi link silently played lossy.
-        let (usesCellularQuality, isLimited, configuredFormat) = await MainActor.run {
-            let metered = serverState.isCellularConnection || serverState.isExpensive || serverState.isNetworkConstrained
-            let limited = serverState.isLimitedNetwork
-            return (metered, limited, streamingSettings.formatForCurrentNetwork(isLimited: metered))
+        let (usesCellularQuality, isLimited, configuredFormat, ceiling, measuredRate, sampleRevision) = await MainActor.run {
+            let metered = serverState.usesCellularQuality
+            let format = streamingSettings.formatForCurrentNetwork(isLimited: metered)
+            let maySample = format == .matchStream && !preserveBitstream
+                && serverState.playbackNetworkPath?.online == true && !serverState.isNetworkConstrained
+                && (requestedRoute == .automatic || requestedRoute == .openSubsonic)
+            return (metered, serverState.isLimitedNetwork, format,
+                    streamingSettings.adaptiveStreamingCeiling(isLimited: metered),
+                    serverState.measuredBytesPerSecond,
+                    maySample ? serverState.playbackNetworkRevision : nil)
         }
-
-        // Playback must never wait for a second GET of the same audio just to measure it.
-        // Sustained playback failures can lower Automatic for subsequent resolutions.
-        let ceiling = await MainActor.run {
-            streamingSettings.currentAdaptiveCeiling(isLimited: usesCellularQuality)
-        }
-        let applyCeilingToExplicitChoice = await MainActor.run {
-            streamingSettings.adaptiveCeilingAppliesToExplicitChoice
-        }
-        // The published rate is path-scoped: NetworkMonitor clears it on every path change and the
-        // underrun handler writes a slow value. The per-server `NetworkSpeedProbe` cache is not
-        // path-scoped, so it must not decide quality after a Wi-Fi → cellular transition.
-        let measuredRate = await MainActor.run { serverService.state.measuredBytesPerSecond }
         try Task.checkCancellation()
         let effectiveFormat = AdaptiveQualityPolicy.effectiveFormat(
             configured: configuredFormat,
             sourceBitRateKbps: song?.bitRate,
             measuredBytesPerSecond: measuredRate,
             ceiling: ceiling,
-            isLimitedNetwork: usesCellularQuality,
-            applyCeilingToExplicitChoice: applyCeilingToExplicitChoice
+            isLimitedNetwork: usesCellularQuality
         )
         // Automatic delivery must not override an explicit network quality selection.
         // The policy's answer is authoritative: keep the original bytes only when it chose an
@@ -204,6 +197,10 @@ actor MediaResolver: MediaResolverProtocol {
         let client = context.client
         let credentials = context.credentials
         try Task.checkCancellation()
+        if let sampleRevision, let sampleURL = client.streamURL(id: currentSongID, maxBitRate: nil, format: "raw") {
+            scheduleQualitySample(url: sampleURL, headers: credentials.customHeaders,
+                                  identity: identity, networkRevision: sampleRevision)
+        }
         // Direct originals avoid capability/authentication/PlaybackInfo round trips and cannot
         // inherit a Jellyfin universal endpoint's default AAC encoder. Cache hits still win above.
         if requestedRoute == .automatic,
@@ -399,6 +396,34 @@ actor MediaResolver: MediaResolverProtocol {
             "Resolved '\(currentSongID, privacy: .public)' as stream (limited=\(isLimited, privacy: .public), format=\(format ?? "default", privacy: .public), measured=\(measuredRate.map { Int($0) } ?? -1, privacy: .public)B/s)"
         )
         return .stream(streamURL, customHeaders: credentials.customHeaders)
+    }
+
+    /// Measure once playback has had time to start. The first resolve uses the path's default;
+    /// subsequent resolves can use a sample without opening another request on their critical path.
+    private func scheduleQualitySample(url: URL, headers: [String: String],
+                                       identity: ServerRequestIdentity, networkRevision: UInt64) {
+        guard let speedProbe else { return }
+        let now = Date()
+        if let last = lastQualitySampleRequest,
+           last.identity == identity, last.networkRevision == networkRevision,
+           now.timeIntervalSince(last.date) < 30 { return }
+        lastQualitySampleRequest = (identity, networkRevision, now)
+
+        let scope = NetworkSpeedProbe.Scope(accountRevision: identity.revision, networkRevision: networkRevision)
+        Task(priority: .utility) { [serverState, streamingSettings] in
+            do { try await Task.sleep(for: .seconds(2)) } catch { return }
+            let canSample = await MainActor.run {
+                serverState.requestIsCurrent(identity) && serverState.playbackNetworkRevision == networkRevision
+                    && serverState.isOnline && !serverState.isNetworkConstrained
+                    && streamingSettings.formatForCurrentNetwork(isLimited: serverState.usesCellularQuality) == .matchStream
+            }
+            guard canSample else { return }
+            let rate = await speedProbe.measurement(serverId: identity.serverID, url: url, headers: headers, scope: scope)
+            await MainActor.run {
+                guard serverState.requestIsCurrent(identity), serverState.playbackNetworkRevision == networkRevision else { return }
+                serverState.measuredBytesPerSecond = rate
+            }
+        }
     }
 
     private nonisolated static func jellyfinCodec(for format: CacheFormat) -> String {

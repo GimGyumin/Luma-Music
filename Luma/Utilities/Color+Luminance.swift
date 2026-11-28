@@ -63,4 +63,23 @@ extension Color {
         return 0
         #endif
     }
+
+    /// HSB components used by the player's dynamic slider palette. Keeping the
+    /// artwork hue while choosing a target brightness avoids the muddy "mix with
+    /// white" result and lets the track follow each album's identity.
+    var hsbComponents: (hue: Double, saturation: Double, brightness: Double)? {
+        var h: CGFloat = 0
+        var s: CGFloat = 0
+        var b: CGFloat = 0
+        var a: CGFloat = 0
+        #if canImport(UIKit)
+        guard UIColor(self).getHue(&h, saturation: &s, brightness: &b, alpha: &a) else { return nil }
+        #elseif canImport(AppKit)
+        guard let ns = NSColor(self).usingColorSpace(.deviceRGB) else { return nil }
+        ns.getHue(&h, saturation: &s, brightness: &b, alpha: &a)
+        #else
+        return nil
+        #endif
+        return (Double(h), Double(s), Double(b))
+    }
 }

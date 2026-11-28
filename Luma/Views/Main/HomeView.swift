@@ -7,10 +7,17 @@ import SwiftUI
 import SwiftData
 import SwiftSonic
 import OSLog
+#if os(iOS)
+import UIKit
+#endif
 
 struct HomeView: View {
     @Environment(\.appContainer) private var container
     @Environment(\.modelContext) private var modelContext
+    #if os(iOS)
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.tabBarPlacement) private var tabBarPlacement
+    #endif
     @Query(sort: \PinnedItem.sortOrder) private var allPinnedItems: [PinnedItem]
     @Query private var recentDownloadedAlbums: [DownloadedAlbum]
     @Query private var recentDownloadedPlaylists: [DownloadedPlaylist]
@@ -165,6 +172,13 @@ struct HomeView: View {
         .lumaScrollingRootHeader(isScrolled: $isHeaderScrolled)
         .toolbar {
             #if os(iOS)
+            if horizontalSizeClass == .regular,
+               UIDevice.current.userInterfaceIdiom == .pad,
+               tabBarPlacement != .sidebar {
+                ToolbarItem(placement: .topBarLeading) {
+                    LumaSidebarToggleButton()
+                }
+            }
             if !isHeaderScrolled {
                 if isEditingPins {
                     ToolbarItem(placement: .topBarTrailing) {
@@ -208,21 +222,27 @@ struct HomeView: View {
                         .accessibilityLabel(String(localized: "More", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale))
                     }
 
-                    // Own ToolbarItem so the profile control sits apart from the action capsule.
-                    if #available(iOS 26.0, *) {
-                        ToolbarSpacer(.fixed, placement: .topBarTrailing)
-                    }
-
-                    ToolbarItem(placement: .topBarTrailing) {
-                        Button {
-                            showAccountSheet = true
-                        } label: {
-                            Image(systemName: "person.crop.circle.fill")
-                                .font(.title2)
-                                .symbolRenderingMode(.hierarchical)
-                                .foregroundStyle(.white)
+                    // The sidebar footer already exposes the account on a
+                    // regular-width iPad; keep the content toolbar uncluttered.
+                    if !(horizontalSizeClass == .regular
+                         && UIDevice.current.userInterfaceIdiom == .pad
+                         && tabBarPlacement == .sidebar) {
+                        // Own ToolbarItem so the profile control sits apart from the action capsule.
+                        if #available(iOS 26.0, *) {
+                            ToolbarSpacer(.fixed, placement: .topBarTrailing)
                         }
-                        .accessibilityLabel(String(localized: "Account", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale))
+
+                        ToolbarItem(placement: .topBarTrailing) {
+                            Button {
+                                showAccountSheet = true
+                            } label: {
+                                Image(systemName: "person.crop.circle.fill")
+                                    .font(.title2)
+                                    .symbolRenderingMode(.hierarchical)
+                                    .foregroundStyle(.white)
+                            }
+                            .accessibilityLabel(String(localized: "Account", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale))
+                        }
                     }
                 }
             }

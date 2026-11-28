@@ -9,6 +9,8 @@ struct AudioQualityLabelView: View {
     enum Style {
         /// Player scrubber: compact rounded-rectangle chip.
         case pill
+        /// Full player scrubber: flat Dolby mark and wordmark.
+        case scrubberAtmos
         /// Album header: Apple Music–style mark + title, no capsule.
         case album
     }
@@ -21,6 +23,9 @@ struct AudioQualityLabelView: View {
     var usesGlass: Bool = false
     var style: Style = .pill
     var compact: Bool = false
+    /// Full-player reference uses the bare lossless mark on the scrubber row,
+    /// while the label still opens the quality detail sheet.
+    var showsChipBackground: Bool = true
 
     @State private var showDetail = false
 
@@ -30,7 +35,7 @@ struct AudioQualityLabelView: View {
             albumMark
                 .foregroundStyle(foreground)
                 .accessibilityLabel(quality.title)
-        case .pill:
+        case .pill, .scrubberAtmos:
             if interactive {
                 Button {
                     // Disable the system presentation slide-up; the card animates from center.
@@ -40,15 +45,23 @@ struct AudioQualityLabelView: View {
                         showDetail = true
                     }
                 } label: {
-                    pillContent
-                        .foregroundStyle(foreground)
-                        .padding(.horizontal, compact ? 7 : 10)
-                        .padding(.vertical, compact ? 4 : 6)
-                        .background {
-                            RoundedRectangle(cornerRadius: 7, style: .continuous)
-                                .fill(foreground.opacity(compact ? 0.16 : (usesGlass ? 0.18 : 0.22)))
-                        }
-                        .contentShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+                    if style == .scrubberAtmos {
+                        atmosWordmark
+                            .frame(minHeight: 22)
+                            .contentShape(Rectangle())
+                    } else {
+                        pillContent
+                            .foregroundStyle(foreground)
+                            .padding(.horizontal, compact ? 7 : 10)
+                            .padding(.vertical, compact ? 4 : 6)
+                            .background {
+                                if showsChipBackground {
+                                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                        .fill(foreground.opacity(compact ? 0.16 : (usesGlass ? 0.18 : 0.22)))
+                                }
+                            }
+                            .contentShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+                    }
                 }
                 .buttonStyle(.plain)
                 #if os(iOS)
@@ -61,11 +74,24 @@ struct AudioQualityLabelView: View {
                     MacAudioQualityPopover(quality: quality, isPresented: $showDetail)
                 }
                 #endif
+            } else if style == .scrubberAtmos {
+                atmosWordmark
             } else {
                 pillContent
                     .foregroundStyle(foreground)
             }
         }
+    }
+
+    private var atmosWordmark: some View {
+        HStack(spacing: 3) {
+            AudioFormatSymbol(quality: quality, height: 12)
+            Text(quality.title)
+                .font(.system(size: 16, weight: .medium))
+                .lineLimit(1)
+        }
+        .foregroundStyle(foreground.opacity(0.78))
+        .fixedSize(horizontal: true, vertical: false)
     }
 
     @ViewBuilder
@@ -222,9 +248,10 @@ private struct AudioQualityDetailOverlay: View {
 
                 Button {
                     #if os(iOS)
-                    if let url = URL(string: UIApplication.openSettingsURLString) {
-                        UIApplication.shared.open(url)
-                    }
+                    // Leave the player and open Luma's own Audio Quality screen,
+                    // not the system Settings app.
+                    NotificationCenter.default.post(name: .lumaOpenAudioQualitySettings, object: nil)
+                    dismiss()
                     #elseif os(macOS)
                     NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
                     #endif

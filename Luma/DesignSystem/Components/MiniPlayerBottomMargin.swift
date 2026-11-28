@@ -10,8 +10,10 @@ import SwiftUI
 private struct MiniPlayerBottomMargin: ViewModifier {
     func body(content: Content) -> some View {
         #if os(macOS)
+        // RootViewMacOS owns the single 73 pt player reserve through
+        // safeAreaInset. Adding the legacy 120 pt content margin here doubled
+        // the empty band under every list and pushed the last row too high.
         content
-            .contentMargins(.bottom, LumaMacOSLayout.playerBarReservedHeight, for: .scrollContent)
             .lumaSoftBottomScrollEdge()
         #else
         content

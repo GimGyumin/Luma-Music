@@ -60,7 +60,7 @@ nonisolated struct LibraryPreparationProgress: Sendable, Equatable {
     }
 }
 
-#if os(iOS)
+#if os(iOS) && !targetEnvironment(macCatalyst)
 import ActivityKit
 
 /// Live Activity shown while the library is being updated (indexing + album artwork).

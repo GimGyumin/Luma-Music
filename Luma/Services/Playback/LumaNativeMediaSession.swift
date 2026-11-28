@@ -1,4 +1,7 @@
-#if os(iOS)
+// `NowPlaying` and MediaSession are iOS 27 APIs. Mac Catalyst also satisfies
+// `os(iOS)`, but the framework is not available to that target, so keep this
+// session out of Catalyst/macOS builds.
+#if os(iOS) && !targetEnvironment(macCatalyst)
 import AppIntents
 import Foundation
 import MediaPlayer
@@ -70,6 +73,19 @@ final class LumaNativeMediaSession: @MainActor MediaSessionRepresentable {
         return result
     }
 
+    static func artworkCGImage(_ artwork: MPMediaItemArtwork, requestedSize: CGSize) -> CGImage? {
+        let validSize = requestedSize.width.isFinite && requestedSize.height.isFinite
+            && requestedSize.width > 0 && requestedSize.height > 0
+        guard let image = artwork.image(at: validSize ? requestedSize : artwork.bounds.size) else { return nil }
+        if image.imageOrientation == .up, let cgImage = image.cgImage { return cgImage }
+        guard image.size.width > 0, image.size.height > 0 else { return nil }
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        return UIGraphicsImageRenderer(size: image.size, format: format).image { _ in
+            image.draw(in: CGRect(origin: .zero, size: image.size))
+        }.cgImage
+    }
+
     func apply(_ value: [String: Any]?) {
         metadata = value
         guard let value, let title = value[MPMediaItemPropertyTitle] as? String else {
@@ -102,8 +118,10 @@ final class LumaNativeMediaSession: @MainActor MediaSessionRepresentable {
             contentKey = key
             let nativeArtwork = artwork.map { legacy in
                 Artwork(id: canonical + ":" + String(describing: ObjectIdentifier(legacy))) { requestedSize in
-                    let image = await MainActor.run { legacy.image(at: requestedSize) }
-                    guard let cgImage = image?.cgImage else { throw ArtworkRepresentation.ArtworkRepresentationError.noRepresentationAvailable }
+                    let cgImage = await MainActor.run {
+                        Self.artworkCGImage(legacy, requestedSize: requestedSize)
+                    }
+                    guard let cgImage else { throw ArtworkRepresentation.ArtworkRepresentationError.noRepresentationAvailable }
                     return try ArtworkRepresentation(cgImage: cgImage)
                 }
             }

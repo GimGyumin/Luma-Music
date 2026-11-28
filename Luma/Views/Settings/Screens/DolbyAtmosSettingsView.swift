@@ -24,14 +24,25 @@ struct DolbyAtmosSettingsView: View {
     var body: some View {
         Form {
             Section {
-                Toggle(isOn: Binding(
-                    get: { settings.preferDolbyAtmos },
-                    set: {
-                        settings.preferDolbyAtmos = $0
+                ForEach(SettingsOnOffChoice.allCases, id: \.self) { choice in
+                    Button {
+                        settings.preferDolbyAtmos = choice == .on
                         Task { await container?.playerService.playbackVariantSettingsDidChange() }
+                    } label: {
+                        HStack {
+                            Text(choice.choiceTitle).foregroundStyle(.primary)
+                            Spacer()
+                            Image(systemName: "checkmark")
+                                .font(.body.weight(.semibold))
+                                .foregroundStyle(LumaColors.controlAccent)
+                                .opacity(SettingsOnOffChoice(settings.preferDolbyAtmos) == choice ? 1 : 0)
+                                .accessibilityHidden(true)
+                        }
+                        .frame(minHeight: 36)
+                        .contentShape(Rectangle())
                     }
-                )) {
-                    Text("Prefer Dolby Atmos")
+                    .buttonStyle(.plain)
+                    .accessibilityAddTraits(SettingsOnOffChoice(settings.preferDolbyAtmos) == choice ? [.isSelected] : [])
                 }
             } footer: {
                 SettingsSectionFooter("When enabled, plays a matching Dolby Atmos version from your server while keeping the original song title, artwork, and album information. If no reliable match is available, plays the original song. Changes apply to the next song.\n\nSpatial playback depends on the source file and connected audio device.")

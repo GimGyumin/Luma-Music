@@ -287,6 +287,7 @@ extension PlayerService {
                 guard await commitPresentation(context, { state in
                     state.position = 0
                     state.pendingSeekPosition = nil
+                    state.trackRestartRevision &+= 1
                     state.playbackState = .loading
                     return true
                 }) else { return }
@@ -511,6 +512,7 @@ extension PlayerService {
         if isAudible { currentPlaySegmentStart = Date() }
 
         guard await commitPresentation(bridgedContext, { state in
+            if state.currentTrack?.id == next.id { state.trackRestartRevision &+= 1 }
             state.currentTrack = next
             state.currentPlaybackTrack = nextSource.playbackSong
             state.currentIndex = nextIndex

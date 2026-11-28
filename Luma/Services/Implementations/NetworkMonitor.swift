@@ -30,7 +30,6 @@ nonisolated final class NetworkMonitor: Sendable {
             Task { @MainActor in
                 guard serverState.playbackNetworkPath != snapshot else { return }
                 serverState.playbackNetworkPath = snapshot
-                serverState.measuredBytesPerSecond = nil
                 serverState.isOnline = online
                 serverState.isExpensive = expensive
                 serverState.isCellularConnection = cellular

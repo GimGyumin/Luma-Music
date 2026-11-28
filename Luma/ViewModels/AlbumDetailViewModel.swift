@@ -26,6 +26,12 @@ final class AlbumDetailViewModel {
     var songs: [DisplayableSong] = []
     private var localAtmosIDs: Set<String> = []
     @ObservationIgnored private var localAtmosCheck = 0
+    /// Album headers call audio quality and Atmos-ID helpers from multiple body
+    /// sections. Cache the per-song preferred variants until the displayed song
+    /// list changes, instead of resolving every song on every render.
+    @ObservationIgnored private var cachedAtmosSignature: [String] = []
+    @ObservationIgnored private var cachedAtmosAlternatives: [DisplayableSong] = []
+    @ObservationIgnored private var cachedAtmosServerId: UUID?
 
     var audioQualities: [AudioQualityKind] { audioQualities(for: songs) }
 
@@ -36,18 +42,38 @@ final class AlbumDetailViewModel {
         }
         let canStream = serverState.isOnline
             && streamingSettings?.allowsRemoteDolbyAtmos(isCellular: serverState.isCellularConnection) == true
-        let alternatives = displayedSongs.compactMap { song -> DisplayableSong? in
-            guard let candidate = libraryIndex?.preferredAtmosSong(for: song, serverId: serverId),
-                  canStream || localAtmosIDs.contains(candidate.id) else { return nil }
-            return candidate
-        }
+        let alternatives = atmosAlternatives(for: displayedSongs, serverId: serverId)
+            .filter { canStream || localAtmosIDs.contains($0.id) }
         return AudioQualityClassifier.albumQualities(in: displayedSongs + alternatives)
     }
     func atmosAlternativeIDs(for displayedSongs: [DisplayableSong]) -> [String] {
         guard let serverId = serverState.activeServer?.id else { return [] }
-        return Array(Set(displayedSongs.compactMap {
-            libraryIndex?.preferredAtmosSong(for: $0, serverId: serverId)?.id
-        })).sorted()
+        return Array(Set(atmosAlternatives(for: displayedSongs, serverId: serverId).map(\.id))).sorted()
+    }
+
+    private func atmosAlternatives(
+        for displayedSongs: [DisplayableSong],
+        serverId: UUID
+    ) -> [DisplayableSong] {
+        let signature = displayedSongs.map(\.id)
+        if signature == cachedAtmosSignature, serverId == cachedAtmosServerId {
+            return cachedAtmosAlternatives
+        }
+        let alternatives = displayedSongs.compactMap {
+            libraryIndex?.preferredAtmosSong(for: $0, serverId: serverId)
+        }
+        cachedAtmosSignature = signature
+        cachedAtmosAlternatives = alternatives
+        cachedAtmosServerId = serverId
+        return alternatives
+    }
+
+    /// A new album payload can change variant metadata without changing song IDs.
+    /// Drop the cache at payload boundaries so the next header read resolves it again.
+    private func invalidateAtmosAlternatives() {
+        cachedAtmosSignature = []
+        cachedAtmosAlternatives = []
+        cachedAtmosServerId = nil
     }
 
     func refreshLocalAtmosAvailability(for displayedSongs: [DisplayableSong]) async {
@@ -91,6 +117,21 @@ final class AlbumDetailViewModel {
     private let serverState: ServerState
     private let libraryIndex: LibraryIndexService?
     private let streamingSettings: StreamingSettings?
+    nonisolated struct LoadKey: Equatable, Sendable {
+        let identity: ServerRequestIdentity?
+        let isOnline: Bool
+        let isReachable: Bool
+
+        @MainActor init(_ state: ServerState) {
+            identity = state.activeServer.flatMap { try? state.requestIdentity(for: $0.id) }
+            isOnline = state.isOnline
+            isReachable = state.isServerReachable
+        }
+    }
+
+    @ObservationIgnored private var downloadBadgeRevision = 0
+    @ObservationIgnored private var activeLoadKey: LoadKey?
+    @ObservationIgnored private var completedLoadKey: LoadKey?
     @ObservationIgnored private var loadGeneration = 0
     @ObservationIgnored private var needsPresentationReload = false
     @ObservationIgnored private var presentationSuspended = false
@@ -100,15 +141,19 @@ final class AlbumDetailViewModel {
     /// loading flags here: leave the outgoing image exactly as it was.
     func suspendPendingLoad() {
         presentationSuspended = true
-        needsPresentationReload = needsPresentationReload || isLoading || isLoadingMoreAlbums
+        needsPresentationReload = needsPresentationReload || activeLoadKey != nil
+        activeLoadKey = nil
         loadGeneration &+= 1
     }
 
     func resumePendingLoadIfNeeded() async {
         guard !Task.isCancelled else { return }
         presentationSuspended = false
-        guard needsPresentationReload else { return }
-        await load()
+        if needsPresentationReload {
+            await load()
+        } else {
+            await loadIfNeeded()
+        }
     }
 
     init(
@@ -129,93 +174,172 @@ final class AlbumDetailViewModel {
         self.streamingSettings = streamingSettings
     }
 
+    func loadIfNeeded() async {
+        let key = LoadKey(serverState)
+        guard key != completedLoadKey else { return }
+        await load()
+    }
+
     func load() async {
-        guard !Task.isCancelled, !presentationSuspended else { return }
+        let key = LoadKey(serverState)
+        guard !Task.isCancelled, !presentationSuspended, activeLoadKey != key else { return }
         needsPresentationReload = false
+        activeLoadKey = key
+        completedLoadKey = nil
         let generation = loadGeneration + 1
         loadGeneration = generation
         isLoading = true
-        // Refreshes keep the already-published album visible. Optional enrichment or a
-        // cancelled navigation task must not turn a usable page back into a loading cover.
         error = nil
-        if serverState.isOnline {
-            // A local album may contain only downloaded tracks. Publish it only as an
-            // offline/failure fallback, never as the initial online catalog snapshot.
-            await loadFromAPI(generation: generation)
+        defer {
+            if generation == loadGeneration {
+                activeLoadKey = nil
+                isLoading = false
+                if !Task.isCancelled, key == LoadKey(serverState), isPrimaryContentReady, error == nil,
+                   !key.isOnline || !isOffline {
+                    completedLoadKey = key
+                }
+            }
+        }
+
+        if key.isOnline {
+            await loadFromAPI(generation: generation, key: key)
         } else {
             isOffline = true
-            _ = await loadFromLocal()
+            if !(await loadFromLocal(generation: generation, key: key)),
+               isCurrentLoad(generation, key: key), !isPrimaryContentReady {
+                error = .unexpected
+            }
         }
-        guard generation == loadGeneration else { return }
-        let downloading = await downloadService.isDownloadingAlbum(displayAlbumID)
-        guard generation == loadGeneration else { return }
+
+        guard isCurrentLoad(generation, key: key) else { return }
         isLoading = false
+        let badgeRevision = downloadBadgeRevision
+        let downloading = await downloadService.isDownloadingAlbum(displayAlbumID)
+        guard isCurrentLoad(generation, key: key), badgeRevision == downloadBadgeRevision else { return }
         isDownloadingAlbum = downloading
     }
 
-    private func loadFromAPI(generation: Int) async {
+    private func isCurrentLoad(_ generation: Int, key: LoadKey) -> Bool {
+        generation == loadGeneration && !Task.isCancelled && key == LoadKey(serverState)
+    }
+
+    private func loadFromAPI(generation: Int, key: LoadKey) async {
         do {
-            let apiAlbum = try await libraryService.displayAlbum(id: albumId)
-            guard generation == loadGeneration, !Task.isCancelled else { return }
+            guard let serverId = key.identity?.serverID else { throw LumaError.serverNotConfigured }
+
+            // Publish the base album before the display-composition pass. `displayAlbum`
+            // also resolves the artist and every paired Atmos album, which is useful but
+            // must not gate the first track list (and the page transition/lyrics clock)
+            // behind an otherwise unrelated network waterfall.
+            let baseAlbum = try await libraryService.album(id: albumId)
+            guard isCurrentLoad(generation, key: key) else { return }
             // Empty-success guard: behind a captive proxy / Cloudflare-WARP edge the server
             // is reachable but answers 200 with no songs. That never throws, so the catch
             // below can't help — treat an empty result exactly like a failure and prefer the
             // downloaded copy before clobbering the UI with an empty state.
-            if (apiAlbum.song ?? []).isEmpty, await loadFromLocal() { return }
-            guard generation == loadGeneration, !Task.isCancelled else { return }
-            loadedAlbum = apiAlbum
-            guard let serverId = serverState.activeServer?.id else { return }
-            let downloadedIds = await downloadService.downloadedSongIds(serverId: serverId)
-            let prepared = try await DisplayableSong.prepare(
-                apiAlbum.song ?? [], downloadedIDs: downloadedIds,
-                fallbackCoverArtID: apiAlbum.coverArt, sortedBy: Self.albumTrackOrder
-            )
-            guard generation == loadGeneration, !Task.isCancelled, serverState.activeServer?.id == serverId else { return }
-            albumName = apiAlbum.name
-            artistName = apiAlbum.artist
-            year = apiAlbum.year
-            genre = apiAlbum.genre
-            releaseDate = apiAlbum.releaseDate ?? apiAlbum.originalReleaseDate
-            recordLabels = (apiAlbum.recordLabels ?? []).compactMap { label in
-                let name = label.name.trimmingCharacters(in: .whitespacesAndNewlines)
-                return name.isEmpty ? nil : name
-            }
-            trackCopyright = Self.findTrackCopyright((apiAlbum.song ?? []).map(\.comment))
-            totalDurationSeconds = apiAlbum.duration
-            songCount = apiAlbum.songCount
-            coverArtId = apiAlbum.coverArt
-            artistId = apiAlbum.artistId
-            songs = prepared
-            isOffline = false
-            isPrimaryContentReady = true
+            if (baseAlbum.song ?? []).isEmpty, await loadFromLocal(generation: generation, key: key) { return }
+            guard isCurrentLoad(generation, key: key) else { return }
+            try await applyAlbumPayload(baseAlbum, generation: generation, key: key)
+            guard isCurrentLoad(generation, key: key) else { return }
 
+            // Enrich with variant-exclusive tracks after the base page is on screen.
+            // The cache makes the repeated `album(id:)` lookup cheap; only the artist
+            // and variant requests remain, and they no longer delay the first frame.
+            // A normal album with no known Atmos sibling skips the artist round trip
+            // entirely; the local index already tells us whether composition is useful.
+            let indexedVariants = libraryIndex?.variantAlbums(for: baseAlbum) ?? []
+            let shouldResolveVariants = AtmosAlbumPolicy.isAtmos(baseAlbum.name)
+                || !indexedVariants.isEmpty
+            if shouldResolveVariants, baseAlbum.artistId != nil,
+               let displayAlbum = try? await libraryService.displayAlbum(id: albumId),
+               isCurrentLoad(generation, key: key),
+               !hasSameTrackList(displayAlbum, baseAlbum) {
+                try? await applyAlbumPayload(displayAlbum, generation: generation, key: key)
+            }
+            guard isCurrentLoad(generation, key: key) else { return }
+
+            // Local file validation and whole-library download reconciliation must not gate album display.
+            async let downloadTask: Void = refreshDownloadBadges(serverId: serverId, generation: generation, key: key)
             // Footer credits and More By do not depend on the editorial description.
             // Let them publish even while albumInfo or a description provider is slow.
             async let moreByTask: Void = loadMoreAlbumsByArtist(generation: generation)
             async let recordLabelTask: Void = enrichRecordLabelIfNeeded(generation: generation)
-            async let copyrightTask: Void = loadNativeCopyrightIfNeeded(album: apiAlbum, generation: generation)
+            async let copyrightTask: Void = loadNativeCopyrightIfNeeded(album: baseAlbum, generation: generation)
 
             let albumInfo = try? await libraryService.albumInfo(id: albumId)
-            guard generation == loadGeneration, !Task.isCancelled else { return }
+            guard isCurrentLoad(generation, key: key) else { return }
             albumDescription = Self.resolveAlbumDescription(
                 infoNotes: albumInfo?.notes,
-                songs: apiAlbum.song ?? []
+                songs: baseAlbum.song ?? []
             )
             await enrichDescriptionIfNeeded(musicBrainzId: albumInfo?.musicBrainzId, generation: generation)
             await recordLabelTask
             await copyrightTask
             await moreByTask
-        } catch is CancellationError {
-            return
+            await downloadTask
         } catch {
-            guard generation == loadGeneration, !Task.isCancelled else { return }
-            if UserFacingError.isCancellation(error) { return }
+            guard isCurrentLoad(generation, key: key) else { return }
+            if UserFacingError.isCancellation(error) {
+                if !isPrimaryContentReady { self.error = .unexpected }
+                return
+            }
             // Server unreachable (airplane mode with stale isOnline, VPN-satisfied path,
             // server down): fall back to the downloaded copy before surfacing an error.
-            if await loadFromLocal() { return }
-            guard generation == loadGeneration, !Task.isCancelled else { return }
+            if await loadFromLocal(generation: generation, key: key) { return }
+            guard isCurrentLoad(generation, key: key) else { return }
             self.error = UserFacingError.from(error)
         }
+    }
+
+    /// Applies a raw or display-composed album payload. Only one value snapshot crosses
+    /// to the main actor; song normalization stays in `DisplayableSong.prepare`'s worker.
+    private func applyAlbumPayload(
+        _ album: AlbumID3,
+        generation: Int,
+        key: LoadKey
+    ) async throws {
+        let prepared = try await DisplayableSong.prepare(
+            album.song ?? [],
+            downloadedIDs: Set(songs.lazy.filter(\.isDownloaded).map(\.id)),
+            fallbackCoverArtID: album.coverArt,
+            sortedBy: Self.albumTrackOrder
+        )
+        guard isCurrentLoad(generation, key: key) else { return }
+        loadedAlbum = album
+        albumName = album.name
+        artistName = album.artist
+        year = album.year
+        genre = album.genre
+        releaseDate = album.releaseDate ?? album.originalReleaseDate
+        recordLabels = (album.recordLabels ?? []).compactMap { label in
+            let name = label.name.trimmingCharacters(in: .whitespacesAndNewlines)
+            return name.isEmpty ? nil : name
+        }
+        trackCopyright = Self.findTrackCopyright((album.song ?? []).map(\.comment))
+        totalDurationSeconds = album.duration
+        songCount = album.songCount
+        coverArtId = album.coverArt
+        artistId = album.artistId
+        songs = prepared
+        invalidateAtmosAlternatives()
+        isOffline = false
+        isPrimaryContentReady = true
+        isLoading = false
+    }
+
+    private func hasSameTrackList(_ lhs: AlbumID3, _ rhs: AlbumID3) -> Bool {
+        guard lhs.id == rhs.id else { return false }
+        let left = (lhs.song ?? []).map(\.id)
+        let right = (rhs.song ?? []).map(\.id)
+        return left == right
+    }
+
+    private func refreshDownloadBadges(serverId: UUID, generation: Int, key: LoadKey) async {
+        let badgeRevision = downloadBadgeRevision
+        let ids = await downloadService.downloadedSongIds(serverId: serverId)
+        guard isCurrentLoad(generation, key: key), badgeRevision == downloadBadgeRevision,
+              songs.contains(where: { $0.isDownloaded != ids.contains($0.id) }) else { return }
+        songs = songs.map { $0.withDownloaded(ids.contains($0.id)) }
     }
 
     // Compatibility entry points; parsing has no UI, service or actor dependencies.
@@ -322,9 +446,8 @@ final class AlbumDetailViewModel {
         }
     }
 
-    func loadMoreAlbumsByArtist(generation: Int? = nil) async {
+    private func loadMoreAlbumsByArtist(generation: Int) async {
         guard !presentationSuspended, !Task.isCancelled else { return }
-        let generation = generation ?? loadGeneration
         guard let artistId, !artistId.isEmpty else {
             otherAlbumVersions = []
             moreAlbumsByArtist = []
@@ -370,17 +493,16 @@ final class AlbumDetailViewModel {
     /// Sets isOffline only on success — a transient online failure must not flip
     /// the UI into offline mode while songs from a previous load are still shown.
     @discardableResult
-    private func loadFromLocal() async -> Bool {
-        let generation = loadGeneration
-        guard let serverId = serverState.activeServer?.id,
+    private func loadFromLocal(generation: Int, key: LoadKey) async -> Bool {
+        guard let serverId = key.identity?.serverID,
               let data = await downloadService.localAlbumData(albumId: displayAlbumID, serverId: serverId),
-              generation == loadGeneration, !Task.isCancelled,
-              serverId == serverState.activeServer?.id, !data.songs.isEmpty else { return false }
+              isCurrentLoad(generation, key: key), !data.songs.isEmpty else { return false }
         albumName = data.albumName
         artistName = data.artistName
         coverArtId = data.coverArtId
         songCount = data.songs.count
         songs = data.songs
+        invalidateAtmosAlternatives()
         // Downloaded tracks preserve their ID3 comments even though LocalAlbumData
         // has no album-level label field. Also clear a previous credit if absent.
         trackCopyright = Self.findTrackCopyright(data.songs.map(\.comment))
@@ -402,8 +524,12 @@ final class AlbumDetailViewModel {
 
     func downloadAlbum() async {
         guard let album = loadedAlbum, let serverId = serverState.activeServer?.id else { return }
+        downloadBadgeRevision &+= 1
         isDownloadingAlbum = true
-        defer { isDownloadingAlbum = false }
+        defer {
+            isDownloadingAlbum = false
+            downloadBadgeRevision &+= 1
+        }
         do {
             try await downloadService.download(album: album, serverId: serverId)
         } catch {
@@ -417,6 +543,8 @@ final class AlbumDetailViewModel {
 
     func cancelAlbumDownload() async {
         guard let serverId = serverState.activeServer?.id else { return }
+        downloadBadgeRevision &+= 1
+        defer { downloadBadgeRevision &+= 1 }
         if let id = loadedAlbum?.id { await downloadService.cancelAlbumDownload(albumId: id, serverId: serverId) }
         for song in songs {
             await downloadService.cancelDownload(songId: song.id, serverId: serverId)
@@ -427,8 +555,12 @@ final class AlbumDetailViewModel {
     func downloadSong(id: String) async {
         guard let song = loadedAlbum?.song?.first(where: { $0.id == id }),
               let serverId = serverState.activeServer?.id else { return }
+        downloadBadgeRevision &+= 1
         downloadingIds.insert(id)
-        defer { downloadingIds.remove(id) }
+        defer {
+            downloadingIds.remove(id)
+            downloadBadgeRevision &+= 1
+        }
         do {
             try await downloadService.download(song: song, serverId: serverId)
         } catch {
@@ -447,8 +579,12 @@ final class AlbumDetailViewModel {
         let downloadedIds = Set(songs.filter { $0.isDownloaded }.map(\.id))
         let missing = allSongs.filter { !downloadedIds.contains($0.id) }
         guard !missing.isEmpty else { return }
+        downloadBadgeRevision &+= 1
         isDownloadingAlbum = true
-        defer { isDownloadingAlbum = false }
+        defer {
+            isDownloadingAlbum = false
+            downloadBadgeRevision &+= 1
+        }
         var anyFailed = false
         for song in missing {
             do {
@@ -466,6 +602,8 @@ final class AlbumDetailViewModel {
 
     func deleteDownload() async {
         guard let serverId = serverState.activeServer?.id else { return }
+        downloadBadgeRevision &+= 1
+        defer { downloadBadgeRevision &+= 1 }
         try? await downloadService.remove(albumId: displayAlbumID, serverId: serverId)
         songs = songs.map { $0.withDownloaded(false) }
     }

@@ -32,11 +32,11 @@ extension PlaylistDetailView {
                     ShareLink(item: playlistShareText(songCount: resolvedSongs(viewModel).count))
                     Button {
                         Task { await container?.playerService.playNext(resolvedSongs(viewModel)) }
-                    } label: { Label("Play Next", systemImage: "text.line.first.and.arrowtriangle.forward") }
+                    } label: { DestinationMenuLabel.playNext(after: container?.playerState.currentTrack?.title) }
                     .disabled(resolvedSongs(viewModel).isEmpty)
                     Button {
                         Task { await container?.playerService.addToQueue(resolvedSongs(viewModel)) }
-                    } label: { Label("Add to Queue", systemImage: "text.line.last.and.arrowtriangle.forward") }
+                    } label: { DestinationMenuLabel.addToQueue(systemImage: "text.line.last.and.arrowtriangle.forward") }
                     .disabled(resolvedSongs(viewModel).isEmpty)
                 } label: { navBarIcon("ellipsis") }
                 .accessibilityLabel("More options")
@@ -97,7 +97,6 @@ extension PlaylistDetailView {
         let songs = resolvedSongs(viewModel)
         let isOnline = container?.serverState.isOnline == true
         let pinned = container?.pinService.isPinned(itemType: .playlist, itemId: playlistId) == true
-        let nowPlayingTitle = container?.playerState.currentTrack?.title
         Menu {
             ControlGroup {
                 if let vm = viewModel, vm.isOffline != true { playlistDownloadMenuButtons(vm: vm) }
@@ -182,21 +181,14 @@ extension PlaylistDetailView {
             Button {
                 Task { await container?.playerService.playNext(songs) }
             } label: {
-                Label(String(localized: "Play Next", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale), systemImage: "text.line.first.and.arrowtriangle.forward")
+                DestinationMenuLabel.playNext(after: container?.playerState.currentTrack?.title)
             }
             .disabled(songs.isEmpty)
 
             Button {
                 Task { await container?.playerService.addToQueue(songs) }
             } label: {
-                if let nowPlayingTitle, !nowPlayingTitle.isEmpty {
-                    Label(
-                        String(format: String(localized: "Play Later: %@", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale), nowPlayingTitle),
-                        systemImage: "text.line.last.and.arrowtriangle.forward"
-                    )
-                } else {
-                    Label(String(localized: "Add to Queue", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale), systemImage: "text.line.last.and.arrowtriangle.forward")
-                }
+                DestinationMenuLabel.addToQueue(systemImage: "text.line.last.and.arrowtriangle.forward")
             }
             .disabled(songs.isEmpty)
 

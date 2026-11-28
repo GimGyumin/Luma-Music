@@ -47,6 +47,9 @@ struct CoverArtView: View {
     /// full-bleed landscape sleeve, where the square cover is cropped to the
     /// viewport height instead of being letterboxed into a centered square.
     var fillsFrame: Bool = false
+    /// When set, the placeholder and the resolved image fade in at separate stages.
+    var reveal: CoverArtReveal? = nil
+    var placeholderTint: Color? = nil
 
     var body: some View {
         // No artworkCache read here — see guard comment above.
@@ -61,9 +64,18 @@ struct CoverArtView: View {
             initialImage: initialImage,
             contentMode: contentMode,
             loadingEnabled: loadingEnabled,
-            fillsFrame: fillsFrame
+            fillsFrame: fillsFrame,
+            reveal: reveal,
+            placeholderTint: placeholderTint
         )
     }
+}
+
+struct CoverArtReveal {
+    let placeholder: Color
+    let visible: Bool
+    let placeholderAnimation: Animation
+    let artworkAnimation: Animation
 }
 
 // MARK: - Content
@@ -77,7 +89,10 @@ private struct CoverArtViewContent: View {
     let contentMode: ContentMode
     let loadingEnabled: Bool
     let fillsFrame: Bool
+    let reveal: CoverArtReveal?
+    let placeholderTint: Color?
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.appContainer) private var container
     @Environment(ArtworkImageCache.self) private var artworkCache: ArtworkImageCache?
     /// Global cover-refresh counter (UserDefaults-backed → reliably observed, no @Observable-in-body / optional-
@@ -89,8 +104,11 @@ private struct CoverArtViewContent: View {
     /// The id whose image `cachedImage` currently represents. A new cover id immediately
     /// hides the old image while its replacement is resolved.
     @State private var displayedId: String?
+    @State private var pendingAppearance: (id: String, color: Color)?
+    @State private var unavailableId: String?
+    @State private var fadesInArtwork = false
 
-    init(id: String, size: Int?, tier: ArtworkTier?, cornerRadius: CGFloat, placeholderSystemImage: String, initialImage: PlatformImage?, contentMode: ContentMode = .fill, loadingEnabled: Bool = true, fillsFrame: Bool = false) {
+    init(id: String, size: Int?, tier: ArtworkTier?, cornerRadius: CGFloat, placeholderSystemImage: String, initialImage: PlatformImage?, contentMode: ContentMode = .fill, loadingEnabled: Bool, fillsFrame: Bool, reveal: CoverArtReveal?, placeholderTint: Color?) {
         self.id = id
         self.size = size
         self.tier = tier
@@ -99,6 +117,8 @@ private struct CoverArtViewContent: View {
         self.contentMode = contentMode
         self.loadingEnabled = loadingEnabled
         self.fillsFrame = fillsFrame
+        self.reveal = reveal
+        self.placeholderTint = placeholderTint
         _cachedImage = State(initialValue: initialImage)
         // A caller-provided image is its best guess for THIS id, so mark it displayed for `id`:
         // it is upgraded by the load step online, but kept (not cleared) when offline.
@@ -110,15 +130,25 @@ private struct CoverArtViewContent: View {
     }
 
     var body: some View {
+        let image = reveal?.visible != false && displayedId == id ? cachedImage : nil
         ZStack {
-            if displayedId == id, let cached = cachedImage {
-                Image(platformImage: cached)
-                    .resizable()
-                    .aspectRatio(contentMode: contentMode)
-            } else {
+            if let reveal {
+                (preparedPlaceholderColor ?? reveal.placeholder)
+                    .opacity(reveal.visible ? 1 : 0)
+                    .animation(reduceMotion ? nil : reveal.placeholderAnimation, value: reveal.visible)
+            } else if image == nil {
                 placeholder
             }
+            if let image {
+                Image(platformImage: image)
+                    .resizable()
+                    .aspectRatio(contentMode: contentMode)
+            }
         }
+        .animation(
+            reduceMotion ? nil : (reveal?.artworkAnimation ?? (fadesInArtwork ? LumaContentReveal.animation : nil)),
+            value: image != nil
+        )
         .frame(maxWidth: fillsFrame ? .infinity : nil,
                maxHeight: fillsFrame ? .infinity : nil)
         .clipped()
@@ -130,8 +160,9 @@ private struct CoverArtViewContent: View {
                 originalRevision &+= 1
             }
         }
-        .task(id: "\(loadingEnabled):\(id):\(resolvedTier.rawValue):\(coverArtUploadVersion):\(originalRevision):\(container?.serverState.isCellularConnection == true):\(container?.serverState.isOnline == true)") {
+        .task(id: "\(loadingEnabled):\(id):\(resolvedTier.rawValue):\(coverArtUploadVersion):\(originalRevision):\(container?.serverState.isCellularConnection == true):\(container?.serverState.artworkNetworkRevision ?? 0):\(container?.serverState.accountRevision ?? 0)") {
             guard loadingEnabled, let artworkCache else { return }
+            unavailableId = nil
             let t = resolvedTier
             let online = container?.serverState.isOnline ?? true
 
@@ -142,10 +173,14 @@ private struct CoverArtViewContent: View {
             //    closures are not tracked by @Observable, so this creates no observation on the
             //    global cache dictionary.
             let ram = artworkCache.cachedImage(for: id, tier: t)
-            if let ram { apply(ram, for: id) }
+            if let ram {
+                apply(ram, for: id)
+            } else if displayedId != id || cachedImage == nil {
+                pendingAppearance = artworkCache.preparedPalette(for: id).map { (id, $0.background) }
+            }
             if let local = await artworkCache.loadPlainDiskCover(coverArtId: id, tier: t) {
                 guard !Task.isCancelled else { return }
-                apply(local, for: id)
+                apply(local, for: id, animated: true)
                 return
             }
 
@@ -157,14 +192,14 @@ private struct CoverArtViewContent: View {
                     apply(ramThumb, for: id)
                 } else if let diskThumb = await artworkCache.load(coverArtId: id, tier: .thumb, allowNetwork: false) {
                     guard !Task.isCancelled else { return }
-                    apply(diskThumb, for: id)
+                    apply(diskThumb, for: id, animated: true)
                 }
             }
 
             // Resolve the requested tier before deciding whether a network upgrade is needed.
             if let local = await artworkCache.load(coverArtId: id, tier: t, allowNetwork: false) {
                 guard !Task.isCancelled else { return }
-                apply(local, for: id)
+                apply(local, for: id, animated: true)
                 return
             }
             // A thumbnail/initial image is only a first frame for a hero. Stopping here
@@ -173,9 +208,12 @@ private struct CoverArtViewContent: View {
 
             // 3. Tiered load (RAM → disk `{id}@{tier}` → optional network). Always go through the
             //    cache so disk decode is gated — never ungated ImageIO from this view.
-            if let image = await artworkCache.load(coverArtId: id, tier: t, allowNetwork: online) {
+            if let image = await artworkCache.loadVisibleArtwork(coverArtId: id, tier: t, allowNetwork: online) {
                 guard !Task.isCancelled else { return }
-                apply(image, for: id)
+                apply(image, for: id, animated: true)
+                if t == .thumb, placeholderTint != nil {
+                    await artworkCache.preparePlaceholderColor(for: id, from: image)
+                }
                 return
             }
 
@@ -186,7 +224,7 @@ private struct CoverArtViewContent: View {
             // 4. Legacy plain-`id` offline download file — gated decode via the shared cache.
             if let image = await artworkCache.loadPlainDiskCover(coverArtId: id, tier: t) {
                 guard !Task.isCancelled else { return }
-                apply(image, for: id)
+                apply(image, for: id, animated: true)
                 return
             }
             guard !Task.isCancelled else { return }
@@ -195,25 +233,31 @@ private struct CoverArtViewContent: View {
             // bypass shared coalescing, custom headers and the cellular restriction.
             cachedImage = nil
             displayedId = nil
+            unavailableId = id
         }
     }
 
     /// Atomically swaps in a resolved image and records the id it belongs to.
-    private func apply(_ image: PlatformImage, for resolvedId: String) {
+    private func apply(_ image: PlatformImage, for resolvedId: String, animated: Bool = false) {
+        if displayedId != resolvedId || cachedImage == nil {
+            fadesInArtwork = animated
+        }
         cachedImage = image
         displayedId = resolvedId
     }
 
+    private var preparedPlaceholderColor: Color? {
+        pendingAppearance?.id == id ? pendingAppearance?.color : nil
+    }
+
     private var placeholder: some View {
         ZStack {
-            LinearGradient(
-                colors: [LumaColors.accent.opacity(0.25), LumaColors.accent.opacity(0.08)],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-            Image(systemName: placeholderSystemImage)
-                .font(.title2)
-                .foregroundStyle(.secondary)
+            preparedPlaceholderColor ?? placeholderTint ?? Color.secondary.opacity(0.14)
+            if unavailableId == id && displayedId != id {
+                Image(systemName: placeholderSystemImage)
+                    .font(.title2)
+                    .foregroundStyle(.secondary)
+            }
         }
     }
 }

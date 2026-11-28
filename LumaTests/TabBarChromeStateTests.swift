@@ -1,45 +1,45 @@
 import Testing
 @testable import Luma
 
-@Suite("Tab bar chrome presentation")
+@Suite("Tab bar chrome transitions")
 @MainActor
 struct TabBarChromeStateTests {
-    @Test func albumPresentationPinsUntilThePageActuallyEnds() {
+    @Test func albumPresentationPinsOnlyUntilTheTransitionSettles() {
         let chrome = TabBarChromeState()
-        #expect(!chrome.isAlbumPresented)
-        chrome.beginAlbum(pageID: "album-a#1")
-        #expect(chrome.isAlbumPresented)
+        #expect(!chrome.isTransitioning)
+        chrome.beginTransition(pageID: "album-a#1")
+        #expect(chrome.isTransitioning)
         // Repeated appearance callbacks during an interactive swipe must not flicker.
-        chrome.beginAlbum(pageID: "album-a#1")
-        #expect(chrome.isAlbumPresented)
-        chrome.endAlbum(pageID: "album-a#1")
-        #expect(!chrome.isAlbumPresented)
+        chrome.beginTransition(pageID: "album-a#1")
+        #expect(chrome.isTransitioning)
+        chrome.endTransition(pageID: "album-a#1")
+        #expect(!chrome.isTransitioning)
     }
 
-    @Test func stackedAlbumPagesKeepTheChromeStableUntilTheLastOneEnds() {
+    @Test func stackedAlbumPagesKeepTheChromeStableUntilTheLastTransitionEnds() {
         let chrome = TabBarChromeState()
-        chrome.beginAlbum(pageID: "a")
-        chrome.beginAlbum(pageID: "b")
-        chrome.endAlbum(pageID: "a")
-        #expect(chrome.isAlbumPresented)
-        chrome.endAlbum(pageID: "b")
-        #expect(!chrome.isAlbumPresented)
+        chrome.beginTransition(pageID: "a")
+        chrome.beginTransition(pageID: "b")
+        chrome.endTransition(pageID: "a")
+        #expect(chrome.isTransitioning)
+        chrome.endTransition(pageID: "b")
+        #expect(!chrome.isTransitioning)
     }
 
-    @Test func thirtyAlbumZoomCyclesReleaseChromeEveryTime() {
+    @Test func thirtyTransitionCyclesReleaseChromeEveryTime() {
         let chrome = TabBarChromeState()
         for cycle in 0..<30 {
-            chrome.beginAlbum(pageID: "stress-\(cycle)")
-            #expect(chrome.isAlbumPresented)
-            chrome.endAlbum(pageID: "stress-\(cycle)")
-            #expect(!chrome.isAlbumPresented)
+            chrome.beginTransition(pageID: "stress-\(cycle)")
+            #expect(chrome.isTransitioning)
+            chrome.endTransition(pageID: "stress-\(cycle)")
+            #expect(!chrome.isTransitioning)
         }
     }
 
     @Test func unknownOrEmptyPagesCannotPinTheTabBar() {
         let chrome = TabBarChromeState()
-        chrome.beginAlbum(pageID: "")
-        chrome.endAlbum(pageID: "missing")
-        #expect(!chrome.isAlbumPresented)
+        chrome.beginTransition(pageID: "")
+        chrome.endTransition(pageID: "missing")
+        #expect(!chrome.isTransitioning)
     }
 }

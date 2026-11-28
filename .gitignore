@@ -19,6 +19,11 @@ DerivedData/
 # Local archives and scratch folders
 *.zip
 .cursor-tmp/
+.dd-zoom/
+
+# Local profiling / terminal output
+*.profraw
+nohup.out
 
 # Local Swift package build products
 Packages/**/.build/
@@ -31,11 +36,3 @@ GoogleService-Info.plist
 # Cloud test build products and artifacts
 .cloud-test/
 *.xctestrun
-
-# Internal development notes and audit artifacts (not shipped)
-.agents/
-skills-lock.json
-/docs/audits/
-/docs/fixes/
-/docs/ui/
-/docs/screenshots/

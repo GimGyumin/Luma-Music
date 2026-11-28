@@ -42,11 +42,16 @@ final class StreamingSettings {
         return format
     }
 
+    nonisolated static func effectiveStreamingPreference(_ format: CacheFormat, losslessEnabled: Bool) -> CacheFormat {
+        !losslessEnabled && format == .flacOriginal ? .aac256 : format
+    }
+
     var effectiveDownloadFormat: CacheFormat {
         Self.effectiveFormat(downloadFormat, losslessEnabled: losslessAudioEnabled)
     }
 
     var allowsWiFiLosslessUpgrade: Bool {
+        guard losslessAudioEnabled else { return false }
         let format = formatForCurrentNetwork(isLimited: false)
         return format == .matchStream || format == .flacOriginal
     }
@@ -182,10 +187,18 @@ final class StreamingSettings {
 
     /// Stream format for the active network. A limited (metered or constrained) link uses the
     /// cellular quality so a throttled Wi-Fi connection is not silently handed the original
-    /// bitstream. Lossless choices remain saved while the master switch temporarily caps
-    /// automatic/original delivery at AAC 256. Availability depends on the server's files.
+    /// bitstream. Automatic remains adaptive while the lossless switch is off.
     func formatForCurrentNetwork(isLimited: Bool) -> CacheFormat {
-        Self.effectiveFormat(isLimited ? cellularFormat : wifiFormat, losslessEnabled: losslessAudioEnabled)
+        Self.effectiveStreamingPreference(isLimited ? cellularFormat : wifiFormat, losslessEnabled: losslessAudioEnabled)
+    }
+
+    func adaptiveStreamingCeiling(isLimited: Bool) -> CacheFormat? {
+        let learned = currentAdaptiveCeiling(isLimited: isLimited)
+        guard !losslessAudioEnabled else { return learned }
+        if let learned, AdaptiveQualityPolicy.qualityRank(learned) < AdaptiveQualityPolicy.qualityRank(.aac256) {
+            return learned
+        }
+        return .aac256
     }
 
     func reloadFromDefaults() {

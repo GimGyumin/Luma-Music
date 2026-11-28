@@ -16,6 +16,7 @@ nonisolated private final class ArtworkPolicyProtocol: URLProtocol, @unchecked S
         var requests: [URLRequest] = []
         var payloads: [String: Data] = [:]
         var holdsResponse = false
+        var statuses: [Int] = []
     }
     static let record = Mutex(Record())
     private let delivery = Mutex<Task<Void, Never>?>(nil)
@@ -23,14 +24,18 @@ nonisolated private final class ArtworkPolicyProtocol: URLProtocol, @unchecked S
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
     override func startLoading() {
         guard let url = request.url else { return }
-        let data = Self.record.withLock { value in value.requests.append(request); return value.payloads[url.path] }
+        let (data, status) = Self.record.withLock { value in
+            value.requests.append(request)
+            let status = value.statuses.isEmpty ? 200 : value.statuses.removeFirst()
+            return (value.payloads[url.path], status)
+        }
         let task = Task { [weak self] in
             while Self.record.withLock({ $0.holdsResponse }) {
                 do { try await Task.sleep(for: .milliseconds(5)) } catch { return }
             }
             do { try await Task.sleep(for: .milliseconds(120)) } catch { return }
             guard let self, !Task.isCancelled, let data else { return }
-            let response = HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: ["Content-Type": "image/png"])!
+            let response = HTTPURLResponse(url: url, statusCode: status, httpVersion: nil, headerFields: ["Content-Type": "image/png"])!
             self.client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
             self.client?.urlProtocol(self, didLoad: data)
             self.client?.urlProtocolDidFinishLoading(self)
@@ -564,6 +569,33 @@ struct ArtworkDownloadPolicyTests {
         ArtworkPolicyProtocol.record.withLock { $0.holdsResponse = false }
         #expect(await f.cache.downloadOriginalAndCacheAsHero(coverArtId: "shared", cacheHero: false))
         #expect(ArtworkPolicyProtocol.record.withLock { $0.requests.count } == 2)
+    }
+
+    @Test func visibleCoverRecoversFromTemporaryServerFailure() async throws {
+        let f = try fixture()
+        defer { f.session.invalidateAndCancel(); try? FileManager.default.removeItem(at: f.root) }
+        ArtworkPolicyProtocol.record.withLock { $0.statuses = [503] }
+        #expect(await f.cache.loadVisibleArtwork(coverArtId: "shared", tier: .thumb) != nil)
+        #expect(ArtworkPolicyProtocol.record.withLock { $0.requests.count } == 2)
+    }
+
+    @Test func reconnectSkipsTemporaryFailureCooldown() async throws {
+        let f = try fixture()
+        defer { f.session.invalidateAndCancel(); try? FileManager.default.removeItem(at: f.root) }
+        ArtworkPolicyProtocol.record.withLock { $0.statuses = [503] }
+        #expect(await f.cache.load(coverArtId: "shared") == nil)
+        f.server.state.isServerReachable = false
+        f.server.state.isServerReachable = true
+        #expect(await f.cache.load(coverArtId: "shared") != nil)
+        #expect(ArtworkPolicyProtocol.record.withLock { $0.requests.count } == 2)
+    }
+
+    @Test func visibleCoverDoesNotRetryMissingArtworkImmediately() async throws {
+        let f = try fixture()
+        defer { f.session.invalidateAndCancel(); try? FileManager.default.removeItem(at: f.root) }
+        ArtworkPolicyProtocol.record.withLock { $0.statuses = [404] }
+        #expect(await f.cache.loadVisibleArtwork(coverArtId: "shared", tier: .thumb) == nil)
+        #expect(ArtworkPolicyProtocol.record.withLock { $0.requests.count } == 1)
     }
 
     @Test func returningToWiFiCanFetchImmediatelyAndRequestsEnforceThePolicy() async throws {

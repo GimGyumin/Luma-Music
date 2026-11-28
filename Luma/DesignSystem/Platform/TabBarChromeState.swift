@@ -1,22 +1,28 @@
 import SwiftUI
+import OSLog
 
-/// Single source of truth for chrome that must remain stable while an album detail
-/// page participates in a zoom transition. SwiftUI's `onScrollDown` tab-bar
-/// minimization can otherwise run during the push/pop transition and visibly
-/// re-show the bar for a frame.
+/// Chrome that must remain stable only while a detail page is participating in a
+/// navigation transition. The pin is held from the start of the appearance/disappearance
+/// transition until it settles — never for the page's whole lifetime.
+///
+/// Pinning for the lifetime is what made `.never` tab-bar minimization leak into other
+/// tabs: an album left in one tab's navigation stack kept the pin alive, so the mini
+/// player stayed expanded when scrolling anywhere else.
 @MainActor
 @Observable
 final class TabBarChromeState {
-    private(set) var albumPageIDs: Set<String> = []
+    private(set) var transitionPageIDs: Set<String> = []
 
-    var isAlbumPresented: Bool { !albumPageIDs.isEmpty }
+    var isTransitioning: Bool { !transitionPageIDs.isEmpty }
 
-    func beginAlbum(pageID: String) {
+    func beginTransition(pageID: String) {
         guard !pageID.isEmpty else { return }
-        albumPageIDs.insert(pageID)
+        transitionPageIDs.insert(pageID)
+        Logger.ui.debug("[CHROME] transition begin page=\(pageID, privacy: .public) pages=\(self.transitionPageIDs.count, privacy: .public)")
     }
 
-    func endAlbum(pageID: String) {
-        albumPageIDs.remove(pageID)
+    func endTransition(pageID: String) {
+        transitionPageIDs.remove(pageID)
+        Logger.ui.debug("[CHROME] transition end page=\(pageID, privacy: .public) pages=\(self.transitionPageIDs.count, privacy: .public)")
     }
 }

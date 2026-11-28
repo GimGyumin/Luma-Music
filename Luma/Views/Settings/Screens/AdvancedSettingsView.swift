@@ -13,6 +13,7 @@ struct AdvancedSettingsView: View {
     @State private var isClearingCache = false
     @State private var showClearCacheConfirm = false
     @State private var showResetSignInConfirm = false
+    @State private var showIntroduction = false
 
     var body: some View {
         Form {
@@ -31,6 +32,11 @@ struct AdvancedSettingsView: View {
             DeveloperLogsSection()
 
             Section {
+                SettingsActionRow("View Start Screen Again") {
+                    showIntroduction = true
+                }
+                .accessibilityIdentifier("advanced.replay-start-screen")
+
                 OnboardingReplayButton()
 
                 SettingsActionRow("Reset Sign-In Data", isDestructive: true) {
@@ -48,6 +54,16 @@ struct AdvancedSettingsView: View {
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
         #endif
+        .sheet(isPresented: $showIntroduction) {
+            LumaReleaseIntroductionView(isUpdate: false) {
+                showIntroduction = false
+            }
+            #if os(iOS)
+            .presentationDetents([.large])
+            #elseif os(macOS)
+            .frame(minWidth: 480, minHeight: 650)
+            #endif
+        }
         .confirmationDialog(
             "Clear all cached data?",
             isPresented: $showClearCacheConfirm,

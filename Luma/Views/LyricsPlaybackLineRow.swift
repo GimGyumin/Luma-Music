@@ -36,6 +36,7 @@ struct LyricsPlaybackLineRow: View {
     var alignment: HorizontalAlignment = .leading
     var textAlignment: TextAlignment = .leading
     var primaryFontSize: CGFloat = 36
+    var stageEmphasis: Bool = false
     var usesSpeakerLayout: Bool = false
     var horizontalInset: CGFloat = 32
     let onTap: () -> Void
@@ -58,7 +59,11 @@ struct LyricsPlaybackLineRow: View {
     private var resolvedFontSize: CGFloat { isSecondary ? primaryFontSize * 0.82 : primaryFontSize }
     private var secondaryLyricOpacity: Double { isCurrent ? 1 : 0.45 }
     private var speakerSideInset: CGFloat { usesSpeakerLayout ? 64 : 0 }
-    private var translationFontSize: CGFloat { max(18, resolvedFontSize * 0.52) }
+    private var translationFontSize: CGFloat {
+        // Docked lyrics use a 17 pt primary line, so keep its translation legible
+        // without making it larger than the line it belongs to.
+        max(primaryFontSize < 24 ? 12 : 18, resolvedFontSize * 0.52)
+    }
     private var pronunciationIsPrimary: Bool {
         prefersPronunciationAsPrimary
             && !pronunciationText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -72,28 +77,29 @@ struct LyricsPlaybackLineRow: View {
     }
     private var emphasisOpacity: Double {
         guard followsPlayback else { return 1 }
-        if viewModel.isUserScrolling { return isCurrent ? 1 : (isSecondary ? 0.30 : 0.38) }
-        if isSecondary { return isCurrent ? 0.82 : 0.38 }
+        if viewModel.isUserScrolling { return isCurrent ? 1 : (isSecondary ? 0.50 : 0.64) }
+        if isSecondary { return isCurrent ? 0.84 : 0.44 }
         if isCurrent { return 1 }
-        guard let currentLineIndex else { return 0.30 }
+        guard let currentLineIndex else { return 0.34 }
         switch abs(index - currentLineIndex) {
-        case 1: return index > currentLineIndex ? 0.38 : 0.30
-        case 2: return 0.28
+        case 1: return index > currentLineIndex ? 0.46 : 0.40
+        case 2: return 0.32
         default: return 0.24
         }
     }
     private var emphasisScale: CGFloat {
         guard followsPlayback, !viewModel.isUserScrolling, !reduceMotion else { return 1 }
+        if stageEmphasis { return isCurrent ? 1.06 : 0.965 }
         return isCurrent ? 1 : 0.985
     }
-    /// Only dormant, static text is blurred. The frame-driven active glyphs stay sharp.
+    /// Active glyphs stay sharp. Browsing restores legibility until follow mode resumes.
     private var emphasisBlur: CGFloat {
         guard followsPlayback, !viewModel.isUserScrolling, !isCurrent, let currentLineIndex else { return 0 }
-        if isSecondary { return 1.4 }
+        if isSecondary { return 1.5 }
         switch abs(index - currentLineIndex) {
-        case 1: return 2.4
-        case 2: return 3.2
-        default: return 4.0
+        case 1: return index < currentLineIndex ? 2.4 : 2.0
+        case 2: return 2.9
+        default: return 3.5
         }
     }
     private var lineMotionDuration: TimeInterval? {
@@ -158,7 +164,7 @@ struct LyricsPlaybackLineRow: View {
                 backgroundLine
             }
             .blur(radius: emphasisBlur)
-            .animation(nil, value: emphasisBlur)
+            .animation(reduceMotion || isCurrent ? nil : .easeOut(duration: 0.22), value: emphasisBlur)
             .opacity(emphasisOpacity)
             .scaleEffect(emphasisScale, anchor: scaleAnchor)
             .offset(y: isCurrent && !reduceMotion && !viewModel.isUserScrolling ? -2 : 0)
@@ -287,7 +293,6 @@ struct LyricsPlaybackLineRow: View {
     private var backgroundLine: some View {
         if !isSecondary, !viewModel.displayBackgroundWords(at: index).isEmpty {
             LyricsBackgroundClockBlock(viewModel: viewModel, index: index,
-                active: viewModel.activeLineIndices.contains(index),
                 translation: showTranslation ? line.backgroundTranslation : "",
                 alignment: alignment, textAlignment: textAlignment,
                 fontSize: translationFontSize * 0.92, reduceMotion: reduceMotion)
@@ -315,15 +320,18 @@ private struct LyricsPairedPronunciationLine: View {
         let running = active && viewModel.isPlaying && viewModel.isShown && viewModel.isActive
         TimelineView(.animation(minimumInterval: governor.budget.lyricsRenderInterval, paused: !running)) { _ in
             let time = active ? viewModel.presentationTimeMs() : idleMs
-            LyricPronunciationLayout(spacing: fontSize * 0.18, lineSpacing: fontSize * 0.24) {
+            LyricPronunciationLayout(spacing: fontSize * 0.25, lineSpacing: fontSize * 0.30) {
                 ForEach(pairs.indices, id: \.self) { index in
                     let pair = pairs[index]
-                    VStack(alignment: .leading, spacing: 2) {
+                    VStack(alignment: .leading, spacing: fontSize * 0.08) {
                         LyricWordKaraokeLine(words: [pair.original], adjustedMs: time, fontSize: fontSize,
                             reduceMotion: reduceMotion || !governor.budget.allowsLyricScrollMotion, fillsWidth: false)
-                        LyricWordKaraokeLine(words: [pair.reading], adjustedMs: time, fontSize: max(16, fontSize * 0.52),
-                            reduceMotion: true, fillsWidth: false)
+                        if !pair.readings.isEmpty {
+                            LyricWordKaraokeLine(words: pair.readings, adjustedMs: time, fontSize: max(18, fontSize * 0.56),
+                                reduceMotion: true, fillsWidth: false)
+                        }
                     }
+                    .layoutValue(key: LyricPronunciationSeparatorKey.self, value: pair.separator)
                 }
             }
             .transaction { $0.animation = nil }
@@ -375,7 +383,6 @@ private struct LyricsWordClockLine: View {
 struct LyricsBackgroundClockBlock: View {
     let viewModel: LyricsViewModel
     let index: Int
-    let active: Bool
     let translation: String
     let alignment: HorizontalAlignment
     let textAlignment: TextAlignment
@@ -383,19 +390,20 @@ struct LyricsBackgroundClockBlock: View {
     let reduceMotion: Bool
 
     var body: some View {
+        let visible = viewModel.isEmbeddedChorusVisible(at: index)
         let words = viewModel.displayBackgroundWords(at: index)
         let start = words.map(\.startMs).min() ?? 0
         let end = words.map(\.endMs).max() ?? start
         let settled = Int(AMLLGlyphStyle.settledTime(startMs: Double(start), endMs: Double(end)))
         VStack(alignment: alignment, spacing: 3) {
             LyricsWordClockLine(words: words, viewModel: viewModel,
-                followsClock: active, idleMs: settled, fontSize: fontSize,
+                followsClock: visible && viewModel.followsPlayback, idleMs: settled, fontSize: fontSize,
                 isSecondary: true, textAlignment: textAlignment, reduceMotion: reduceMotion)
             let pronunciation = viewModel.arePronunciationsVisible
                 ? viewModel.pronunciationWords(at: index, background: true) : []
             if !pronunciation.isEmpty {
                 LyricsWordClockLine(words: pronunciation, viewModel: viewModel,
-                    followsClock: active, idleMs: settled, fontSize: fontSize * 0.87,
+                    followsClock: visible && viewModel.followsPlayback, idleMs: settled, fontSize: fontSize * 0.87,
                     isSecondary: true, textAlignment: textAlignment, reduceMotion: reduceMotion)
             }
             if !translation.isEmpty {
@@ -405,9 +413,9 @@ struct LyricsBackgroundClockBlock: View {
                 .multilineTextAlignment(textAlignment).fixedSize(horizontal: false, vertical: true)
             }
         }
-        .opacity(active || viewModel.isUserScrolling || !viewModel.followsPlayback ? 1 : 0)
-        .accessibilityHidden(viewModel.followsPlayback && !viewModel.isUserScrolling && !active)
-        .allowsHitTesting(active || viewModel.isUserScrolling || !viewModel.followsPlayback)
-        .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: active)
+        .opacity(visible ? 1 : 0)
+        .accessibilityHidden(!visible)
+        .allowsHitTesting(visible)
+        .animation(nil, value: visible)
     }
 }

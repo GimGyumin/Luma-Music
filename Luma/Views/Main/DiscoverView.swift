@@ -26,6 +26,7 @@ struct DiscoverView: View {
     @State private var isStartingShuffle = false
     @State private var loadedServerID: String?
     @State private var isHeaderScrolled = false
+    private var isOnline: Bool { container?.serverState.isOnline != false }
 
     var body: some View {
         ScrollView {
@@ -55,11 +56,11 @@ struct DiscoverView: View {
         .miniPlayerBottomMargin()
         .lumaContentWidth(.fill)
         .navigationTitle(String(localized: "Discover", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale))
-        .lumaAccountProfileToolbar(isVisible: !isHeaderScrolled)
-        .lumaScrollingRootHeader(isScrolled: $isHeaderScrolled)
-        .task(id: container?.serverState.activeServer?.localReplayID) {
-            replaySummary = nil
-            guard let container else { return }
+        .lumaAccountProfileToolbar(isVisible: isOnline && !isHeaderScrolled, usesInlineTitle: !isOnline)
+        .lumaScrollingRootHeader(isScrolled: $isHeaderScrolled, enabled: isOnline)
+        .lumaServerReachability()
+        .task(id: "\(container?.serverState.activeServer?.localReplayID ?? ""):\(isOnline)") {
+            guard let container, isOnline else { return }
             let serverId = container.serverState.activeServer?.id.uuidString
             if vm == nil || loadedServerID != serverId {
                 vm = DiscoverViewModel(
@@ -77,6 +78,7 @@ struct DiscoverView: View {
             }
             // Discover is not the first tab — wait until Home's first list returns.
             await AppBootGate.waitForHome()
+            guard !Task.isCancelled else { return }
             await container.homeDiscoveryFeed.load()
             isListenBrainzConnected = await container.listenBrainzService.currentSnapshot().isEnabled
             guard !didLoadSecondary else { return }
@@ -86,7 +88,7 @@ struct DiscoverView: View {
             await vm?.loadSpatialAlbums()
             radioStations = (try? await stations) ?? []
             await loadReplaySummary()
-            didLoadSecondary = true
+            if !Task.isCancelled { didLoadSecondary = true }
         }
         .refreshable {
             await container?.homeDiscoveryFeed.load(forceRefresh: true)

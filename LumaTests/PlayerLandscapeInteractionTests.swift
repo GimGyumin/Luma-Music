@@ -114,6 +114,15 @@ struct PlayerLandscapeInteractionTests {
         #expect(!vm.shouldHideStandaloneBacking(at: 0))
     }
 
+    @Test func embeddedChorusCanStartAtZero() {
+        let words = [
+            LyricDisplayWord(text: "lead", startMs: 500, endMs: 4_000, role: .main),
+            LyricDisplayWord(text: "backing", startMs: 0, endMs: 1_500, role: .background),
+            LyricDisplayWord(text: "untimed", startMs: 9_000, endMs: 9_000, role: .background)
+        ]
+        #expect(LyricsViewModel.backgroundCueBounds(words) == 0..<1_500)
+    }
+
     @Test func embeddedChorusHasNoVisibleInkBeforeItsCue() throws {
         let container = try AppContainer(inMemory: true, engine: FakePlaybackEngine())
         let vm = LyricsViewModel(songId: "embedded", serverId: UUID(), lyricsService: container.lyricsService,
@@ -124,8 +133,7 @@ struct PlayerLandscapeInteractionTests {
         vm.hasTimedPlayback = true
         func ink(at time: Int) throws -> Int {
             vm.karaokePlaybackMs = time
-            let active = time >= 1000 && time < 2000
-            let renderer = ImageRenderer(content: LyricsBackgroundClockBlock(viewModel: vm, index: 0, active: active,
+            let renderer = ImageRenderer(content: LyricsBackgroundClockBlock(viewModel: vm, index: 0,
                 translation: "Translation", alignment: .leading, textAlignment: .leading,
                 fontSize: 24, reduceMotion: true).frame(width: 300, height: 100).background(.black))
             let image = try #require(renderer.cgImage)
@@ -136,8 +144,14 @@ struct PlayerLandscapeInteractionTests {
             context.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
             return stride(from: 0, to: pixels.count, by: 4).filter { pixels[$0] > 20 }.count
         }
+        vm.activeLineIndices = [0]
         #expect(try ink(at: 999) == 0)
+        #expect(try ink(at: 1000) > 100)
+        vm.activeLineIndices = []
         #expect(try ink(at: 1500) > 100)
+        #expect(try ink(at: 1999) > 100)
+        #expect(try ink(at: 2000) == 0)
+        vm.userStartedScrolling()
         #expect(try ink(at: 2000) == 0)
         #expect(try ink(at: 0) == 0) // backward seek hides future chorus again
     }

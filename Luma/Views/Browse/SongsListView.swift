@@ -4,6 +4,7 @@
 // See LICENSE file in the project root for full license information.
 
 import SwiftUI
+import SwiftData
 import SwiftSonic
 
 struct SongsListView: View {
@@ -16,40 +17,53 @@ struct SongsListView: View {
     /// session-scoped so the screen always opens on the full library.
     @AppStorage("luma.songSort") private var songSort: SongSort = .title
     @State private var songFilter: SongListFilter
+    #if os(macOS)
+    @AppStorage("luma.songsLayout") private var songsLayout: SongsLayout = .table
+    @State private var songsToAddToPlaylist: SongSelection?
+    @Query(filter: #Predicate<FavoriteRecord> { $0.itemType == "song" }) private var favoriteRecords: [FavoriteRecord]
+    #endif
 
     init(initialFilter: SongListFilter = .allSongs) {
         _songFilter = State(initialValue: initialFilter)
     }
 
     var body: some View {
-        Group {
-            if let vm = viewModel {
-                content(vm)
-                    .transition(.opacity)
-            } else {
-                LoadingStateView()
+        VStack(spacing: 0) {
+            #if os(macOS)
+            macHeader
+            #endif
+
+            Group {
+                if let vm = viewModel {
+                    content(vm)
+                        .transition(.opacity)
+                } else {
+                    LoadingStateView()
+                }
             }
+            .lumaContentReveal(isReady: viewModel.map { !(($0.isLoading || $0.isLoadingFilterSource) && $0.allSongs.isEmpty) } ?? false)
+            #if os(iOS)
+            .navigationTitle(String(localized: "Songs", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale))
+            .navigationBarTitleDisplayModeLarge()
+            .lumaLibrarySearch(
+                text: $searchText,
+                prompt: String(localized: "Search Songs", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale)
+            )
+            .toolbar {
+                ToolbarItem(placement: songsToolbarPlacement) {
+                    SongSortMenu(sort: $songSort)
+                        .tint(.primary)
+                        .foregroundStyle(.primary)
+                }
+                ToolbarItem(placement: songsToolbarPlacement) {
+                    SongFilterMenu(filter: $songFilter)
+                        .tint(.primary)
+                        .foregroundStyle(.primary)
+                }
+            }
+            #endif
         }
-        .lumaContentReveal(isReady: viewModel.map { !(($0.isLoading || $0.isLoadingFilterSource) && $0.allSongs.isEmpty) } ?? false)
         .lumaContentWidth()
-        .navigationTitle(String(localized: "Songs", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale))
-        .navigationBarTitleDisplayModeLarge()
-        .lumaLibrarySearch(
-            text: $searchText,
-            prompt: String(localized: "Search Songs", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale)
-        )
-        .toolbar {
-            ToolbarItem(placement: songsToolbarPlacement) {
-                SongSortMenu(sort: $songSort)
-                    .tint(.primary)
-                    .foregroundStyle(.primary)
-            }
-            ToolbarItem(placement: songsToolbarPlacement) {
-                SongFilterMenu(filter: $songFilter)
-                    .tint(.primary)
-                    .foregroundStyle(.primary)
-            }
-        }
         .tint(.primary)
         .task(id: "\(container?.serverState.accountRevision ?? 0)|\(container?.serverState.isOnline == true)") {
             guard let svc = container?.libraryService else { return }
@@ -81,7 +95,108 @@ struct SongsListView: View {
         .onChange(of: songFilter) { _, newFilter in
             Task { await viewModel?.setFilter(newFilter) }
         }
+        #if os(macOS)
+        .sheet(item: $songsToAddToPlaylist) { selection in
+            AddToPlaylistSheet(songs: selection.songs)
+        }
+        #endif
     }
+
+    #if os(macOS)
+    private var macHeader: some View {
+        let songs = viewModel.map { displayedSongs($0.allSongs) } ?? []
+        return MacLibraryHeader(
+            title: String(localized: "Songs", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale),
+            searchText: $searchText,
+            searchPrompt: String(localized: "Search Songs", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale)
+        ) {
+            MacLibraryHeaderButton(
+                systemImage: "play.fill",
+                help: String(localized: "Play", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale),
+                action: { play(from: 0, songs: songs) }
+            )
+            .disabled(songs.isEmpty)
+
+            MacLibraryHeaderButton(
+                systemImage: "shuffle",
+                help: String(localized: "Shuffle", bundle: AppUILanguage.localizationBundle, locale: AppUILanguage.locale),
+                action: { shuffle(songs) }
+            )
+            .disabled(songs.isEmpty)
+
+            Menu {
+                Picker("View", selection: $songsLayout) {
+                    Label("Songs", systemImage: "list.bullet").tag(SongsLayout.table)
+                    Label("Albums", systemImage: "rectangle.grid.1x2").tag(SongsLayout.grouped)
+                }
+            } label: {
+                Image(systemName: songsLayout == .table ? "list.bullet" : "rectangle.grid.1x2")
+                    .font(.system(size: 13, weight: .medium))
+                    .frame(width: 28, height: 28)
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .accessibilityLabel(Text("Song layout"))
+
+            SongSortMenu(sort: $songSort)
+                .frame(width: 28, height: 28)
+                .accessibilityLabel(Text("Sort songs"))
+
+            SongFilterMenu(filter: $songFilter)
+                .frame(width: 28, height: 28)
+                .accessibilityLabel(Text("Filter songs"))
+        }
+    }
+
+    private var favoriteIDs: Set<String> {
+        guard let serverId = container?.serverState.activeServer?.id else { return [] }
+        return FavoriteRecord.songIDSet(from: favoriteRecords.filter { $0.serverId == serverId })
+    }
+
+    private func songsTable(_ vm: SongsListViewModel) -> some View {
+        let filtered = displayedSongs(vm.allSongs)
+        return Group {
+            if filtered.isEmpty {
+                ContentUnavailableView.search(text: searchText)
+            } else {
+                SongsTableMacOS(
+                    songs: filtered,
+                    favoriteIDs: favoriteIDs,
+                    onToggleFavorite: toggleFavorite,
+                    onAddToPlaylist: { songsToAddToPlaylist = SongSelection(songs: $0) },
+                    onLoadMore: { Task { await vm.loadMoreIfNeeded() } }
+                )
+            }
+        }
+        .transition(.opacity)
+    }
+
+    private func toggleFavorite(_ song: DisplayableSong) {
+        guard let c = container else { return }
+        Task {
+            do {
+                if favoriteIDs.contains(song.id) {
+                    try await c.favoritesService.unstar(itemType: .song, itemId: song.id)
+                } else {
+                    try await c.favoritesService.star(itemType: .song, itemId: song.id)
+                }
+            } catch {
+                c.toastService.showError(error.localizedDescription)
+            }
+        }
+    }
+
+    private func shuffle(_ songs: [DisplayableSong]) {
+        guard let firstIndex = songs.indices.randomElement() else { return }
+        Task {
+            try? await container?.playerService.play(tracks: songs, startIndex: firstIndex)
+            if container?.playerState.isShuffled != true {
+                await container?.playerService.toggleShuffle()
+            }
+        }
+    }
+    #endif
 
     /// The sort + filter controls sit together in the trailing toolbar on iOS and the primary-action
     /// group on macOS.
@@ -113,8 +228,17 @@ struct SongsListView: View {
         } else if vm.allSongs.isEmpty {
             emptyState(for: vm.filter)
         } else {
+            #if os(macOS)
+            if songsLayout == .table {
+                songsTable(vm)
+            } else {
+                songsList(vm)
+                    .transition(.opacity)
+            }
+            #else
             songsList(vm)
                 .transition(.opacity)
+            #endif
         }
     }
 
@@ -276,3 +400,15 @@ struct SongsListView: View {
     }
 
 }
+
+#if os(macOS)
+nonisolated enum SongsLayout: String, CaseIterable, Sendable {
+    case table
+    case grouped
+}
+
+private struct SongSelection: Identifiable {
+    let id = UUID()
+    let songs: [DisplayableSong]
+}
+#endif

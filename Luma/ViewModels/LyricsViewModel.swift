@@ -55,6 +55,7 @@ final class LyricsViewModel {
     /// Clock used for word-level karaoke progress (ms, lyrics-offset adjusted).
     var karaokePlaybackMs: Int = 0
     @ObservationIgnored var karaokeFrameTimeMs: Int = 0
+    @ObservationIgnored var lastPresentedLyricFrameMs: Int?
     @ObservationIgnored var karaokeSampleHostTime: CFTimeInterval = CACurrentMediaTime()
     /// 0...1 while waiting through a long instrumental / inter-line gap; `nil` when a lyric line is active.
     var instrumentalGapProgress: Double? {
@@ -160,6 +161,9 @@ final class LyricsViewModel {
     var areTranslationsVisible = false
     /// Pronunciation / romanization is controlled independently from translations.
     var arePronunciationsVisible = false
+    /// English lyrics get a Korean phonetic reading by default. Hiding it persists
+    /// across songs; server-provided pronunciation layers keep their own behavior.
+    nonisolated static let englishPronunciationPreferenceKey = "luma.lyrics.englishPronunciationVisible"
     var pronunciationPairs: [[LyricPronunciationPair]] = []
     var generatedPronunciationIndices: Set<Int> = []
     var isTranslating = false
@@ -202,6 +206,7 @@ final class LyricsViewModel {
     var lastPositionSampleAt: CFTimeInterval = CACurrentMediaTime()
     /// Last transport value actually fed into lyric timing; keep monotonic except on real seeks.
     var lastDisplayedPositionMs: Int = 0
+    @ObservationIgnored var observedTrackRestartRevision: UInt64 = 0
     /// True after `userTapped` pins the display position — supress `startTimer` overwrite.
     var justSeeked = false
     @ObservationIgnored var lyricSeekTask: Task<Void, Never>?

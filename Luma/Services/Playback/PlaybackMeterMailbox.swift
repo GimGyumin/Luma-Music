@@ -1,5 +1,7 @@
 import Synchronization
 import AVFoundation
+import AudioToolbox
+import CoreAudio
 import Accelerate
 import QuartzCore
 
@@ -52,6 +54,7 @@ nonisolated final class PlaybackPCMWindow: @unchecked Sendable {
         let receivedAt: Double
         let presentationTime: Double
         let mediaTime: Double?
+        let supplementary: Bool
     }
     private var windows = (0..<capacity).map { _ in UnsafeMutablePointer<Float>.allocate(capacity: count * channels) }
     private var stamps = [Stamp?](repeating: nil, count: capacity)
@@ -73,7 +76,8 @@ nonisolated final class PlaybackPCMWindow: @unchecked Sendable {
     deinit { writing.deallocate(); for window in windows { window.deallocate() } }
 
     func capture(_ list: UnsafePointer<AudioBufferList>, format: AudioStreamBasicDescription,
-                 frames: Int, generation token: UInt64, hostTime: Double? = nil, mediaTime: Double? = nil) {
+                 frames: Int, generation token: UInt64, hostTime: Double? = nil,
+                 mediaTime: Double? = nil, supplementary: Bool = false) {
         guard busy.compareExchange(expected: false, desired: true, ordering: .acquiring).exchanged else {
             discontinuity.store(true, ordering: .relaxed)
             return
@@ -147,7 +151,7 @@ nonisolated final class PlaybackPCMWindow: @unchecked Sendable {
                 let centerOffset = (Double(frame + 1) - Double(Self.count) / 2) / sampleRate
                 stamps[slot] = Stamp(revision: revision, generation: token, sampleRate: sampleRate, channels: channels,
                     receivedAt: receivedAt, presentationTime: (hostTime ?? receivedAt) + centerOffset,
-                    mediaTime: mediaTime.map { $0 + centerOffset })
+                    mediaTime: mediaTime.map { $0 + centerOffset }, supplementary: supplementary)
                 queued += 1
                 filled = 0
             }
@@ -155,7 +159,7 @@ nonisolated final class PlaybackPCMWindow: @unchecked Sendable {
     }
 
     func copyLatest(into destination: UnsafeMutablePointer<Float>, generation token: UInt64,
-                    after consumed: UInt64, oldestFirst: Bool = false) -> (revision: UInt64, sampleRate: Double, channels: Int, receivedAt: Double, presentationTime: Double, mediaTime: Double?)? {
+                    after consumed: UInt64, oldestFirst: Bool = false) -> (revision: UInt64, sampleRate: Double, channels: Int, receivedAt: Double, presentationTime: Double, mediaTime: Double?, supplementary: Bool)? {
         guard busy.compareExchange(expected: false, desired: true, ordering: .acquiring).exchanged else { return nil }
         defer { busy.store(false, ordering: .releasing) }
         guard queued > 0 else { return nil }
@@ -166,7 +170,8 @@ nonisolated final class PlaybackPCMWindow: @unchecked Sendable {
             first = (first + 1) % Self.capacity
             queued -= 1
         }
-        return (stamp.revision, stamp.sampleRate, stamp.channels, stamp.receivedAt, stamp.presentationTime, stamp.mediaTime)
+        return (stamp.revision, stamp.sampleRate, stamp.channels, stamp.receivedAt,
+                stamp.presentationTime, stamp.mediaTime, stamp.supplementary)
     }
 }
 
@@ -441,6 +446,15 @@ actor PlaybackFileSpectrumAnalyzer {
                     destination.advanced(by: frames).update(repeating: 0, count: PlaybackPCMWindow.count - frames)
                 }
             }
+            var channelPointers: [UnsafePointer<Float>] = []
+            channelPointers.reserveCapacity(channelCount)
+            for channel in 0..<channelCount {
+                channelPointers.append(UnsafePointer(channels[channel]))
+            }
+            LyricifyBassAnalyzer.shared.processWindow(
+                channelData: channelPointers,
+                frameCount: frames,
+                sampleRate: rate)
             return analyzer.analyze(sampleRate: rate, channels: channelCount)
         } catch {
             failedSource = source

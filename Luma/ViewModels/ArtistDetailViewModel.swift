@@ -21,7 +21,7 @@ final class ArtistDetailViewModel {
     var error: UserFacingError?
     var similarArtists: [SimilarArtistRecommendation] = []
     var isLoadingSimilarArtists = false
-    var outOfLibraryArtistImages: [String: URL?] = [:]
+    var outOfLibraryArtistImages: [String: URL] = [:]
     /// Most-played songs (getTopSongs). Empty on bare self-hosted servers → the view hides the section.
     var topSongs: [DisplayableSong] = []
     /// Starts true so the section shows a skeleton until the first load resolves (then empty → hidden).
@@ -174,7 +174,7 @@ final class ArtistDetailViewModel {
         }
         do {
             let songs = try await libraryService.topSongs(artist: name, count: 25)
-            guard generation == loadGeneration else { return }
+            guard generation == loadGeneration, !Task.isCancelled else { return }
             topSongs = songs
             didLoadTopSongs = true
         } catch is CancellationError {
@@ -182,39 +182,29 @@ final class ArtistDetailViewModel {
         } catch {
             Logger.recommendations.warning("topSongs failed for \(self.artistId): \(error)")
             guard generation == loadGeneration else { return }
-            topSongs = []
-            didLoadTopSongs = true
+            didLoadTopSongs = false
         }
     }
 
-    // Called from the view's .task after load() returns so artist loading and
-    // index/network calls from similar artists never compete on the same server.
     func loadSimilarArtists(force: Bool = false) async {
-        guard !Task.isCancelled else { return }
-        if didLoadSimilarArtists, !force {
-            await loadOutOfLibraryImages(generation: loadGeneration)
-            return
-        }
+        guard !Task.isCancelled, artist != nil else { return }
+        if didLoadSimilarArtists, !force { return }
         let generation = loadGeneration
         isLoadingSimilarArtists = true
-        if force { similarArtists = [] }
         defer {
             if generation == loadGeneration { isLoadingSimilarArtists = false }
         }
         do {
             let results = try await recommendationService.similarArtists(to: artistId)
-            guard generation == loadGeneration else { return }
+            guard generation == loadGeneration, !Task.isCancelled else { return }
             similarArtists = results
             didLoadSimilarArtists = true
         } catch is CancellationError {
             return
         } catch {
             Logger.recommendations.warning("similarArtists failed for \(self.artistId): \(error)")
-            if generation == loadGeneration { didLoadSimilarArtists = true }
+            if generation == loadGeneration { didLoadSimilarArtists = false }
         }
-        guard generation == loadGeneration else { return }
-        // Keep image enrichment in the view task's lifetime; a pop cancels this loop.
-        await loadOutOfLibraryImages(generation: generation)
     }
 
     /// Pull-to-refresh — reload artist, top songs, and similar artists.
@@ -224,13 +214,12 @@ final class ArtistDetailViewModel {
         await loadSimilarArtists(force: true)
     }
 
-    private func loadOutOfLibraryImages(generation: Int) async {
-        for rec in similarArtists where !rec.inLibrary {
-            guard generation == loadGeneration, !Task.isCancelled else { return }
-            guard outOfLibraryArtistImages.index(forKey: rec.id) == nil else { continue }
-            let url = await imageResolver.resolveImageURL(for: rec)
-            guard generation == loadGeneration, !Task.isCancelled else { return }
-            outOfLibraryArtistImages[rec.id] = .some(url)
-        }
+    func loadSimilarArtistImage(_ recommendation: SimilarArtistRecommendation) async {
+        guard !recommendation.inLibrary, outOfLibraryArtistImages[recommendation.id] == nil,
+              !Task.isCancelled else { return }
+        let generation = loadGeneration
+        guard let url = await imageResolver.resolveImageURL(for: recommendation),
+              generation == loadGeneration, !Task.isCancelled else { return }
+        outOfLibraryArtistImages[recommendation.id] = url
     }
 }

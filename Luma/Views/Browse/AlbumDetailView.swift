@@ -14,14 +14,6 @@ import UIKit
 
 // MARK: - Mode
 
-struct AlbumShelfBackgroundKey: PreferenceKey {
-    static var defaultValue: [Anchor<CGRect>] { [] }
-
-    static func reduce(value: inout [Anchor<CGRect>], nextValue: () -> [Anchor<CGRect>]) {
-        value.append(contentsOf: nextValue())
-    }
-}
-
 enum AlbumDetailMode: Sendable {
     case full           // show all album songs (default — online catalog browsing)
     case downloadedOnly // show only downloaded tracks (Downloads/Offline contexts for purely-partial albums)
@@ -78,6 +70,11 @@ struct AlbumDetailView: View {
     }
 
     var body: some View {
+        #if os(macOS)
+        AlbumDetailMacOS(albumId: resolvedAlbumID, albumName: resolvedAlbumName, coverArtId: coverArtId,
+            initialArtist: resolvedAlbum?.artist, mode: mode)
+            .appEntityIdentifier(onscreenEntityIdentifier)
+        #else
         let themeKey = coverArtId ?? resolvedAlbumID
         // Prefer the exact image supplied by the source card, then the thumbnail that
         // was just painted in the list. No network or disk work is started from body.
@@ -113,6 +110,7 @@ struct AlbumDetailView: View {
             }
         }
         .appEntityIdentifier(onscreenEntityIdentifier)
+        #endif
     }
 
     /// Lets Siri AI resolve “this album” while the album page is on screen.
@@ -155,9 +153,21 @@ struct AlbumDetailView: View {
     }
 }
 
+/// Presentation timing starts when the payload arrives; only the fades overlap.
+enum AlbumDetailRevealStage {
+    case header, artwork, tracks
+
+    var animation: Animation {
+        switch self {
+        case .header: .easeOut(duration: 0.24)
+        case .artwork: .easeInOut(duration: 0.15)
+        case .tracks: .easeInOut(duration: 0.24).delay(0.06)
+        }
+    }
+}
+
 struct AlbumDetailContentView: View {
     @Environment(\.accessibilityReduceMotion) var reduceMotion
-    @Environment(TabBarChromeState.self) private var tabBarChrome
     let albumId: String
     let initialName: String
     /// Present when the source card already knows the artist. Showing it on the
@@ -229,12 +239,9 @@ struct AlbumDetailContentView: View {
     @State var artworkPreference: AlbumArtworkPreference = .automatic
     @AppStorage("coverArtUploadVersion") var coverArtUploadVersion = 0
     @State var artworkRevision = 0
-    @State var paletteRequestID: String?
-    var paletteIdentity: String { "\(albumCoverId):\(coverArtUploadVersion):\(artworkRevision):\(container?.serverState.accountRevision ?? 0)" }
+    @State var paletteCoverScope: String?
+    var paletteIdentity: String { "\(albumCoverId):\(coverArtUploadVersion):\(artworkRevision):\(container?.serverState.accountRevision ?? 0):\(container?.serverState.artworkNetworkRevision ?? 0)" }
     @State var artworkTopInset: CGFloat = 59
-    @State var headerRevealed = false
-    @State private var toolbarRevealed = false
-    @State private var revealTask: Task<Void, Never>?
     @AppStorage("luma.visuals.albumFollowsAppearance") private var albumFollowsAppearance = false
     @AppStorage("luma.visuals.immersiveAlbums") var immersiveAlbums = true
 
@@ -277,10 +284,6 @@ struct AlbumDetailContentView: View {
     /// the stack being destroyed and re-created; one log line per instance makes that visible instead
     /// of guessed at (the fixes themselves live in the navigation structure).
     @State private var pageInstanceID = UUID()
-    /// The `isOnline` value this page already loaded for. A `.task` restart that carries the same
-    /// value — the page was rebuilt, or SwiftUI re-applied the same id — must not re-run the whole
-    /// album + More-By + description load behind whatever page is open on top of this one.
-    @State private var loadedForOnlineState: Bool?
     @Query private var albumFavoriteMatches: [FavoriteRecord]
     @Query var downloadedAlbumTracks: [DownloadedTrack]
 
@@ -412,15 +415,18 @@ struct AlbumDetailContentView: View {
         }
     }
 
-    private var isPrimaryContentReady: Bool {
+    var albumContentVisible: Bool {
         guard let viewModel else { return false }
-        // An error still owns a real page (retry / offline copy); reveal it
-        // instead of leaving the opaque loading cover forever.
-        return viewModel.isPrimaryContentReady || (!viewModel.isLoading && viewModel.error != nil)
+        return viewModel.isPrimaryContentReady || !viewModel.isLoading
     }
 
-    var showsTrackContent: Bool {
-        headerRevealed && isPrimaryContentReady
+    var albumArtworkReveal: CoverArtReveal {
+        CoverArtReveal(
+            placeholder: headerTextColor.opacity(0.075),
+            visible: albumContentVisible,
+            placeholderAnimation: AlbumDetailRevealStage.header.animation,
+            artworkAnimation: AlbumDetailRevealStage.artwork.animation
+        )
     }
 
     /// `unthemed` album atmosphere uses `.clear`; a clear loading cover would
@@ -431,13 +437,16 @@ struct AlbumDetailContentView: View {
     }
 
     private var albumPage: some View {
-        // Keep one root view for the lifetime of the page. The content is mounted
-        // behind an opaque page-color cover until the primary payload is ready;
-        // the ScrollView/LazyVStack identity never changes, so navigation and
-        // pop snapshots stay stable. This avoids the old "part of the header
-        // appears, then the rest loads in" behavior.
+        // Keep the themed background and scroll layout mounted throughout the reveal
+        // so the native navigation zoom and its return snapshot use the same page.
         ZStack {
-            pageCoverColor.ignoresSafeArea()
+            pageCoverColor
+                .overlay {
+                    let headerVisible = albumContentVisible
+                    Color.black.opacity(atmosphere.isThemed && !atmosphere.isLight && !headerVisible ? 0.16 : 0)
+                        .animation(reduceMotion ? nil : AlbumDetailRevealStage.header.animation, value: headerVisible)
+                }
+                .ignoresSafeArea()
 
             Group {
                 if usesDesktopDetail {
@@ -544,23 +553,21 @@ struct AlbumDetailContentView: View {
                 .buttonStyle(.plain)
             }
             #endif
-            ToolbarItem(placement: .primaryAction) {
-                HStack(spacing: LumaSpacing.xs) {
-                    LumaShareButtonWithOptions(
-                        itemID: albumId,
-                        shareOptions: ShareSettings.shared.makeAlbumOptions(albumName: albumDisplayName),
-                        fallbackText: albumShareText,
-                        style: .circle(foreground: navigationInk, size: 44)
-                    )
-                    .buttonStyle(.plain)
+            if albumContentVisible {
+                ToolbarItem(placement: .primaryAction) {
+                    HStack(spacing: LumaSpacing.xs) {
+                        LumaShareButtonWithOptions(
+                            itemID: albumId,
+                            shareOptions: ShareSettings.shared.makeAlbumOptions(albumName: albumDisplayName),
+                            fallbackText: albumShareText,
+                            style: .circle(foreground: navigationInk, size: 44)
+                        )
+                        .buttonStyle(.plain)
 
-                    albumMoreMenu
+                        albumMoreMenu
+                    }
+                    .environment(\.colorScheme, albumNavigationBarColorScheme ?? colorScheme)
                 }
-                .environment(\.colorScheme, albumNavigationBarColorScheme ?? colorScheme)
-                .opacity(toolbarRevealed ? 1 : 0)
-                .allowsHitTesting(toolbarRevealed)
-                .accessibilityHidden(!toolbarRevealed)
-                .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: toolbarRevealed)
             }
         }
         .alert("Pin Limit Reached", isPresented: $showPinLimitAlert) {
@@ -574,7 +581,6 @@ struct AlbumDetailContentView: View {
                 pageID: "\(albumId)#\(albumNavigationAttempt)",
                 onDeparture: { viewModel?.suspendPendingLoad() },
                 onReturn: { await viewModel?.resumePendingLoadIfNeeded() },
-                chrome: self.tabBarChrome
             )
             .frame(width: 0, height: 0)
             .allowsHitTesting(false)
@@ -596,11 +602,7 @@ struct AlbumDetailContentView: View {
 
     var body: some View {
         albumChrome
-        // Keyed on connectivity so the list re-loads from the right source when
-        // NWPathMonitor flips isOnline — same pattern as AlbumDetailMacOS and
-        // PlaylistDetailView. Guarded by the connectivity state actually loaded, so an id change that
-        // carries no new value cannot re-run the whole load (see `loadedForOnlineState`).
-        .task(id: container?.serverState.isOnline) {
+        .task(id: container.map { AlbumDetailViewModel.LoadKey($0.serverState) }) {
             guard let c = container else { return }
             if viewModel == nil {
                 viewModel = AlbumDetailViewModel(
@@ -612,25 +614,8 @@ struct AlbumDetailContentView: View {
                     libraryIndex: c.libraryIndexService,
                     streamingSettings: c.streamingSettings
                 )
-                Logger.ui.debug("[ALBUM-STATE] viewModel created attempt=\(albumNavigationAttempt, privacy: .public) album=\(albumId, privacy: .public)")
             }
-            let isOnline = c.serverState.isOnline
-            Logger.ui.debug(
-                "[ALBUM-PAGE] task start instance=\(pageInstanceID, privacy: .public) attempt=\(albumNavigationAttempt, privacy: .public) album=\(albumId, privacy: .public) online=\(isOnline, privacy: .public) loaded=\(String(describing: loadedForOnlineState), privacy: .public)"
-            )
-            // SwiftUI restarts .task when a pushed page is uncovered. If optional album-info
-            // work was cancelled after tracks appeared, preserve the completed primary load.
-            if loadedForOnlineState == nil,
-               viewModel?.isPrimaryContentReady == true,
-               viewModel?.isOffline == !isOnline {
-                loadedForOnlineState = isOnline
-            }
-            guard loadedForOnlineState != isOnline else { return }
-            await viewModel?.load()
-            if !Task.isCancelled, viewModel?.acceptsPresentationUpdates == true,
-               viewModel?.isPrimaryContentReady == true {
-                loadedForOnlineState = isOnline
-            }
+            await viewModel?.loadIfNeeded()
         }
         .onReceive(NotificationCenter.default.publisher(for: OriginalArtwork.didInstall)) { note in
             if viewModel?.acceptsPresentationUpdates != false, note.object as? String == albumCoverId {
@@ -641,11 +626,8 @@ struct AlbumDetailContentView: View {
             let requestedCoverID = albumCoverId
             await resolveDominantColor(coverArtId: requestedCoverID)
         }
-        .onChange(of: viewModel?.isPrimaryContentReady) { _, ready in
-            Logger.ui.debug("[ALBUM-STATE] primary-ready=\(ready == true, privacy: .public) attempt=\(albumNavigationAttempt, privacy: .public) album=\(albumId, privacy: .public) loading=\(viewModel?.isLoading == true, privacy: .public)")
-            guard ready == true, let trace = openTrace else { return }
-            trace.finish(.success)
-            openTrace = nil
+        .onChange(of: albumContentVisible) { _, visible in
+            if visible { finishOpenTrace() }
         }
         .onChange(of: usesDesktopDetail) { _, desktop in
             Logger.ui.debug("[ALBUM-STATE] root=\(desktop ? "desktop" : "compact", privacy: .public) attempt=\(albumNavigationAttempt, privacy: .public) album=\(albumId, privacy: .public)")
@@ -654,13 +636,8 @@ struct AlbumDetailContentView: View {
             Logger.ui.debug("[ALBUM-ART] revision=\(revision, privacy: .public) attempt=\(albumNavigationAttempt, privacy: .public) album=\(albumId, privacy: .public) cover=\(albumCoverId, privacy: .public)")
         }
         .onAppear(perform: handleAppear)
-        .onChange(of: isPrimaryContentReady) { _, ready in
-            if ready { startStagedRevealIfNeeded() }
-        }
         .onDisappear {
             Logger.ui.debug("[NAV] album disappear instance=\(pageInstanceID, privacy: .public) attempt=\(albumNavigationAttempt, privacy: .public) album=\(albumId, privacy: .public)")
-            revealTask?.cancel()
-            revealTask = nil
             openTrace?.finish(.cancelled)
             openTrace = nil
             let closeTrace = DiagnosticsCenter.shared.begin(.albumClose)
@@ -673,52 +650,14 @@ struct AlbumDetailContentView: View {
 
     private func handleAppear() {
         Logger.ui.debug("[NAV] album appear instance=\(pageInstanceID, privacy: .public) attempt=\(albumNavigationAttempt, privacy: .public) album=\(albumId, privacy: .public)")
-        startStagedRevealIfNeeded()
         guard openTrace == nil else { return }
         let trace = DiagnosticsCenter.shared.begin(.albumOpen)
         openTrace = trace
-        if viewModel?.isPrimaryContentReady == true {
-            trace.finish(.success)
-            openTrace = nil
-        }
+        if albumContentVisible { finishOpenTrace() }
     }
 
-    /// The page is covered by its representative color until the primary payload
-    /// is actually ready. Once ready, hero/tracks reveal together (with the track
-    /// rows overlapping the hero fade) and the share/more cluster lands last.
-    /// This is readiness-based, not a fixed timer: an uncached album never shows
-    /// a half-built header while waiting on the network.
-    private func startStagedRevealIfNeeded() {
-        guard isPrimaryContentReady else { return }
-        guard revealTask == nil, !headerRevealed else {
-            if !toolbarRevealed {
-                revealTask = Task { @MainActor in
-                    if !reduceMotion {
-                        do { try await Task.sleep(for: .milliseconds(180)) } catch { return }
-                    }
-                    toolbarRevealed = true
-                }
-            }
-            return
-        }
-        revealTask = Task { @MainActor in
-            if !reduceMotion {
-                withAnimation(.easeOut(duration: 0.24)) {
-                    headerRevealed = true
-                }
-                do { try await Task.sleep(for: .milliseconds(180)) } catch { return }
-            } else {
-                headerRevealed = true
-            }
-            guard !Task.isCancelled else { return }
-            if reduceMotion {
-                toolbarRevealed = true
-            } else {
-                withAnimation(.easeOut(duration: 0.16)) {
-                    toolbarRevealed = true
-                }
-            }
-        }
+    private func finishOpenTrace() {
+        openTrace?.finish(viewModel?.error == nil ? .success : .failure)
+        openTrace = nil
     }
-
 }

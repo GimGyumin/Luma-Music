@@ -19,13 +19,13 @@
 >
 > The previously reported iPad interface issues have been addressed in **RC3**. **RC3 is recommended for iPad users.**
 >
-> **iPad 업데이트 안내:** 기존에 보고된 iPad UI 문제를 **RC3에서 수정했습니다. RC3 IPA가 공개되면 iPad 사용자는 RC3로 업데이트해 주세요.** RC2는 계속 다운로드할 수 있지만 해당 수정 사항은 포함되지 않습니다.
+> **iPad 업데이트 안내:** 기존에 보고된 iPad UI 문제를 **RC3에서 수정했습니다. iPad 사용자는 RC3로 업데이트해 주세요.** RC2는 계속 다운로드할 수 있지만 해당 수정 사항은 포함되지 않습니다.
 
 > **Luma Music 1.0 RC3 · Latest published release**
 >
-> The RC3 release page is published, with player, lyrics, and iPad improvements. The latest development build number is **261116**, but that source update has not yet been synchronized to this public repository.
+> The RC3 release page is published, with player, lyrics, and iPad improvements. The RC3 source code (**build 261116**) was published to this public repository on November 28, 2026.
 >
-> [RC3 release page](https://github.com/GimGyumin/Luma-Music/releases/tag/v1.0.0-rc3) &nbsp; · &nbsp; [RC3 notes](docs/releases/v1.0.0-rc3.md)
+> [RC3 release page](https://github.com/GimGyumin/Luma-Music/releases/tag/v1.0.0-rc3) &nbsp; · &nbsp; [RC3 notes](docs/releases/v1.0.0-rc3.md) &nbsp; · &nbsp; [Browse build 261116 source](https://github.com/GimGyumin/Luma-Music/tree/1797cfb53eaae932ae1136b33ddb6bc675c351c6)
 
 ---
 
@@ -79,7 +79,7 @@ Library search, responsive artwork, and efficient UI updates. Supported system f
 
 Download an IPA from the releases page, install it with a compatible sideloading method such as SideStore or AltStore, then connect to **your own music server**. Luma is a client, not a music server or a commercial streaming catalog.
 
-**There is currently no TestFlight or App Store distribution.**
+**The official 1.0 release will continue to be distributed through GitHub via sideloading. No TestFlight or App Store release is planned.**
 
 | Platform | Availability |
 | --- | --- |
@@ -87,7 +87,7 @@ Download an IPA from the releases page, install it with a compatible sideloading
 | **iPad** | IPA preview · iPadOS 18.6 or later · **Previously reported UI issues addressed in RC3; RC3 recommended.** |
 | **macOS** | **Coming next year (2027)** · Not available |
 
-The stable **Luma Music 1.0 release for iPhone and iPad has been postponed from late 2026 to early 2027**, subject to testing and release readiness. **Follow-up RC builds will continue in the meantime**, with RC3 introducing a redesigned player, improved lyrics, and iPad UI fixes. The separate macOS app is planned for 2027; the current IPA is not a Mac installer.
+**RC4, the final release candidate before the official 1.0 release, is coming soon.** The stable **Luma Music 1.0 release for iPhone and iPad is scheduled for January 2027**, subject to final testing and release readiness. This is the first stable release, not a TestFlight or App Store launch. The separate macOS app is planned for 2027; the current IPA is not a Mac installer.
 
 [Get started](docs/GETTING_STARTED.md) &nbsp; · &nbsp; [Explore features](docs/FEATURES.md) &nbsp; · &nbsp; [Roadmap](docs/ROADMAP.md)
 

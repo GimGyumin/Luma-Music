@@ -1,97 +1,109 @@
-<p align="center"><img src="./Luma-Music-README-Hero.png" alt="Luma Music" width="100%" /></p>
+<p align="center"><sub>LUMA MUSIC &nbsp; / &nbsp; 1.0 RC3</sub></p>
 
-<h1 align="center">Luma Music</h1>
-<p align="center"><strong>Your music. The experience it deserves.</strong></p>
-<p align="center">A beautiful, native listening experience for the music you own.</p>
+<h1 align="center">Your music, beautifully.</h1>
+
+<p align="center">Your server. Your collection. An extraordinary way to listen.</p>
+<p align="center">A native, open-source music experience for iPhone and iPad.</p>
 
 <p align="center">
-  <a href="#discover-luma">Explore</a> &nbsp; · &nbsp;
-  <a href="#get-luma-music">Get Luma</a> &nbsp; · &nbsp;
-  <a href="./docs/README.md">Guides</a> &nbsp; · &nbsp;
-  <a href="./docs/ROADMAP.md">Roadmap</a> &nbsp; · &nbsp;
-  <a href="https://github.com/GimGyumin/Luma-Music/discussions">Community</a>
+  <a href="https://github.com/GimGyumin/Luma-Music/releases/tag/v1.0.0-rc3"><strong>Get Luma Music</strong></a>
+  &nbsp; · &nbsp;
+  <a href="#discover-luma">Explore</a>
+  &nbsp; · &nbsp;
+  <a href="#whats-next">What's next</a>
 </p>
 
-<p align="center"><sub>iPhone — IPA preview &nbsp; | &nbsp; iPad — UI fixes included in RC3 &nbsp; | &nbsp; macOS — Coming in 2027</sub></p>
-<p align="center"><sub>Navidrome · OpenSubsonic-compatible servers · Supported Jellyfin libraries</sub></p>
+<!-- Product film: insert the GitHub user-attachments video URL here on its own line. -->
 
-> **📱 iPad update — RC3 recommended**
->
-> The previously reported iPad interface issues have been addressed in **RC3**. **RC3 is recommended for iPad users.**
->
-> **iPad 업데이트 안내:** 기존에 보고된 iPad UI 문제를 **RC3에서 수정했습니다. iPad 사용자는 RC3로 업데이트해 주세요.** RC2는 계속 다운로드할 수 있지만 해당 수정 사항은 포함되지 않습니다.
+<p align="center"><img src="./Luma-Music-README-Hero.png" alt="Luma Music" width="100%" /></p>
 
-> **Luma Music 1.0 RC3 · Latest published release**
->
-> The RC3 release page is published, with player, lyrics, and iPad improvements. The RC3 source code (**build 261116**) was published to this public repository on November 28, 2026.
->
-> [RC3 release page](https://github.com/GimGyumin/Luma-Music/releases/tag/v1.0.0-rc3) &nbsp; · &nbsp; [RC3 notes](docs/releases/v1.0.0-rc3.md) &nbsp; · &nbsp; [Browse build 261116 source](https://github.com/GimGyumin/Luma-Music/tree/1797cfb53eaae932ae1136b33ddb6bc675c351c6)
+<p align="center"><sub>iOS &amp; iPadOS 18.6 or later &nbsp; · &nbsp; Navidrome &nbsp; · &nbsp; OpenSubsonic &nbsp; · &nbsp; Supported Jellyfin libraries</sub></p>
 
 ---
 
 ## Discover Luma
 
+<h2 align="center">Feel every note.</h2>
+<p align="center">Immersive artwork. Beautifully timed lyrics. A player designed around your music.</p>
+
 <p align="center">
   <img src="./assets/screenshots/now-playing.jpg" alt="Immersive Now Playing" width="23%" />
   <img src="./assets/screenshots/lyrics-translation.jpg" alt="Synchronized lyrics and translation" width="23%" />
-  <img src="./assets/screenshots/lyrics-pronunciation.jpg" alt="Lyrics with pronunciation when supported" width="23%" />
-  <img src="./rc3-lyrics-pronunciation.jpg" alt="RC3 English-to-Korean pronunciation with synchronized lyrics" width="23%" />
+  <img src="./assets/screenshots/lyrics-pronunciation.jpg" alt="Lyrics with pronunciation" width="23%" />
+  <img src="./rc3-lyrics-pronunciation.jpg" alt="RC3 English-to-Korean pronunciation" width="23%" />
 </p>
-<p align="center"><sub>Now Playing &nbsp; · &nbsp; Lyrics & translation &nbsp; · &nbsp; Pronunciation &nbsp; · &nbsp; RC3 pronunciation preview</sub></p>
+
+<h2 align="center">A collection that feels like yours.</h2>
+<p align="center">From the albums you love to the music on your Lock Screen.</p>
 
 <p align="center">
-  <img src="./assets/screenshots/album-page-hopeless-romantic.jpg" alt="Artwork-focused album page" width="30%" />
-  <img src="./assets/screenshots/lock-screen-childhood.jpg" alt="Music on the Lock Screen" width="30%" />
+  <img src="./assets/screenshots/album-page-hopeless-romantic.jpg" alt="Artwork-focused album page" width="38%" />
+  <img src="./assets/screenshots/lock-screen-childhood.jpg" alt="Music on the Lock Screen" width="38%" />
 </p>
-<p align="center"><sub>Beautiful album pages &nbsp; · &nbsp; Lock Screen controls</sub></p>
+
+Immersive artwork is available for compatible covers and supported devices.
 
 ---
 
-## Your albums, brought to life.
+## Every detail. In harmony.
 
-Your own collection deserves more than a list of tracks. Luma brings an **Apple Music-inspired interface** to your self-hosted library, with immersive artwork, smooth transitions, and native playback controls.
+| | |
+| :--- | :--- |
+| **Every word matters.**<br>Word-by-word TTML lyrics, optional translation and pronunciation, and music-reactive lyric backgrounds. | **Hear it all.**<br>Lossless and Hi-Res playback where supported, gapless transitions, Crossfade, and ReplayGain. |
+| **Make it yours.**<br>Artwork-focused browsing, library search, queue controls, offline downloads, and caching. | **Naturally at home.**<br>Siri, Shortcuts, Spotlight, widgets, Lock Screen controls, VoiceOver, Dynamic Type, and Reduce Motion. |
 
-Immersive artwork is available for **compatible covers only**. Some album covers or device capabilities may not support this presentation.
+RC3 adds English-to-Korean pronunciation fallback for supported words. Lyrics depend on compatible timing data and available sources. Audio quality depends on the source and output route.
 
-## Every word matters.
-
-Synchronized lyrics move with your music, including **TTML word-timed highlighting** when compatible timing data is available. Optional Apple- or OpenAI-powered translation can help with provided lyric text.
-
-**RC3 adds an English-to-Korean pronunciation fallback for supported words.** RC2 displays pronunciation only when compatible pronunciation data is supplied. Lyrics themselves depend on your server or an enabled source such as LRCLIB, and are not available for every track.
-
-## Hear it all. Without the gaps.
-
-Gapless playback for supported albums and live recordings. Lossless streaming where the source and audio route allow it. Crossfade, ReplayGain, queue controls, offline downloads, and caching for your everyday listening.
-
-## Thoughtful in every detail.
-
-Library search, responsive artwork, and efficient UI updates. Supported system features include Siri, Shortcuts, Spotlight, widgets, and playback controls, alongside VoiceOver, Dynamic Type, Reduce Motion, and English/Korean localization.
-
-> Battery use depends on brightness, device, network, media format, and audio output. No independently verified battery-life advantage over other players is claimed.
+Battery use depends on brightness, device, network, media format, and audio output. No independently verified battery-life advantage over other players is claimed.
 
 ---
 
 ## Get Luma Music
 
-**Latest release: Luma Music 1.0 RC3.** RC3 includes fixes for previously reported iPad UI issues.
+<h2 align="center">Ready when you are.</h2>
+<p align="center"><strong>1.0 RC3 · Build 261116</strong></p>
+<p align="center">
+  <a href="https://github.com/GimGyumin/Luma-Music/releases/tag/v1.0.0-rc3"><strong>Download RC3</strong></a>
+  &nbsp; · &nbsp;
+  <a href="docs/GETTING_STARTED.md">Installation guide</a>
+  &nbsp; · &nbsp;
+  <a href="docs/releases/v1.0.0-rc3.md">Release notes</a>
+</p>
 
-**[RC3 release page](https://github.com/GimGyumin/Luma-Music/releases/tag/v1.0.0-rc3)** &nbsp; · &nbsp; **[All releases](https://github.com/GimGyumin/Luma-Music/releases)** &nbsp; · &nbsp; **[Installation guide](docs/GETTING_STARTED.md)**
+The RC3 source code was published on November 28, 2026. [Browse build 261116 source](https://github.com/GimGyumin/Luma-Music/tree/1797cfb53eaae932ae1136b33ddb6bc675c351c6).
 
-Download an IPA from the releases page, install it with a compatible sideloading method such as SideStore or AltStore, then connect to **your own music server**. Luma is a client, not a music server or a commercial streaming catalog.
+Install the IPA using a compatible sideloading method such as SideStore or AltStore, then connect to your own music server. Luma is a client, not a music server or commercial streaming catalog.
 
-**The official 1.0 release in January 2027 will be distributed through GitHub via sideloading.**
+**iPad update:** Previously reported iPad UI issues have been addressed in RC3. RC3 is recommended for iPad users.
 
-**TestFlight and App Store releases are planned for later in 2027.** There is no confirmed date yet, but your interest and support could help bring these releases forward. If you'd like to see Luma Music on TestFlight and the App Store sooner, consider starring the repository, sharing the project, or providing feedback.
+**iPad 업데이트 안내:** 기존에 보고된 iPad UI 문제는 RC3에서 수정되었습니다. RC3로 업데이트해 주세요.
 
-| Platform | Availability |
-| --- | --- |
-| **iPhone** | IPA preview · iOS 18.6 or later |
-| **iPad** | IPA preview · iPadOS 18.6 or later · **Previously reported UI issues addressed in RC3; RC3 recommended.** |
-| **macOS** | **Coming next year (2027)** · Not available |
+---
 
-**RC4, the final release candidate before the official 1.0 release, is coming soon.** The stable **Luma Music 1.0 release for iPhone and iPad is scheduled for January 2027**, subject to final testing and release readiness. This is the first stable release, not a TestFlight or App Store launch. The separate macOS app is planned for 2027; the current IPA is not a Mac installer.
+## What's next
 
-[Get started](docs/GETTING_STARTED.md) &nbsp; · &nbsp; [Explore features](docs/FEATURES.md) &nbsp; · &nbsp; [Roadmap](docs/ROADMAP.md)
+<h2 align="center">The beginning of something beautiful.</h2>
+<p align="center">Luma Music 1.0 is scheduled for January 2027.</p>
+
+| Milestone | Target |
+| :--- | :--- |
+| **RC4** — Final release candidate | Coming soon |
+| **Luma Music 1.0** — First stable iOS/iPadOS release | January 2027 |
+| **TestFlight** | Later in 2027 |
+| **App Store** | Later in 2027 |
+| **Dedicated macOS app** | 2027 |
+
+The January release will be distributed through GitHub via sideloading, not through TestFlight or the App Store. TestFlight and App Store releases are planned for later in 2027; there is no confirmed date yet. All targets remain subject to readiness.
+
+**Your interest could bring them closer.** Star the repository, share Luma Music, and tell us what you'd love to see next. Your support could help bring TestFlight and App Store availability forward.
+
+<p align="center">
+  <a href="https://github.com/GimGyumin/Luma-Music"><strong>Star Luma Music</strong></a>
+  &nbsp; · &nbsp;
+  <a href="https://github.com/GimGyumin/Luma-Music/discussions">Join the discussion</a>
+  &nbsp; · &nbsp;
+  <a href="docs/ROADMAP.md">Roadmap</a>
+</p>
 
 ---
 
@@ -115,7 +127,7 @@ We're still polishing Luma Music, its documentation, and this repository. If you
 
 ## 📜 Credits & Licensing
 
-Luma Music is an **AI-assisted, open-source music player developed from the Cassette project**.
+Luma Music is an **AI-assisted, open-source music player developed from the Cassette project**. It is an independent third-party client and is not affiliated with Apple.
 
 ### Acknowledgements
 
@@ -137,4 +149,4 @@ For copyright attribution and third-party licensing details, see:
 
 ---
 
-<p align="center"><strong>Luma Music</strong><br><em>Your music. The experience it deserves.</em></p>
+<p align="center"><strong>Luma Music</strong><br><em>Your music, beautifully.</em></p>

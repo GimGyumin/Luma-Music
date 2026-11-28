@@ -13,7 +13,7 @@
   <a href="#whats-next">What's next</a>
 </p>
 
-<!-- Product film: insert the GitHub user-attachments video URL here on its own line. -->
+https://github.com/user-attachments/assets/308c76b8-a228-4f1f-b423-77c5fea9aab3
 
 <p align="center"><img src="./Luma-Music-README-Hero.png" alt="Luma Music" width="100%" /></p>
 
